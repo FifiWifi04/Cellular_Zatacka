@@ -1,0 +1,130 @@
+# Task Board — Cellular Zatacka
+
+Sequential work plan. **Do one task per session, in order.** Read
+[`AGENT_CONDUCT.md`](AGENT_CONDUCT.md) first — every time.
+
+Target file: `260703_Cellsnake.html` (single file, no build step).
+
+---
+
+## How to use this board
+
+1. Open this file. Find the lowest-numbered task with status **`READY`**.
+2. Open `docs/tasks/<ID>-*.md` and follow it exactly.
+3. When done and verified, change that task's status here to **`DONE`**, and
+   change the next task's status from `BLOCKED` to `READY` **only if** its listed
+   dependencies are all `DONE`.
+4. Commit both the code change and this board update together.
+
+Statuses: `READY` · `BLOCKED` (dependency not met) · `DONE` · `PARKED` (deferred
+by owner decision).
+
+---
+
+## Status
+
+### Track A — Finish Phase 1 (gate blockers)
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T01 | [DDA ray-march in `raycast()`](tasks/T01-dda-raymarch.md) | — | `READY` |
+| T02 | [Wall sensing: microtubules + ER/Golgi](tasks/T02-wall-sensing.md) | T01 | `BLOCKED` |
+| T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `BLOCKED` |
+| T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `READY` |
+| T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
+| T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) | T04, T05 | `BLOCKED` |
+
+**Phase 1 gate:** T01–T06 all `DONE`, with T06's report committed.
+
+### Track B — Structural hygiene (cheap, unblocks Phase 3)
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06 | `BLOCKED` |
+| T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `BLOCKED` |
+| T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `READY` |
+| T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `BLOCKED` |
+
+### Track C — Phase 3 content (generation-gated)
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T11 | [Generation counter infrastructure](tasks/T11-generation-counter.md) | T06 | `BLOCKED` |
+| T12 | [Gen 2 — membrane calcification](tasks/T12-gen2-calcification.md) | T11 | `BLOCKED` |
+| T13 | [Gen 2 — organelle necrosis (lethal static walls)](tasks/T13-gen2-necrosis.md) | T11 | `BLOCKED` |
+| T14 | [Gen 3 — the malignant mass](tasks/T14-gen3-malignant-mass.md) | T11 | `BLOCKED` |
+| T15 | [Gen 4 — angiogenesis gravity well](tasks/T15-gen4-angiogenesis.md) | T11 | `BLOCKED` |
+
+### Track D — Phase 4 juice
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T16 | [Camera screenshake utility](tasks/T16-screenshake.md) | T06 | `BLOCKED` |
+| T17 | [Particle emitter splash system](tasks/T17-particles.md) | T16 | `BLOCKED` |
+| T18 | [Warning-window post-processing filter](tasks/T18-warning-filter.md) | T16 | `BLOCKED` |
+
+### Track E — Phase 5 UX
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T19 | [Quick Play button](tasks/T19-quick-play.md) | T03 | `BLOCKED` |
+| T20 | [Control-mapping splash screen](tasks/T20-control-splash.md) | — | `READY` |
+
+### Parked
+
+| ID | Task | Reason |
+|----|------|--------|
+| P01 | Phase 2 — sprite/asset pipeline | Owner decision: the vector→image substitution did not look right. Needs a different approach before it is re-planned. See [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). |
+
+---
+
+## Dependency graph
+
+```
+T01 ──► T02 ──► T03 ──────────────► T19
+T04 ──┬────────► T06 ──┬─► T07 ──► T08
+T05 ──┘               ├─► T11 ──┬─► T12
+T04 ──► T10           │         ├─► T13
+                      │         ├─► T14
+T09  (independent)    │         └─► T15
+T20  (independent)    └─► T16 ──┬─► T17
+                                └─► T18
+```
+
+Three tasks are independent and can be picked up at any time if the head of a
+track is blocked: **T09**, **T20**, and (before T04 lands) **T05**.
+
+---
+
+## Current state of the code — reference
+
+Established by reading `260703_Cellsnake.html` at commit `4bf057f`. Anchor by
+function name, not by line number.
+
+**Present and working**
+- `SpatialGrid` class + `rebuildSpatialGrid()` — traces, organelles, vesicles,
+  virus particles, rebuilt once per frame at the top of `gameLoop`.
+- Swept collision helpers `ptSegDistSq`, `segsCross`, `segSegDistSq`.
+- `checkCollision()` / `checkArcCollision()` — swept, correct, frame-aware.
+- 3-ray bot (`updateBotAI`, `raycast`, `getRayWeight`), ±0.5 rad, 350px range.
+- Mitosis engine, infection/virus event, vesicle economy, split-screen camera.
+
+**Known gaps (these are the tasks)**
+- `raycast()` samples at a fixed 12px step and allocates a `Set` + array per
+  step via `queryRange` — ~90 allocations per bot per frame.
+- `raycast()` is blind to `mitosis.microtubules` and to `centralHitboxes`
+  (ER/Golgi), both of which are lethal in the physics path.
+- `getRayWeight()` hazard term reaches ≈ −612,500 while the vesicle reward is
+  +2,000 and the mitosis pull ≈ ±470 — rewards are ~1300× outweighed.
+- `devMode` disables all death checks *and* gates the fuzzer, so the fuzzer
+  cannot find collision bugs.
+- `generateMap()` and the organelle reset use `removeChildren()` without
+  destroying the children — display objects leak on every `startRound()`.
+- Traces grow unbounded (~3,600 points/player/minute); the grid rebuild is
+  linear in total trace length every frame.
+- `drawArcs()` re-randomizes the ER layout on every call, so the ER teleports
+  whenever any arc shatters (the Golgi has this fixed via `window.golgiData`;
+  the ER does not).
+- No `activeCell.generation` field exists — all of Phase 3 needs it.
+- Dev hotkeys are `` ` ``/`~`/`½` (god mode) and `Tab` (+15s); the roadmap
+  specifies `\` and `]`.
