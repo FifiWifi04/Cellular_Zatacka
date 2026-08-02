@@ -17,7 +17,12 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 4. Commit both the code change and this board update together.
 
 Statuses: `READY` · `BLOCKED` (dependency not met) · `DONE` · `PARKED` (deferred
-by owner decision).
+by owner decision) · `OWNER-RUN` (must be run by a human, not a scheduled agent).
+
+**`OWNER-RUN` tasks:** a scheduled session must **skip** these and take the next
+`READY` task instead. If the only remaining work is `OWNER-RUN`, report that and
+stop. Currently only T06 — its soak runs are 30 minutes each, which exceeds the
+10-minute command ceiling a scheduled session has.
 
 **Resumable tasks** are marked ⏳. They span several sessions and carry their own
 `## Progress` checklist, committed after each stage. They stay `READY` until every
@@ -37,7 +42,7 @@ sign of a stale board.
 | T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `BLOCKED` |
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `READY` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
-| T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) ⏳ *resumable, multi-session* | T04, T05 | `BLOCKED` |
+| T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) ⏳ *resumable* · 👤 *owner-run* | T04, T05 | `BLOCKED` → becomes `OWNER-RUN` |
 
 **Phase 1 gate:** T01–T06 all `DONE`, with T06's report committed.
 

@@ -22,11 +22,19 @@ You are implementing ONE task from this project's task board, then stopping.
 This is a scheduled session with no memory of previous runs — everything you
 need is in the repository.
 
-STEP 0 — SYNC AND SANITY CHECK
-  - git fetch origin and check out the branch above, then pull it.
-  - Run `git log --oneline -10` and `git status`.
-  - If the working tree is dirty, a previous session failed mid-task. Do not
-    build on it: report what you found, and stop.
+STEP 0 — SYNC, AND CONFIRM YOU CAN SEE THE PLAN
+  - git fetch origin --prune
+  - Check out the working branch, creating it from origin if it is not local:
+      git checkout claude/html-game-phase-1-43obou 2>/dev/null \
+        || git checkout -b claude/html-game-phase-1-43obou origin/claude/html-game-phase-1-43obou
+      git pull --ff-only origin claude/html-game-phase-1-43obou
+    A fresh session may start on some other auto-generated branch. Do not work
+    there. Everything below assumes the branch above.
+  - CONFIRM docs/AGENT_CONDUCT.md and docs/TASKS.md both exist. If either is
+    missing, you are on the wrong branch or the clone is incomplete: STOP and
+    report. Do not proceed, and do not improvise a plan of your own.
+  - Run `git log --oneline -10` and `git status`. If the working tree is dirty,
+    a previous session failed mid-task. Do not build on it: report and stop.
 
 STEP 1 — READ THE RULES
   Read completely, in this order, before touching any code:
@@ -37,7 +45,10 @@ STEP 1 — READ THE RULES
 
 STEP 2 — PICK YOUR TASK
   Take the LOWEST-NUMBERED task on the board whose status is READY.
-  If no task is READY, stop and report which dependencies are blocking.
+  SKIP any task marked OWNER-RUN (currently T06) — those need a human and a
+  longer runtime than you have; take the next READY task instead.
+  If no task is READY, stop and report which dependencies are blocking, and
+  name any OWNER-RUN task that is waiting on the owner.
 
   Then open docs/tasks/<ID>-*.md and check whether it has a "## Progress"
   section:
@@ -72,14 +83,43 @@ STEP 4 — IMPLEMENT EXACTLY THAT ONE TASK
     - no allocation in the per-frame hot path
     - anything you notice outside scope goes in docs/BACKLOG.md, not the diff
 
-STEP 5 — VERIFY IN A REAL BROWSER
-  Serve the folder: python3 -m http.server 8083
-  Drive 260703_Cellsnake.html with Playwright/Chromium, which is preinstalled —
-  do NOT run `playwright install`.
-  Run EVERY numbered item in the task's "## Verification" section, and capture
+STEP 5 — VERIFY IN A REAL BROWSER (you have Bash only — there is no browser tool)
+  5a. Probe the toolchain first:
+        python3 -c "import playwright; print('playwright ok')"
+        ls "$PLAYWRIGHT_BROWSERS_PATH" 2>/dev/null || ls ~/.cache/ms-playwright 2>/dev/null
+      If Playwright or a Chromium build is missing, try `python3 -m playwright
+      install chromium` ONCE. If that also fails, append the finding to
+      docs/BACKLOG.md, commit only that, and stop — do not commit unverified
+      game code.
+
+  5b. Serve the folder from a single Bash call, backgrounded:
+        nohup python3 -m http.server 8083 >/tmp/http.log 2>&1 &
+      (You have no BashOutput tool, so never leave anything in the foreground
+      that you need to read later.)
+
+  5c. Write a Python script using Playwright's SYNCHRONOUS API that:
+        - launches headless chromium at 1280x1024
+        - registers handlers collecting console messages AND page errors
+        - loads http://localhost:8083/260703_Cellsnake.html
+        - drives the game with page.evaluate(...): set devMode / godMode /
+          fuzzActive, call startRound(), read window.fuzzStats, dispatch key
+          events, advance time — whatever the task's checks require
+        - saves screenshots to /tmp/verify/*.png
+        - prints ONE JSON object to stdout: the measurements plus every console
+          error and page error captured
+
+  5d. Run that script via Bash SYNCHRONOUSLY and keep every invocation UNDER
+      10 MINUTES — that is your hard command ceiling. Split long checks into
+      several short scripts rather than one long one. Never start a run you
+      cannot finish inside that ceiling.
+
+  5e. Read the JSON it printed, and use the Read tool on the screenshots to
+      inspect them visually — Read renders images.
+
+  Run EVERY numbered item in the task's "## Verification" section and capture
   the measurements it asks for (timings, counts, before/after numbers).
-  The browser console must be completely clean. If a check fails, fix it or
-  revert — never commit a partially working task.
+  The console must be completely clean — zero errors, zero page errors.
+  If a check fails, fix it or revert — never commit a partially working task.
 
 STEP 6 — COMMIT AND PUSH
   (Resumable tasks override this — commit per stage as their task file says,
@@ -100,12 +140,15 @@ STOP CONDITIONS — stop and report rather than pressing on:
   - The task turns out to be wrong or impossible. Do not improvise a different
     design: write a "## Blocked" section at the bottom of the task file saying
     what you found, commit only that, and stop.
-  - Verification cannot be completed (no browser, no network). Unverified work
-    on this codebase is worse than no work — commit nothing.
+  - docs/AGENT_CONDUCT.md or docs/TASKS.md is missing after STEP 0. You are on
+    the wrong branch — report it, change nothing.
+  - Verification cannot be completed (no Playwright, no Chromium, no network).
+    Unverified work on this codebase is worse than no work: record why in
+    docs/BACKLOG.md, commit only that, and stop.
   - The task file says the step needs an owner decision.
-  - T06 returns a FAIL verdict. Create the follow-up task files it calls for,
-    put them on the board ahead of T07, and stop. Do not start Track C or D on
-    a failed Phase 1 gate.
+  - The only remaining work is OWNER-RUN (T06). Report that it is waiting on
+    the owner and stop. Do not attempt it, and do not start Track C or D on an
+    unfinished Phase 1 gate.
 ```
 
 ---
@@ -120,6 +163,23 @@ DONE. If they are not, stop and report rather than proceeding.
 ```
 
 ---
+
+## Environment requirements
+
+Learned the hard way — the first routine produced no-ops for these reasons:
+
+- **`docs/` must exist on whatever branch the session lands on.** A scheduled
+  session starts on an auto-generated branch cut from the repo default, not on
+  your working branch. `docs/` is therefore merged to `main`; STEP 0 also
+  force-checks-out the working branch and aborts loudly if the docs are absent.
+- **Minimum `allowed_tools`:** `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`.
+  STEP 5 is written to need nothing more — it drives Playwright through Bash.
+  Adding `BashOutput` and `KillBash` would let sessions manage long background
+  processes and is worth doing if you can.
+- **Commands are capped at 10 minutes.** Anything longer must be split, or
+  marked `OWNER-RUN` on the board (currently only T06).
+- **Repo write access.** The session must be able to push to
+  `claude/html-game-phase-1-43obou`.
 
 ## Scheduling notes
 
@@ -138,7 +198,7 @@ safely, but the firing is wasted. Prefer 6h for that reason too.
 
 | Task | Why it needs you |
 |---|---|
-| T06 | Runs 90+ min of soaks across **several firings** (it is resumable — see its `## Progress`), and ends in a PASS/FAIL gate verdict that must not be worked around. |
+| T06 | **`OWNER-RUN` — scheduled sessions skip it entirely.** Its 30-minute soaks exceed the 10-minute command ceiling, and it ends in a PASS/FAIL gate verdict that is yours to make. Run it interactively. Note that T07, T11 and T16 stay `BLOCKED` until you do, so the routine will run out of Track A work and fall through to T09/T20/T21. |
 | T07 | The trace cap is a real gameplay change. The task defaults to a conservative memory-bound value and asks before shipping the aggressive one. |
 | T12 | Highest-risk task on the board — it changes the arena boundary. Worth reviewing personally. |
 | T21 | Acceptance is subjective. "Revert it, it looked worse" is a valid outcome and needs your eye. |

@@ -2,10 +2,15 @@
 
 **Track:** A (Phase 1 gate) · **Depends on:** T04, T05 · **Risk:** none (no gameplay code) · **Est. diff:** report only
 
+**👤 OWNER-RUN — a scheduled agent session must SKIP this task** and take the
+next `READY` one instead. Each soak is a continuous 30-minute run, and a
+scheduled session's commands are capped at 10 minutes, so it physically cannot
+complete a stage. Run this yourself, interactively, when the board reaches it.
+It also ends in a PASS/FAIL gate verdict that is yours to make.
+
 **⚠ This task is RESUMABLE and spans multiple sessions.** It runs 90+ minutes of
-soak tests — more than one scheduled session can reliably finish. Read
-`## Progress` below **first**: it is the durable record of what has already been
-done, and it is committed after every stage.
+soak tests. Read `## Progress` below **first**: it is the durable record of what
+has already been done, and it is committed after every stage.
 
 Read `docs/AGENT_CONDUCT.md` before starting.
 
