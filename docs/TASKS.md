@@ -19,6 +19,11 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 Statuses: `READY` · `BLOCKED` (dependency not met) · `DONE` · `PARKED` (deferred
 by owner decision).
 
+**Resumable tasks** are marked ⏳. They span several sessions and carry their own
+`## Progress` checklist, committed after each stage. They stay `READY` until every
+stage is ticked, and partial commits bearing their task ID are expected — not a
+sign of a stale board.
+
 ---
 
 ## Status
@@ -32,7 +37,7 @@ by owner decision).
 | T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `BLOCKED` |
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `READY` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
-| T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) | T04, T05 | `BLOCKED` |
+| T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) ⏳ *resumable, multi-session* | T04, T05 | `BLOCKED` |
 
 **Phase 1 gate:** T01–T06 all `DONE`, with T06's report committed.
 

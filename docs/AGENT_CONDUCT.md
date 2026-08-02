@@ -23,6 +23,10 @@ real browser before committing. If you find an unrelated bug, write it in
 1. **One task per session.** Open `docs/TASKS.md`, take the lowest-numbered task
    whose status is `READY`, and do only that. Do not start the next one, even if
    it looks trivial and related.
+   *Exception:* a task carrying a `## Progress` checklist (marked ⏳ on the board)
+   is **resumable** — it spans several sessions, commits per stage, and stays
+   `READY` until every stage is ticked. Follow its own "How to run this task
+   across sessions" section instead of §9's one-commit rule.
 2. **Do not fix what you were not asked to fix.** This codebase has known
    oddities (dead code branches, inconsistent constants, unused variables). If you
    spot one, append it to `docs/BACKLOG.md` with a one-line description and the

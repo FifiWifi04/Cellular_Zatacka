@@ -37,11 +37,21 @@ STEP 1 — READ THE RULES
 
 STEP 2 — PICK YOUR TASK
   Take the LOWEST-NUMBERED task on the board whose status is READY.
-  Before starting it, confirm it has not already been done: search
-  `git log --oneline` for a commit starting with that task's ID (e.g. "T04:").
-  If such a commit exists, the board is stale — fix the board, push that fix
-  alone, and stop.
   If no task is READY, stop and report which dependencies are blocking.
+
+  Then open docs/tasks/<ID>-*.md and check whether it has a "## Progress"
+  section:
+
+  - NO "## Progress" (the normal case, one session per task):
+      Confirm the task has not already been done — search `git log --oneline`
+      for a commit starting with that task's ID (e.g. "T04:"). If such a commit
+      exists, the board is stale: fix the board, push that fix alone, and stop.
+
+  - HAS "## Progress" (a RESUMABLE multi-session task, e.g. T06):
+      Partial commits with that task's ID are EXPECTED and do not mean the board
+      is stale. Do not apply the check above. Read the checklist, start at the
+      first unticked stage, and follow that task file's own "How to run this task
+      across sessions" instructions instead of STEP 6 below.
 
 STEP 3 — READ THE TASK
   Read docs/tasks/<ID>-*.md completely.
@@ -50,6 +60,8 @@ STEP 3 — READ THE TASK
   questions exist because their answers change the implementation.
   Line numbers in task files are approximate — anchor on function names and the
   quoted search strings.
+  Never begin a timed run you cannot finish inside this session. A truncated
+  measurement is worse than none — stop and leave the stage for the next firing.
 
 STEP 4 — IMPLEMENT EXACTLY THAT ONE TASK
   Nothing else. Follow AGENT_CONDUCT.md, in particular:
@@ -70,6 +82,8 @@ STEP 5 — VERIFY IN A REAL BROWSER
   revert — never commit a partially working task.
 
 STEP 6 — COMMIT AND PUSH
+  (Resumable tasks override this — commit per stage as their task file says,
+  and leave the board at READY until the final stage.)
   - Update docs/TASKS.md: your task READY -> DONE, and flip any newly unblocked
     task BLOCKED -> READY.
   - ONE commit containing the code change, the board update, and any BACKLOG
@@ -124,7 +138,7 @@ safely, but the firing is wasted. Prefer 6h for that reason too.
 
 | Task | Why it needs you |
 |---|---|
-| T06 | Produces a PASS/FAIL gate verdict. A FAIL must not be worked around. |
+| T06 | Runs 90+ min of soaks across **several firings** (it is resumable — see its `## Progress`), and ends in a PASS/FAIL gate verdict that must not be worked around. |
 | T07 | The trace cap is a real gameplay change. The task defaults to a conservative memory-bound value and asks before shipping the aggressive one. |
 | T12 | Highest-risk task on the board — it changes the arena boundary. Worth reviewing personally. |
 | T21 | Acceptance is subjective. "Revert it, it looked worse" is a valid outcome and needs your eye. |
