@@ -75,3 +75,34 @@ them.
   composite only).
 - Gravity well (T15) pulling players as well as vesicles — explicitly *not* what
   the roadmap says, and it would fight the steering model. Owner call.
+
+---
+
+## Found while unblocking the scheduled routine — 2026-08-02
+
+- **The game was never actually self-contained.** `AGENT_CONDUCT.md` §2 claimed
+  it "must keep working from `file://`", but the two `<script>` tags loaded
+  PixiJS from cdnjs and pixi-filters from jsdelivr — so opening the file offline
+  never worked, and sandboxes whose egress policy blocks those hosts could not
+  run the game at all. Both libraries are now vendored in `vendor/` (fetched via
+  `npm pack`, which is on the proxy allowlist). Verified: over `file://` the
+  console is completely clean. **Never point these back at a CDN.**
+
+- **Software rendering is slow.** No GPU in the sandbox, so game time runs at
+  ~0.11x real time at 1280x1024 and ~0.38x at 640x480. Disabling the bloom
+  filter changes nothing — the cost is rasterisation. Several task files ask for
+  "5 minutes" or "10 minutes" of observation; those cannot be done in one
+  10-minute invocation and must be split or fast-forwarded. Worth revisiting
+  those durations task by task.
+
+- **`startRound()` reads config from the DOM selects, not from the globals.**
+  Setting `currentMode`/`aiCount` and calling `startRound()` silently keeps the
+  previous configuration. Already flagged in T19; the harness handles it.
+
+- **A `players=1, bots=1` round ends in seconds.** Nothing steers the human, it
+  drives into the membrane, and one survivor ends the round. Use `bots=3` or
+  `immortal=True` when observing. Cost us one hung verification run.
+
+- **`favicon.ico` 404 is the one expected console entry** over `http://`. It
+  does not appear over `file://`. The harness filters it — note the URL is in
+  the console message's `location`, not its `text`.

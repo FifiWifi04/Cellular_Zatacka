@@ -7,8 +7,11 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Cellular Zatacka - The Viral Infection</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/pixi-filters@5.2.1/dist/pixi-filters.js"></script>
+    <!-- Vendored locally so the game runs offline, from file://, and inside
+         sandboxes with no CDN egress. Same builds the CDNs served:
+         pixi.js 7.3.2, pixi-filters 5.2.1. Keep these two versions in step. -->
+    <script src="vendor/pixi.min.js"></script>
+    <script src="vendor/pixi-filters.js"></script>
     <style>
         /* Force the page to fill the window and remove scrollbars */
         html,

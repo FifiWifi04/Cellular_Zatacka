@@ -84,41 +84,38 @@ STEP 4 — IMPLEMENT EXACTLY THAT ONE TASK
     - anything you notice outside scope goes in docs/BACKLOG.md, not the diff
 
 STEP 5 — VERIFY IN A REAL BROWSER (you have Bash only — there is no browser tool)
-  5a. Probe the toolchain first:
-        python3 -c "import playwright; print('playwright ok')"
-        ls "$PLAYWRIGHT_BROWSERS_PATH" 2>/dev/null || ls ~/.cache/ms-playwright 2>/dev/null
-      If Playwright or a Chromium build is missing, try `python3 -m playwright
-      install chromium` ONCE. If that also fails, append the finding to
-      docs/BACKLOG.md, commit only that, and stop — do not commit unverified
-      game code.
+  USE THE EXISTING HARNESS. Do not write browser boilerplate from scratch:
+  tools/verify_harness.py already handles serving the game, launching the
+  sandbox's Chromium, capturing console/page errors, starting a round with the
+  right configuration, and advancing GAME time. Read its docstring — it
+  documents four traps that will otherwise silently invalidate your results.
 
-  5b. Serve the folder from a single Bash call, backgrounded:
-        nohup python3 -m http.server 8083 >/tmp/http.log 2>&1 &
-      (You have no BashOutput tool, so never leave anything in the foreground
-      that you need to read later.)
+  5a. One-time setup if needed:  pip install playwright
+      Do NOT run `playwright install` — its download hosts are blocked, and a
+      Chromium is already present. The harness globs for it.
+      Smoke-test the harness first:  python3 tools/verify_harness.py
 
-  5c. Write a Python script using Playwright's SYNCHRONOUS API that:
-        - launches headless chromium at 1280x1024
-        - registers handlers collecting console messages AND page errors
-        - loads http://localhost:8083/260703_Cellsnake.html
-        - drives the game with page.evaluate(...): set devMode / godMode /
-          fuzzActive, call startRound(), read window.fuzzStats, dispatch key
-          events, advance time — whatever the task's checks require
-        - saves screenshots to /tmp/verify/*.png
-        - prints ONE JSON object to stdout: the measurements plus every console
-          error and page error captured
+  5b. Write a SHORT script per check that imports the harness:
+        import sys; sys.path.insert(0, "tools")
+        from verify_harness import game
+        with game(players=1, bots=1) as g:
+            g.run_game_seconds(30)
+            print(g.stats())
+            g.screenshot("after30s")
+            g.assert_console_clean()
 
-  5d. Run that script via Bash SYNCHRONOUSLY and keep every invocation UNDER
-      10 MINUTES — that is your hard command ceiling. Split long checks into
-      several short scripts rather than one long one. Never start a run you
-      cannot finish inside that ceiling.
+  5c. Run each script via Bash SYNCHRONOUSLY, UNDER 10 MINUTES per invocation —
+      that is your hard command ceiling. Split long checks across several short
+      scripts. Never start a run you cannot finish inside that ceiling.
 
-  5e. Read the JSON it printed, and use the Read tool on the screenshots to
-      inspect them visually — Read renders images.
+  5d. Read the printed JSON, and use the Read tool on /tmp/verify/*.png to
+      inspect screenshots visually — Read renders images.
 
   Run EVERY numbered item in the task's "## Verification" section and capture
   the measurements it asks for (timings, counts, before/after numbers).
-  The console must be completely clean — zero errors, zero page errors.
+  The console must be clean — the harness already ignores the browser's
+  automatic favicon.ico 404, which is the only expected entry; treat anything
+  else as a real failure.
   If a check fails, fix it or revert — never commit a partially working task.
 
 STEP 6 — COMMIT AND PUSH

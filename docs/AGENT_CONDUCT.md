@@ -45,12 +45,21 @@ real browser before committing. If you find an unrelated bug, write it in
 
 ## 2. Where things live (single-file constraint)
 
-- All code is in `260703_Cellsnake.html`. There is no bundler, no `npm`, no
-  modules. PixiJS v7 comes from a CDN `<script>` tag.
-- **The game must keep working when opened directly from `file://`.** No `fetch`,
-  no `import`, no external asset loads, no XHR. If a change requires loading a
-  file, the task is wrong — stop and report.
-- Do not create new `.js` or `.css` files. Do not split the file.
+- All game code is in `260703_Cellsnake.html`. There is no bundler, no modules,
+  no build step.
+- **PixiJS 7.3.2 and pixi-filters 5.2.1 are vendored in `vendor/`** and loaded
+  with relative `<script src="vendor/...">` tags. They used to come from cdnjs
+  and jsdelivr; both hosts are blocked by the egress policy in sandboxed
+  sessions, which made the game impossible to run there. **Never point these
+  back at a CDN.** If you need to change a version, fetch it from
+  `registry.npmjs.org` (allowed) with `npm pack`, and update both files together.
+- **The game must keep working when opened directly from `file://`, offline.**
+  No `fetch`, no `import`, no XHR, no remote asset loads. This is verified: over
+  `file://` the console is completely clean. If a change requires loading
+  something over the network, the task is wrong — stop and report.
+- Do not create new `.js` or `.css` files for game code, and do not split
+  `260703_Cellsnake.html`. `vendor/` (third-party libraries, never edited) and
+  `tools/` (the verification harness) are the only exceptions.
 - Anything you add goes next to the code it belongs with, in the existing
   `// --- N. Section ---` structure.
 
