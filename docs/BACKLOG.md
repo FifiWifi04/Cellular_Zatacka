@@ -65,9 +65,12 @@ them.
   Currently `attack` is only entered near traces with a speed power-up, so bots
   will essentially never shatter it.
 - Particle burst on malignant-mass block shatter (T14) — belongs with T17.
-- Extend additive blending to vesicle drop zones and player head cores. This is
-  Phase 2.2 and is **independent of the parked asset swap** — it works fine on the
-  current vector renderer. Low risk, could be its own task whenever wanted.
+- ~~Extend additive blending beyond the trails and Golgi.~~ Written up as **T21**.
+  Note the finding that came out of scoping it: roadmap 2.2's three literal
+  targets (head cores, active traces, vesicle drop zones) are **already
+  satisfied** — heads and traces are drawn into the additive `trailGlow`/
+  `trailCore`, and the Golgi cisternae are additive. T21 is an extension beyond
+  2.2's wording, not a gap in it.
 - Per-viewport screenshake in split-screen mode (T16 applies shake to the shared
   composite only).
 - Gravity well (T15) pulling players as well as vesicles — explicitly *not* what

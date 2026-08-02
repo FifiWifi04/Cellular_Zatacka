@@ -106,12 +106,18 @@ Not a task — a sketch for whoever re-plans this.
    vector and sprite rendering can be compared side by side in the same build.
 4. Author assets for additive blending: black background, bright emissive
    subject, PNG with alpha, sized to their drawn dimensions.
-5. Phase 2.2 (additive blending) is **partially done already** and is independent
-   of the asset swap — `trailGlow`, `trailCore`, and the Golgi arcs already use
-   `BLEND_MODES.ADD`. Extending it to vesicle drop zones and player head cores is
-   a small, low-risk task that could be done at any time on the current vector
-   renderer. That is worth splitting out if the owner wants Phase 2 value without
-   the asset risk.
+5. Phase 2.2 (additive blending) is **not parked** — it is independent of the
+   asset swap and is written up as **[T21](T21-additive-blending.md)**, working on
+   the current vector renderer. Note that 2.2's three literal targets (player head
+   cores, active traces, vesicle drop zones) are already satisfied: heads and
+   traces are drawn into the additive `trailGlow`/`trailCore`, and the Golgi
+   cisternae carry `BLEND_MODES.ADD`. T21 extends the look to organelles, vesicles
+   and the virus.
+
+   If T21 lands and looks good, that is also **evidence about this parked task**:
+   it isolates how much of the intended bioluminescent aesthetic comes from
+   blending rather than from the artwork. If the vector renderer looks right with
+   additive blending alone, the case for the asset swap weakens considerably.
 
 ---
 

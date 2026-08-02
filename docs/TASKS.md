@@ -70,11 +70,17 @@ by owner decision).
 | T19 | [Quick Play button](tasks/T19-quick-play.md) | T03 | `BLOCKED` |
 | T20 | [Control-mapping splash screen](tasks/T20-control-splash.md) | — | `READY` |
 
+### Track F — Phase 2.2 (renderer-independent)
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T21 | [Extend additive blending on the vector renderer](tasks/T21-additive-blending.md) | — | `READY` |
+
 ### Parked
 
 | ID | Task | Reason |
 |----|------|--------|
-| P01 | Phase 2 — sprite/asset pipeline | Owner decision: the vector→image substitution did not look right. Needs a different approach before it is re-planned. See [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). |
+| P01 | Phase 2.1 — sprite/asset pipeline | Owner decision: the vector→image substitution did not look right. Needs a different approach before it is re-planned. See [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). **Phase 2.2 is not parked** — it is T21 above, and it does not depend on the asset swap. |
 
 ---
 
@@ -88,11 +94,11 @@ T04 ──► T10           │         ├─► T13
                       │         ├─► T14
 T09  (independent)    │         └─► T15
 T20  (independent)    └─► T16 ──┬─► T17
-                                └─► T18
+T21  (independent)              └─► T18
 ```
 
-Three tasks are independent and can be picked up at any time if the head of a
-track is blocked: **T09**, **T20**, and (before T04 lands) **T05**.
+Four tasks are independent and can be picked up at any time if the head of a
+track is blocked: **T09**, **T20**, **T21**, and (before T04 lands) **T05**.
 
 ---
 
@@ -125,6 +131,9 @@ function name, not by line number.
 - `drawArcs()` re-randomizes the ER layout on every call, so the ER teleports
   whenever any arc shatters (the Golgi has this fixed via `window.golgiData`;
   the ER does not).
+- Additive blending covers `trailGlow`, `trailCore` and the Golgi cisternae only;
+  organelles, vesicles, the virus and the ER are still normally blended. A global
+  `AdvancedBloomFilter` is active on `world` (`pixi-filters@5.2.1` is loaded).
 - No `activeCell.generation` field exists — all of Phase 3 needs it.
 - Dev hotkeys are `` ` ``/`~`/`½` (god mode) and `Tab` (+15s); the roadmap
   specifies `\` and `]`.

@@ -58,10 +58,15 @@ Track B  T07 → T08, T09, T10      structural hygiene
 Track C  T11 → T12/T13/T14/T15    Phase 3 generation-gated content
 Track D  T16 → T17/T18            Phase 4 juice
 Track E  T19, T20                 Phase 5 UX
+Track F  T21                      Phase 2.2 additive blending (vector renderer)
 ```
 
-**T09, T20, and T05 are independent** — take one of those if the head of a track
-is blocked.
+**T09, T20, T21, and T05 are independent** — take one of those if the head of a
+track is blocked.
+
+Phase 2.1 (the sprite/asset swap) is **parked** — see
+[`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). Phase
+2.2 is not: it is T21, and it works on the current vector renderer.
 
 **Phase 1 is not done until T06 produces a PASS.** Do not start Track C or D
 before that, regardless of how ready they look.

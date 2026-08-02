@@ -23,16 +23,20 @@ Roadmap 4.3:
 Read: the `infection` state object, `updateInfection()` (find where `state`
 becomes and stops being `'warning'`, and confirm the window's actual duration),
 the existing filter usage at init (`PIXI.BlurFilter` on `trailGlow`, and the
-`AdvancedBloomFilter` block — note it is wrapped in a conditional, so check
-whether `PIXI.filters` is actually available in the loaded PixiJS build), and
-`isCellFrozen` in `gameLoop`, which already special-cases the warning window.
+`AdvancedBloomFilter` block), and `isCellFrozen` in `gameLoop`, which already
+special-cases the warning window.
 
-**Establish first, and write under `## Findings`:** which filter classes are
-available from the PixiJS build this page loads. If `pixi-filters` is not
-bundled, `AdvancedBloomFilter` and any chromatic-aberration filter do not exist,
-and you must use a built-in (`BlurFilter`, `ColorMatrixFilter`,
-`AlphaFilter`, `NoiseFilter`) or hand-write one. **Do not add a CDN dependency** —
-see `AGENT_CONDUCT.md` §2.
+**Already established — `pixi-filters@5.2.1` is loaded** from CDN alongside
+`pixi.js@7.3.2`, so the whole `PIXI.filters` set is available, and the global
+`AdvancedBloomFilter` on `world` is active (its `if (typeof
+PIXI.filters.AdvancedBloomFilter !== 'undefined')` guard passes). You therefore
+have more than the built-ins to choose from.
+
+**Still establish and write under `## Findings`:** which specific filter classes
+you used, and — importantly — how your filter interacts with the **existing
+global bloom**, which is applied to `world` and will compose with anything you
+add. **Do not add a new CDN dependency** and do not retune the global bloom — see
+`AGENT_CONDUCT.md` §2.
 
 ---
 
@@ -49,13 +53,13 @@ Ranked by cost and by "does it exist without a new dependency":
    the biological-distress mood.
 3. **`BlurFilter`** — built in, but full-screen blur is the most expensive option
    here. If used, keep the strength very low (1–2) and measure.
-4. **Chromatic aberration** — needs a custom shader or `pixi-filters`. Skip
-   unless (1)+(2) prove insufficient; a hand-written `PIXI.Filter` with a small
-   fragment shader is doable but is the only part of this task that can fail
-   quietly on a different GPU.
+4. **Chromatic aberration / RGB split** — available from `pixi-filters@5.2.1`,
+   which **is** loaded (`RGBSplitFilter`, `GlitchFilter`). Genuinely available, but
+   more expensive than (1)+(2) and easy to overdo. Try only after (1)+(2) are
+   working, and keep the offset to 1–2px.
 
-Start with `ColorMatrixFilter` + `NoiseFilter`. Ship that. Log anything fancier in
-`docs/BACKLOG.md`.
+Start with `ColorMatrixFilter` + `NoiseFilter`, both built in. Ship that, then
+consider `RGBSplitFilter` as an increment if it still reads too subtle.
 
 ### Where to apply it
 
