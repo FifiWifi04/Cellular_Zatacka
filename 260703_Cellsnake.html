@@ -1,0 +1,3016 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Cellular Zatacka - The Viral Infection</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi-filters@5.2.1/dist/pixi-filters.js"></script>
+    <style>
+        /* Force the page to fill the window and remove scrollbars */
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d0d1a;
+        }
+
+        body {
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding-top: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Force the PixiJS canvas to act as a background layer */
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            z-index: 100;
+            background: rgba(13, 13, 26, 0.9);
+            padding: 15px 30px;
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            border: 1px solid rgba(0, 210, 211, 0.3);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            width: fit-content;
+            min-width: 400px;
+        }
+
+        /* Slide the UI up to hide it */
+        #ui.hidden-ui {
+            transform: translate(-50%, -90%);
+            /* Leaves a tiny sliver visible */
+        }
+
+        /* The invisible trigger area at the top of the screen */
+        #ui-trigger {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 30px;
+            z-index: 90;
+        }
+
+        /* Scoreboard remains visible even when menu is hidden */
+        #scoreboard {
+            margin: 5px 0;
+            font-size: 20px;
+            color: #00d2d3;
+            text-shadow: 0 0 10px rgba(0, 210, 211, 0.5);
+        }
+
+        /* When full screen is active, strip away the borders and fill the monitor */
+        :fullscreen #game-container {
+            width: 100vw;
+            height: 100vh;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        .controls {
+            margin-top: 5px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        select,
+        button {
+            background: #0984e3;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        select {
+            background: #2d3436;
+        }
+
+        button:hover {
+            background: #74b9ff;
+        }
+
+        .fullscreen-btn {
+            background: #6c5ce7;
+        }
+
+        .fullscreen-btn:hover {
+            background: #a29bfe;
+        }
+
+        h3 {
+            margin: 5px 0;
+            font-weight: normal;
+            color: #b2bec3;
+        }
+
+        h2 {
+            margin: 5px 0;
+        }
+
+        #globalWarning {
+            height: 28px;
+            color: #ff4757;
+            text-shadow: 0 0 10px #ff4757;
+            font-weight: bold;
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="ui-trigger"></div>
+    <div id="devIndicator"
+        style="display: none; position: absolute; top: 10px; right: 20px; color: #00ff00; font-weight: bold; font-family: monospace; font-size: 18px; z-index: 1000; text-shadow: 0 0 5px #00ff00;">
+        ⚙ DEV MODE ACTIVE [½]</div>
+
+    <h2 id="globalWarning"
+        style="display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); color: #ff4757; text-shadow: 0 0 15px rgba(255, 71, 87, 0.8); font-size: 28px; z-index: 200; pointer-events: none;">
+    </h2>
+
+    <div id="ui">
+        <div class="controls">
+            <select id="modeSelect" onchange="updateUI()">
+                <option value="1">1 Player (Solo)</option>
+                <option value="2">2 Players (Versus)</option>
+                <option value="3">3 Players</option>
+                <option value="4">4 Players</option>
+            </select>
+
+            <select id="aiSelect" onchange="updateUI()">
+                <option value="0">AI Competitors: None</option>
+                <option value="1">1 AI Bot</option>
+                <option value="2">2 AI Bots</option>
+                <option value="3">3 AI Bots</option>
+            </select>
+
+            <select id="cameraSelect" onchange="updateUI()">
+                <option value="shared">Camera: Shared View</option>
+                <option value="split">Camera: Split Screen</option>
+            </select>
+
+            <select id="speedSelect" onchange="updateUI()">
+                <option value="1.5" selected>Speed: Normal</option>
+                <option value="2.5">Speed: Fast</option>
+                <option value="3.5">Speed: Very Fast</option>
+            </select>
+            <button onclick="startRound()">Start Game</button>
+            <button class="fullscreen-btn" onclick="toggleFullScreen()">Fullscreen</button>
+        </div>
+        <h3 id="controlsText">P1 (Blue): Left/Right Arrows</h3>
+        <h2 id="scoreboard">Survival Time: 0.0s</h2>
+    </div>
+
+    <div id="game-container"></div>
+
+    <script>
+        // --- 1. Init PixiJS ---
+        // Grab the initial container size instead of hardcoding 800x600
+        const gameContainer = document.getElementById('game-container');
+        let SCREEN_WIDTH = window.innerWidth;
+        let SCREEN_HEIGHT = window.innerHeight;
+
+        const app = new PIXI.Application({
+            resizeTo: window, // keep Pixi synced with the browser window
+            backgroundColor: 0x0a0a14,
+            antialias: true
+        });
+
+        app.view.style.position = 'absolute';
+        app.view.style.top = '0';
+        app.view.style.left = '0';
+        app.view.style.width = '100vw';
+        app.view.style.height = '100vh';
+        app.view.style.zIndex = '1';
+
+        document.body.appendChild(app.view);
+
+        // Listen for window size changes so the UI and camera math stay in sync.
+        window.addEventListener('resize', () => {
+            SCREEN_WIDTH = window.innerWidth;
+            SCREEN_HEIGHT = window.innerHeight;
+            app.renderer.resize(SCREEN_WIDTH, SCREEN_HEIGHT);
+        });
+
+        // --- 2. Layers & World Camera ---
+        const world = new PIXI.Container();
+        app.stage.addChild(world);
+
+        const backgroundLayer = new PIXI.Container();
+        const mitosisLayer = new PIXI.Graphics();
+        const nucleusLayer = new PIXI.Graphics();
+        const golgiERContainer = new PIXI.Container();
+        const rotatingContainer = new PIXI.Container();
+        const organellesLayer = new PIXI.Graphics();
+        const trailLayer = new PIXI.Container();
+        const dynamicLayer = new PIXI.Graphics(); // Vesicles
+        const virusLayer = new PIXI.Graphics();   // New layer for the Infection event
+        const uiBarsLayer = new PIXI.Graphics();
+
+        world.addChild(backgroundLayer);
+        world.addChild(mitosisLayer); 
+        world.addChild(nucleusLayer);
+        world.addChild(golgiERContainer);
+        golgiERContainer.addChild(rotatingContainer);
+        world.addChild(organellesLayer);
+        world.addChild(trailLayer);
+        world.addChild(dynamicLayer);
+        world.addChild(virusLayer);
+        world.addChild(uiBarsLayer);
+
+        const trailGlow = new PIXI.Graphics();
+        const blurFilter = new PIXI.BlurFilter();
+        blurFilter.blur = 4;
+        trailGlow.filters = [blurFilter];
+        trailGlow.blendMode = PIXI.BLEND_MODES.ADD;
+        const trailCore = new PIXI.Graphics();
+        trailCore.blendMode = PIXI.BLEND_MODES.ADD;
+        trailLayer.addChild(trailGlow);
+        trailLayer.addChild(trailCore);
+
+        // --- GLOBAL BLOOM FILTER ---
+        if (typeof PIXI.filters.AdvancedBloomFilter !== 'undefined') {
+            const bloomFilter = new PIXI.filters.AdvancedBloomFilter({
+                threshold: 0.3,
+                bloomScale: 1.5,
+                brightness: 1.2,
+                blur: 8,
+                quality: 4
+            });
+            world.filters = [bloomFilter];
+        }
+
+        // --- 3. Game State & Constants ---
+        let activeCell = { x: 1500, y: 1500, radiusX: 1400, radiusY: 1200, radius: 1400 };
+
+        let cytosolParticles = []; // Fluid background particles
+        let membraneProtrusionsList = []; // Animated membrane blobs
+        let cytosolContainer;
+
+
+        const TRACE_WIDTH = 4;
+        const TRACE_HITBOX = TRACE_WIDTH * 0.6;
+
+        const GAP_CHANCE = 0.008;
+        const GAP_LENGTH = 12;
+        const EFFECT_DURATION = 10.0;
+
+        let isPlaying = false;
+        let currentMode = 1;
+        let aiCount = 0;
+        let currentSpeed = 1.5;
+        let survivalTime = 0;
+        let playerWins = [0, 0, 0, 0, 0]; // Index matches player ID (1 to 4, index 0 is unused)
+
+        let players = [];
+        let organelles = [];
+        let vesicles = [];
+        let splitTextures = [];
+        let splitSprites = [];
+        let globalRotation = 0;
+
+        // INFECTION STATE OBJECT
+        let infection = {
+            state: 'none',
+            x: 0, y: 0, angle: 0,
+            particles: [],
+            nextWarningTime: 60, // The first warning triggers at 60
+            triggerTime: 0
+        };
+
+        // THE MITOSIS EVENT SYSTEM
+        let mitosis = {
+            state: 'idle', // 'idle', 'forming', 'narrowing'
+            nextTriggerTime: 240, // Production: 4 minutes
+            eventStartTime: 0,
+            cellB: { x: 0, y: 0 },
+            bridge: { x: 0, y: 0, width: 0, height: 0, maxWidth: 600 },
+            direction: 0,
+            currentWidth: 600,
+            microtubules: [],
+            progenitor: { active: false }
+        };
+
+        let devMode = false;
+        const scoreText = document.getElementById('scoreboard');
+        const warningElement = document.getElementById('globalWarning');
+        const modeSelect = document.getElementById('modeSelect');
+        const aiSelect = document.getElementById('aiSelect');
+        const speedSelect = document.getElementById('speedSelect');
+        const uiElement = document.getElementById('ui');
+        const uiTrigger = document.getElementById('ui-trigger');
+
+        const ARCS = [
+            { type: 'ER', r: 160, thick: 20, span: 1.05, color: 0x0097e6 },
+            { type: 'Golgi', r: 230, thick: 14, span: 0.5, color: 0x8c7ae6 },
+            { type: 'Golgi', r: 280, thick: 14, span: 0.7, color: 0x8c7ae6 },
+            { type: 'Golgi', r: 330, thick: 14, span: 0.9, color: 0x8c7ae6 }
+        ];
+
+        const C_MITO = 0x2ecc71;
+        const C_LYSO = 0xe84393;
+        const C_MEMB = 0x487eb0;
+
+        // --- 4. Environment Generation ---
+        let activeArcs = [];
+        let centralHitboxes = [];
+
+        function drawArcs() {
+            rotatingContainer.removeChildren();
+            centralHitboxes = [];
+            const structGraph = new PIXI.Graphics();
+
+            // Generate Rough Endoplasmic Reticulum (RER)
+            const ER_COLOR = 0x0abde3;
+            const RIBO_COLOR = 0xff4757;
+
+            let erActive = activeArcs.some(a => a.type === 'ER');
+            if (erActive) {
+                for (let erGroup = 0; erGroup < 4; erGroup++) {
+                    let currentAngle = (erGroup * Math.PI * 2 / 4) + (Math.random() * 0.4);
+                    let currentR = 150 + Math.random() * 10;
+                    let thick = 14 + Math.random() * 6;
+
+                    structGraph.lineStyle({ width: thick, color: ER_COLOR, alpha: 0.7, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+                    structGraph.moveTo(Math.cos(currentAngle) * currentR, Math.sin(currentAngle) * currentR);
+
+                    let erPath = [];
+                    let numLayers = 3 + Math.floor(Math.random() * 2);
+
+                    for (let i = 0; i < numLayers; i++) {
+                        let span = 0.8 + Math.random() * 0.6;
+                        let dir = (i % 2 === 0) ? 1 : -1;
+                        let endAngle = currentAngle + dir * span;
+
+                        let steps = Math.floor(span / 0.05);
+                        for (let j = 0; j <= steps; j++) {
+                            let a = currentAngle + dir * (j / steps) * span;
+                            erPath.push({ x: Math.cos(a) * currentR, y: Math.sin(a) * currentR, r: currentR, a: a });
+                        }
+
+                        structGraph.arc(0, 0, currentR, currentAngle, endAngle, dir < 0);
+                        currentAngle = endAngle;
+
+                        if (i < numLayers - 1) {
+                            let nextR = currentR + 25 + Math.random() * 10;
+                            let midR = (currentR + nextR) / 2;
+                            let cpAngle = currentAngle + dir * 0.2;
+
+                            let startX = Math.cos(currentAngle) * currentR;
+                            let startY = Math.sin(currentAngle) * currentR;
+                            let cpX = Math.cos(cpAngle) * midR;
+                            let cpY = Math.sin(cpAngle) * midR;
+                            let endX = Math.cos(currentAngle) * nextR;
+                            let endY = Math.sin(currentAngle) * nextR;
+
+                            for (let t = 0.2; t <= 1.0; t += 0.2) {
+                                let bx = Math.pow(1 - t, 2) * startX + 2 * (1 - t) * t * cpX + Math.pow(t, 2) * endX;
+                                let by = Math.pow(1 - t, 2) * startY + 2 * (1 - t) * t * cpY + Math.pow(t, 2) * endY;
+                                erPath.push({ x: bx, y: by, r: midR, a: cpAngle });
+                            }
+
+                            structGraph.quadraticCurveTo(cpX, cpY, endX, endY);
+                            currentR = nextR;
+                        }
+                    }
+
+                    centralHitboxes.push({ type: 'path', points: erPath.map(p => ({ x: p.x, y: p.y })), thick: thick });
+
+                    // Draw Ribosomes
+                    structGraph.lineStyle(0);
+                    structGraph.beginFill(RIBO_COLOR, 0.9);
+                    for (let pt of erPath) {
+                        let rOuter = pt.r + thick / 2 + 2;
+                        let rInner = pt.r - thick / 2 - 2;
+                        if (Math.random() > 0.4) structGraph.drawCircle(Math.cos(pt.a) * rOuter, Math.sin(pt.a) * rOuter, 2 + Math.random() * 1.5);
+                        if (Math.random() > 0.4) structGraph.drawCircle(Math.cos(pt.a) * rInner, Math.sin(pt.a) * rInner, 2 + Math.random() * 1.5);
+                    }
+                    structGraph.endFill();
+                }
+            }
+
+            // Generate ONE Massive Golgi Apparatus
+            const GOLGI_COLOR = 0x8c7ae6;
+            const VESICLE_COLOR = 0x00d2d3;
+
+            let golgiActive = activeArcs.some(a => a.type === 'Golgi');
+            if (golgiActive) {
+                if (!window.golgiData) {
+                    let gAngle = Math.random() * Math.PI * 2;
+                    let gDist = 330 + Math.random() * 10;
+                    let gX = Math.cos(gAngle) * gDist;
+                    let gY = Math.sin(gAngle) * gDist;
+                    let gRot = gAngle + Math.PI / 2;
+                    window.golgiData = { x: gX, y: gY, angle: gAngle, rot: gRot, layers: [] };
+                } else {
+                    window.golgiData.layers = [];
+                }
+
+                let gX = window.golgiData.x;
+                let gY = window.golgiData.y;
+                let gRot = window.golgiData.rot;
+
+                let golgiCont = new PIXI.Container();
+                golgiCont.x = gX;
+                golgiCont.y = gY;
+                golgiCont.rotation = gRot;
+                let golgiGraph = new PIXI.Graphics();
+                golgiGraph.blendMode = PIXI.BLEND_MODES.ADD;
+
+                for (let layer = 0; layer < 4; layer++) {
+                    let layerRadius = 230 + Math.min(2, layer) * 50; // maps layer 0,1,2,3 to 230, 280, 330, 330
+                    if (!activeArcs.some(a => a.type === 'Golgi' && a.r === layerRadius)) continue;
+
+                    let yOffset = (layer - 1.5) * 45; // 45px gaps
+                    let width = 240 - Math.abs(layer - 1.5) * 40; // varying width
+                    let thick = 12 + Math.random() * 3;
+
+                    golgiGraph.lineStyle({ width: thick, color: GOLGI_COLOR, alpha: 0.85, cap: PIXI.LINE_CAP.ROUND });
+                    golgiGraph.moveTo(-width / 2, yOffset);
+                    golgiGraph.quadraticCurveTo(0, yOffset + 20, width / 2, yOffset);
+
+                    let sacPoints = [];
+                    for (let t = 0; t <= 1; t += 0.1) {
+                        let lx = Math.pow(1 - t, 2) * (-width / 2) * (1 - t) + 2 * (1 - t) * t * 0 + Math.pow(t, 2) * (width / 2);
+                        let ly = Math.pow(1 - t, 2) * yOffset + 2 * (1 - t) * t * (yOffset + 20) + Math.pow(t, 2) * yOffset;
+                        sacPoints.push({ lx: lx, ly: ly });
+                    }
+
+                    window.golgiData.layers.push({ radius: layerRadius, points: sacPoints });
+
+                    // Re-calculate global points for centralHitboxes
+                    let rxPoints = sacPoints.map(pt => {
+                        let rx = pt.lx * Math.cos(gRot) - pt.ly * Math.sin(gRot) + gX;
+                        let ry = pt.lx * Math.sin(gRot) + pt.ly * Math.cos(gRot) + gY;
+                        return { x: rx, y: ry };
+                    });
+                    centralHitboxes.push({ type: 'path', points: rxPoints, thick: thick });
+
+                    // Swollen cisternae edges
+                    golgiGraph.lineStyle(0);
+                    golgiGraph.beginFill(GOLGI_COLOR, 0.9);
+                    golgiGraph.drawCircle(-width / 2, yOffset, thick / 2 + 5);
+                    golgiGraph.drawCircle(width / 2, yOffset, thick / 2 + 5);
+                    golgiGraph.endFill();
+                }
+                golgiCont.addChild(golgiGraph);
+                rotatingContainer.addChild(golgiCont);
+            }
+
+            if (erActive) {
+                rotatingContainer.addChild(structGraph);
+            }
+        }
+
+        function createOrganelleGraphics(orgObj) {
+            let sprite = new PIXI.Graphics();
+            let isMito = (orgObj.type === 'mitochondria');
+            let radius = orgObj.radius;
+            let sizeMult = isMito ? radius / 35 : radius / 25;
+
+            if (isMito) {
+                let w = radius * 0.9; 
+                let L = radius * 1.6;
+                let bendY = orgObj.bendY !== undefined ? orgObj.bendY : (Math.random() - 0.5) * L * 0.5;
+                orgObj.bendY = bendY;
+
+                const drawPill = (thick, color, alpha) => {
+                    if (thick <= 0) return;
+                    sprite.lineStyle({width: thick, color: color, alpha: alpha, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND});
+                    sprite.moveTo(-L/2, 0);
+                    sprite.quadraticCurveTo(0, bendY, L/2, 0);
+                };
+
+                drawPill(w + 10, C_MITO, 0.2); 
+                drawPill(w, C_MITO, 0.6);      
+                drawPill(w - 6, 0x0d0d1a, 1.0); 
+                drawPill(w - 10, 0x55efc4, 0.8); 
+                drawPill(w - 14, 0x0d0d1a, 1.0); 
+
+                sprite.lineStyle({width: 2 + sizeMult, color: 0x55efc4, alpha: 0.9, cap: PIXI.LINE_CAP.ROUND});
+                let numCristae = 4 + Math.floor(L / 15); 
+                for (let j = 1; j <= numCristae; j++) {
+                    let t = j / (numCristae + 1);
+                    t += (Math.random() - 0.5) * (0.6 / numCristae); 
+                    
+                    let p0x = -L/2, p0y = 0;
+                    let p1x = 0, p1y = bendY;
+                    let p2x = L/2, p2y = 0;
+                    
+                    let bx = Math.pow(1-t, 2)*p0x + 2*(1-t)*t*p1x + Math.pow(t, 2)*p2x;
+                    let by = Math.pow(1-t, 2)*p0y + 2*(1-t)*t*p1y + Math.pow(t, 2)*p2y;
+                    
+                    let tx = 2*(1-t)*(p1x - p0x) + 2*t*(p2x - p1x);
+                    let ty = 2*(1-t)*(p1y - p0y) + 2*t*(p2y - p1y);
+                    let len = Math.hypot(tx, ty);
+                    let nx = -ty / len; 
+                    let ny = tx / len;
+                    
+                    let side = Math.random() > 0.5 ? 1 : -1;
+                    let startDist = (w - 12) / 2; 
+                    if (startDist <= 0) continue;
+                    let endDist = (Math.random() > 0.3) ? -startDist * (0.1 + Math.random()*0.3) : startDist * (0.2 + Math.random()*0.3);
+                    
+                    let startX = bx + nx * startDist * side;
+                    let startY = by + ny * startDist * side;
+                    let endX = bx + nx * endDist * side;
+                    let endY = by + ny * endDist * side;
+                    
+                    let midX = (startX + endX) / 2;
+                    let midY = (startY + endY) / 2;
+                    let curveOffset = (Math.random() - 0.5) * 8 * sizeMult;
+                    midX += (tx/len) * curveOffset;
+                    midY += (ty/len) * curveOffset;
+                    
+                    sprite.moveTo(startX, startY);
+                    sprite.quadraticCurveTo(midX, midY, endX, endY);
+                }
+            } else {
+                let w = radius;
+                sprite.beginFill(0x0d0d1a, 0.6);
+                sprite.lineStyle(3 * sizeMult, 0xff4757, 0.6);
+                sprite.drawCircle(0, 0, w);
+                sprite.endFill();
+                
+                let numBubbles = Math.floor((8 + Math.random() * 6) * sizeMult);
+                for(let j=0; j<numBubbles; j++) {
+                    let br = Math.random() * (w - 6 * sizeMult);
+                    let ba = Math.random() * Math.PI * 2;
+                    let bubR = (3 + Math.random() * 5) * sizeMult;
+                    sprite.beginFill(0xff6b81, 0.8);
+                    sprite.lineStyle(1 * sizeMult, 0xff4757, 1);
+                    sprite.drawCircle(Math.cos(ba) * br, Math.sin(ba) * br, bubR);
+                    sprite.endFill();
+                    
+                    sprite.beginFill(0xffffff, 0.9);
+                    sprite.lineStyle(0);
+                    sprite.drawCircle(Math.cos(ba) * br, Math.sin(ba) * br, bubR * 0.4);
+                    sprite.endFill();
+                }
+            }
+
+            sprite.x = orgObj.x;
+            sprite.y = orgObj.y;
+            sprite.rotation = orgObj.rotation;
+            return sprite;
+        }
+
+        function generateMap(keepOrganelles = false) {
+            backgroundLayer.removeChildren();
+            nucleusLayer.clear();
+            nucleusLayer.visible = true;
+            golgiERContainer.visible = true;
+            rotatingContainer.removeChildren();
+            window.golgiData = null; // Reset Golgi layout parameters for a fresh round!
+
+            const cellBg = new PIXI.Graphics();
+
+            // 1. Fill base dark color
+            cellBg.beginFill(0x0d0d1a);
+            cellBg.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+            cellBg.endFill();
+
+            // 2. Thick layered glowing membrane
+            cellBg.lineStyle(15, 0x1e3799, 0.4);
+            cellBg.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
+
+            cellBg.lineStyle(8, 0x4a69bd, 0.8);
+            cellBg.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+
+            cellBg.lineStyle(3, 0x82ccdd, 1.0);
+            cellBg.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
+
+            backgroundLayer.addChild(cellBg);
+
+            // Membrane Protrusions (Drawn on top of membrane to look fused)
+            const membraneProtrusionsContainer = new PIXI.Container();
+            backgroundLayer.addChild(membraneProtrusionsContainer);
+            membraneProtrusionsList = [];
+
+            let validProtrusions = [];
+            let maxAttempts = 300;
+            let placed = 0;
+
+            for (let i = 0; i < maxAttempts && placed < 28; i++) {
+                let maxR = 25 + Math.random() * 40;
+
+                // Calculate required angular space to prevent overlap
+                // Fillet is 0.6 * R, padding is 5. Total half-width = R * 1.6 + 5
+                let halfWidth = maxR * 1.6 + 5;
+                // Conservative angular width using the minor axis (1200)
+                let requiredAngularSpace = halfWidth / 1200.0;
+
+                let t = Math.random() * Math.PI * 2;
+                let isValid = true;
+
+                for (let existing of validProtrusions) {
+                    let diff = Math.abs(t - existing.t);
+                    if (diff > Math.PI) diff = Math.PI * 2 - diff;
+
+                    // Ensure distance is greater than their combined radii + 5% padding
+                    if (diff < (requiredAngularSpace + existing.requiredAngularSpace) * 1.05) {
+                        isValid = false;
+                        break;
+                    }
+                }
+
+                if (!isValid) continue;
+
+                validProtrusions.push({ t: t, requiredAngularSpace: requiredAngularSpace });
+                placed++;
+
+                let p = new PIXI.Graphics();
+                p.redraw = function (currentR) {
+                    this.clear();
+                    if (currentR < 1) return;
+
+                    let rc = this.rc;
+                    let fillet = currentR * 0.6;
+                    let eraseY = currentR + fillet + 5;
+
+                    // 1. Dark patch to erase cellBg line
+                    this.beginFill(0x0d0d1a);
+                    this.lineStyle(0);
+                    this.drawRect(-20, -eraseY, 40, eraseY * 2);
+                    this.endFill();
+
+                    // Helper to compute local X on the curved ellipse using osculating parabola
+                    const getX = (baseX, y) => baseX - (y * y) / (2 * rc);
+
+                    // 2. Outer Layer
+                    this.lineStyle({ width: 15, color: 0x1e3799, alpha: 0.4, join: PIXI.LINE_JOIN.ROUND });
+                    this.moveTo(getX(8, -eraseY), -eraseY);
+                    let outStart = -(currentR + fillet);
+                    this.lineTo(getX(8, outStart), outStart);
+                    this.quadraticCurveTo(getX(8, -currentR), -currentR, 8 + fillet, -currentR);
+                    this.arc(8 + fillet, 0, currentR, -Math.PI / 2, Math.PI / 2);
+                    this.quadraticCurveTo(getX(8, currentR), currentR, getX(8, -outStart), -outStart);
+                    this.lineTo(getX(8, eraseY), eraseY);
+
+                    // 3. Middle Layer
+                    let midR = Math.max(0, currentR - 8);
+                    let midFillet = midR * 0.6;
+                    this.lineStyle({ width: 8, color: 0x4a69bd, alpha: 0.8, join: PIXI.LINE_JOIN.ROUND });
+                    this.moveTo(getX(0, -eraseY), -eraseY);
+                    if (midR > 0) {
+                        let midStart = -(midR + midFillet);
+                        this.lineTo(getX(0, midStart), midStart);
+                        this.quadraticCurveTo(getX(0, -midR), -midR, 0 + midFillet, -midR);
+                        this.arc(0 + midFillet, 0, midR, -Math.PI / 2, Math.PI / 2);
+                        this.quadraticCurveTo(getX(0, midR), midR, getX(0, -midStart), -midStart);
+                    } else {
+                        this.lineTo(getX(0, 0), 0);
+                    }
+                    this.lineTo(getX(0, eraseY), eraseY);
+
+                    // 4. Inner Layer
+                    let inR = Math.max(0, currentR - 11);
+                    let inFillet = inR * 0.6;
+                    this.lineStyle({ width: 3, color: 0x82ccdd, alpha: 1.0, join: PIXI.LINE_JOIN.ROUND });
+                    this.moveTo(getX(-3, -eraseY), -eraseY);
+                    if (inR > 0) {
+                        let inStart = -(inR + inFillet);
+                        this.lineTo(getX(-3, inStart), inStart);
+                        this.quadraticCurveTo(getX(-3, -inR), -inR, -3 + inFillet, -inR);
+                        this.arc(-3 + inFillet, 0, inR, -Math.PI / 2, Math.PI / 2);
+                        this.quadraticCurveTo(getX(-3, inR), inR, getX(-3, -inStart), -inStart);
+                    } else {
+                        this.lineTo(getX(-3, 0), 0);
+                    }
+                    this.lineTo(getX(-3, eraseY), eraseY);
+                };
+
+                let a = activeCell.radiusX;
+                let b = activeCell.radiusY;
+                p.angleRad = t;
+                p.maxRadius = maxR;
+                p.phase = Math.random() * Math.PI * 2;
+                p.speed = 0.5 + Math.random() * 1.5;
+
+                // Normal angle for ellipse points perfectly outward
+                p.normAngle = Math.atan2(a * Math.sin(t), b * Math.cos(t));
+                p.rotation = p.normAngle;
+
+                // Radius of curvature
+                let a2_sin2 = Math.pow(a * Math.sin(t), 2);
+                let b2_cos2 = Math.pow(b * Math.cos(t), 2);
+                p.rc = Math.pow(a2_sin2 + b2_cos2, 1.5) / (a * b);
+
+                p.x = activeCell.x + a * Math.cos(t);
+                p.y = activeCell.y + b * Math.sin(t);
+
+                p.redraw(0); // Initial transparent state
+
+                membraneProtrusionsContainer.addChild(p);
+                membraneProtrusionsList.push(p);
+            }
+
+            // 3. Cytosol Fluid (Drifting organic blobs)
+            cytosolContainer = new PIXI.Container();
+            backgroundLayer.addChild(cytosolContainer);
+
+            cytosolParticles = [];
+            for (let i = 0; i < 800; i++) {
+                let px = activeCell.x + (Math.random() * 2 - 1) * activeCell.radiusX;
+                let py = activeCell.y + (Math.random() * 2 - 1) * activeCell.radiusY;
+
+                // Only spawn them roughly inside the cell
+                if ((Math.pow(px - activeCell.x, 2) / Math.pow(activeCell.radiusX, 2)) + (Math.pow(py - activeCell.y, 2) / Math.pow(activeCell.radiusY, 2)) <= 1) {
+                    let blob = new PIXI.Graphics();
+                    let radius = 10 + Math.random() * 50;
+
+                    let colorRoll = Math.random();
+                    let color = 0x1e3799; // Base blue
+                    let alpha = 0.1 + Math.random() * 0.2;
+
+                    if (colorRoll > 0.95) {
+                        color = 0x82ccdd; // Bright Cyan
+                        alpha = 0.4 + Math.random() * 0.3; // Much brighter
+                        radius = 5 + Math.random() * 20; // Brighter ones are smaller
+                    } else if (colorRoll > 0.7) {
+                        color = 0x6c5ce7; // Purple
+                        alpha = 0.2 + Math.random() * 0.2;
+                    } else if (colorRoll > 0.5) {
+                        color = 0x4a69bd; // Medium blue
+                    }
+
+                    blob.beginFill(color, alpha);
+                    blob.drawCircle(0, 0, radius);
+                    blob.endFill();
+                    blob.x = px;
+                    blob.y = py;
+                    blob.vx = (Math.random() - 0.5) * 0.6;
+                    blob.vy = (Math.random() - 0.5) * 0.6;
+                    blob.phase = Math.random() * Math.PI * 2;
+                    blob.baseAlpha = alpha;
+                    cytosolContainer.addChild(blob);
+                    cytosolParticles.push(blob);
+                }
+            }
+
+            // Mask correctly reapplied so particles don't bleed out freely
+            window.bgMask = new PIXI.Graphics();
+            window.bgMask.beginFill(0xffffff);
+            window.bgMask.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+            window.bgMask.endFill();
+
+            backgroundLayer.addChild(window.bgMask);
+            cytosolContainer.mask = window.bgMask;
+
+            // Nucleus Redesign
+            // Outer envelope
+            nucleusLayer.beginFill(0x130f26, 0.95);
+            nucleusLayer.lineStyle(5, 0x6c5ce7, 0.8);
+            nucleusLayer.drawCircle(activeCell.x, activeCell.y, 130);
+            nucleusLayer.endFill();
+
+            // Nucleolus (Dense, off-center inner core)
+            let nucAngle = Math.random() * Math.PI * 2;
+            let nucDist = 30 + Math.random() * 30;
+            let nucX = activeCell.x + Math.cos(nucAngle) * nucDist;
+            let nucY = activeCell.y + Math.sin(nucAngle) * nucDist;
+            nucleusLayer.beginFill(0x4834d4, 0.9);
+            nucleusLayer.lineStyle(3, 0x686de0, 0.8);
+            nucleusLayer.drawCircle(nucX, nucY, 35);
+            nucleusLayer.endFill();
+
+            // Chromatin (Procedural squiggly lines)
+            nucleusLayer.lineStyle(2, 0xa29bfe, 0.5);
+            for (let i = 0; i < 20; i++) {
+                let startX = activeCell.x + (Math.random() - 0.5) * 180;
+                let startY = activeCell.y + (Math.random() - 0.5) * 180;
+                if (Math.hypot(startX - activeCell.x, startY - activeCell.y) > 115) continue;
+                if (Math.hypot(startX - nucX, startY - nucY) < 40) continue; // avoid nucleolus
+
+                nucleusLayer.moveTo(startX, startY);
+                let currentX = startX;
+                let currentY = startY;
+                for (let j = 0; j < 6; j++) {
+                    let angle = Math.random() * Math.PI * 2;
+                    let len = 10 + Math.random() * 20;
+                    let nextX = currentX + Math.cos(angle) * len;
+                    let nextY = currentY + Math.sin(angle) * len;
+                    if (Math.hypot(nextX - activeCell.x, nextY - activeCell.y) > 115) break;
+                    let cpX = currentX + Math.cos(angle + 0.5) * len * 0.5;
+                    let cpY = currentY + Math.sin(angle + 0.5) * len * 0.5;
+                    nucleusLayer.quadraticCurveTo(cpX, cpY, nextX, nextY);
+                    currentX = nextX;
+                    currentY = nextY;
+                }
+            }
+
+            // Nuclear Pores
+            nucleusLayer.lineStyle(3, 0xa29bfe, 0.8);
+            for (let a = 0; a < Math.PI * 2; a += Math.PI / 6 + Math.random() * 0.1) {
+                nucleusLayer.beginFill(0x0d0d1a);
+                nucleusLayer.drawCircle(activeCell.x + Math.cos(a) * 130, activeCell.y + Math.sin(a) * 130, 6);
+                nucleusLayer.endFill();
+            }
+
+            rotatingContainer.position.set(activeCell.x, activeCell.y);
+
+            activeArcs = JSON.parse(JSON.stringify(ARCS));
+            drawArcs(activeArcs);
+
+            // Rebuild/reset the nucleus mask
+            if (window.nucleusMask) {
+                world.removeChild(window.nucleusMask);
+                window.nucleusMask.destroy();
+            }
+            window.nucleusMask = null;
+            nucleusLayer.mask = null;
+            golgiERContainer.mask = null;
+
+            if (!keepOrganelles) {
+                organellesLayer.removeChildren(); // Clean up old sprites
+                organellesLayer.clear();
+
+                organelles = [];
+                let attempts = 0;
+                let p1Spawn = { x: activeCell.x - 600, y: activeCell.y };
+                let p2Spawn = { x: activeCell.x + 600, y: activeCell.y };
+
+                while (organelles.length < 25 && attempts < 1000) {
+                    attempts++;
+                    let x = activeCell.x + (Math.random() * 2 - 1) * activeCell.radiusX * 0.85;
+                    let y = activeCell.y + (Math.random() * 2 - 1) * activeCell.radiusY * 0.85;
+
+                    let distToCenter = Math.hypot(x - activeCell.x, y - activeCell.y);
+                    if (distToCenter < 400) continue;
+                    if (isOutsideCell(x, y, 50)) continue;
+
+                    if (Math.hypot(x - p1Spawn.x, y - p1Spawn.y) < 200) continue;
+                    if (Math.hypot(x - p2Spawn.x, y - p2Spawn.y) < 200) continue;
+
+                    let isMito = Math.random() > 0.4;
+                    let sizeMult = isMito
+                        ? [1, 2, 3][Math.floor(Math.random() * 3)]
+                        : [0.5, 1.0, 1.5, 2.0][Math.floor(Math.random() * 4)];
+                    let radius = (isMito ? 35 : 25) * sizeMult;
+
+                    let overlap = false;
+                    for (let o of organelles) {
+                        if (Math.hypot(x - o.x, y - o.y) < o.radius + radius + 40) overlap = true;
+                    }
+                    if (overlap) continue;
+
+                    let orgObj = {
+                        type: isMito ? 'mitochondria' : 'lysosome',
+                        x: x, y: y,
+                        vx: (Math.random() - 0.5) * 0.4,
+                        vy: (Math.random() - 0.5) * 0.4,
+                        radius: radius,
+                        color: isMito ? C_MITO : C_LYSO,
+                        rotation: Math.random() * Math.PI * 2,
+                        rotSpeed: (Math.random() - 0.5) * 0.015
+                    };
+                    let sprite = createOrganelleGraphics(orgObj);
+                    orgObj.sprite = sprite;
+                    organellesLayer.addChild(sprite);
+                    organelles.push(orgObj);
+                }
+            }
+        }
+
+        // --- 5. Collision Math ---
+        // Upgraded to support elliptical boundaries and hitbox padding
+        function isOutsideCell(x, y, padding = 0) {
+            // 1. Check original Cell A
+            let dxA = x - activeCell.x;
+            let dyA = y - activeCell.y;
+            let rxA = activeCell.radiusX - padding;
+            let ryA = activeCell.radiusY - padding;
+            let inCellA = ((dxA * dxA) / (rxA * rxA)) + ((dyA * dyA) / (ryA * ryA)) < 1;
+            if (inCellA) return false;
+
+            if (mitosis.state !== 'idle') {
+                // 2. Check new Cell B
+                let dxB = x - mitosis.cellB.x;
+                let dyB = y - mitosis.cellB.y;
+                let rxB = activeCell.radiusX - padding;
+                let ryB = activeCell.radiusY - padding;
+                let inCellB = ((dxB * dxB) / (rxB * rxB)) + ((dyB * dyB) / (ryB * ryB)) < 1;
+                if (inCellB) return false;
+
+                // 3. Check the Bridge (Rectangle Collision)
+                let isHorizontal = (mitosis.direction === 0 || mitosis.direction === 2);
+                let halfW = mitosis.currentWidth / 2 - padding;
+
+                if (isHorizontal) {
+                    let minX = Math.min(activeCell.x, mitosis.cellB.x);
+                    let maxX = Math.max(activeCell.x, mitosis.cellB.x);
+                    if (x >= minX && x <= maxX && y >= activeCell.y - halfW && y <= activeCell.y + halfW) return false;
+                } else {
+                    let minY = Math.min(activeCell.y, mitosis.cellB.y);
+                    let maxY = Math.max(activeCell.y, mitosis.cellB.y);
+                    if (x >= activeCell.x - halfW && x <= activeCell.x + halfW && y >= minY && y <= maxY) return false;
+                }
+            }
+
+            return true;
+        }
+
+        class SpatialGrid {
+            constructor(cellSize = 128) {
+                this.cellSize = cellSize;
+                this.cells = new Map();
+            }
+
+            clear() {
+                this.cells.clear();
+            }
+
+            getKey(x, y) {
+                let cx = Math.floor(x / this.cellSize);
+                let cy = Math.floor(y / this.cellSize);
+                return `${cx},${cy}`;
+            }
+
+            insertSegment(x1, y1, x2, y2, item) {
+                let minX = Math.min(x1, x2);
+                let maxX = Math.max(x1, x2);
+                let minY = Math.min(y1, y2);
+                let maxY = Math.max(y1, y2);
+
+                let startCx = Math.floor(minX / this.cellSize);
+                let endCx = Math.floor(maxX / this.cellSize);
+                let startCy = Math.floor(minY / this.cellSize);
+                let endCy = Math.floor(maxY / this.cellSize);
+
+                for (let cx = startCx; cx <= endCx; cx++) {
+                    for (let cy = startCy; cy <= endCy; cy++) {
+                        let key = `${cx},${cy}`;
+                        if (!this.cells.has(key)) this.cells.set(key, []);
+                        this.cells.get(key).push(item);
+                    }
+                }
+            }
+
+            insertCircle(x, y, r, item) {
+                let startCx = Math.floor((x - r) / this.cellSize);
+                let endCx = Math.floor((x + r) / this.cellSize);
+                let startCy = Math.floor((y - r) / this.cellSize);
+                let endCy = Math.floor((y + r) / this.cellSize);
+
+                for (let cx = startCx; cx <= endCx; cx++) {
+                    for (let cy = startCy; cy <= endCy; cy++) {
+                        let key = `${cx},${cy}`;
+                        if (!this.cells.has(key)) this.cells.set(key, []);
+                        this.cells.get(key).push(item);
+                    }
+                }
+            }
+
+            queryRange(x, y, range) {
+                let startCx = Math.floor((x - range) / this.cellSize);
+                let endCx = Math.floor((x + range) / this.cellSize);
+                let startCy = Math.floor((y - range) / this.cellSize);
+                let endCy = Math.floor((y + range) / this.cellSize);
+
+                let results = [];
+                let seen = new Set();
+                for (let cx = startCx; cx <= endCx; cx++) {
+                    for (let cy = startCy; cy <= endCy; cy++) {
+                        let key = `${cx},${cy}`;
+                        let items = this.cells.get(key);
+                        if (items) {
+                            for (let item of items) {
+                                if (!seen.has(item)) {
+                                    seen.add(item);
+                                    results.push(item);
+                                }
+                            }
+                        }
+                    }
+                }
+                return results;
+            }
+        }
+
+        const spatialGrid = new SpatialGrid(128);
+
+        // --- shared swept-collision geometry ---
+        function ptSegDistSq(px, py, x1, y1, x2, y2) {
+            let l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+            if (l2 === 0) return (px - x1) * (px - x1) + (py - y1) * (py - y1);
+            let t = Math.max(0, Math.min(1, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2));
+            let projX = x1 + t * (x2 - x1), projY = y1 + t * (y2 - y1);
+            return (px - projX) * (px - projX) + (py - projY) * (py - projY);
+        }
+        function segsCross(ax, ay, bx, by, cx, cy, dx, dy) {
+            let d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+            let d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+            let d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+            let d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+            return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+        }
+        function segSegDistSq(ax, ay, bx, by, cx, cy, dx, dy) {
+            if (segsCross(ax, ay, bx, by, cx, cy, dx, dy)) return 0;
+            return Math.min(
+                ptSegDistSq(ax, ay, cx, cy, dx, dy), ptSegDistSq(bx, by, cx, cy, dx, dy),
+                ptSegDistSq(cx, cy, ax, ay, bx, by), ptSegDistSq(dx, dy, ax, ay, bx, by)
+            );
+        }
+
+        function rebuildSpatialGrid() {
+            spatialGrid.clear();
+
+            // 1. Insert player traces
+            players.forEach(p => {
+                p.traceSegments.forEach((seg, s) => {
+                    for (let i = 0; i < seg.length - 1; i++) {
+                        spatialGrid.insertSegment(seg[i].x, seg[i].y, seg[i + 1].x, seg[i + 1].y, {
+                            type: 'trace',
+                            x1: seg[i].x, y1: seg[i].y,
+                            x2: seg[i + 1].x, y2: seg[i + 1].y,
+                            playerId: p.id,
+                            s: s,
+                            i: i,
+                            segLength: seg.length
+                        });
+                    }
+                });
+            });
+
+            // 2. Insert drifting organelles
+            organelles.forEach(org => {
+                let r = org.radius;
+                if (org.type === 'mitochondria') r = org.radius * 1.6;
+                spatialGrid.insertCircle(org.x, org.y, r, {
+                    type: 'organelle',
+                    raw: org
+                });
+            });
+
+            // 3. Insert vesicles
+            vesicles.forEach(v => {
+                spatialGrid.insertCircle(v.x, v.y, v.radius, {
+                    type: 'vesicle',
+                    raw: v
+                });
+            });
+
+            // 4. Insert virus particles
+            if (infection.particles) {
+                infection.particles.forEach(vp => {
+                    spatialGrid.insertCircle(vp.x, vp.y, vp.radius, {
+                        type: 'virus',
+                        raw: vp
+                    });
+                });
+            }
+        }
+
+        function raycast(startX, startY, angle, maxDist, casterId = null) {
+            let cos = Math.cos(angle);
+            let sin = Math.sin(angle);
+            let step = 12;
+            let steps = Math.ceil(maxDist / step);
+            
+            for (let i = 0; i <= steps; i++) {
+                let dist = i * step;
+                if (dist > maxDist) dist = maxDist;
+                let rx = startX + cos * dist;
+                let ry = startY + sin * dist;
+                
+                // 1. Check boundary collision
+                if (isOutsideCell(rx, ry)) {
+                    return { dist: dist, type: 'boundary' };
+                }
+                
+                // Check nuclear core
+                if (Math.hypot(rx - activeCell.x, ry - activeCell.y) < 130 + TRACE_HITBOX) {
+                    return { dist: dist, type: 'nucleus' };
+                }
+
+                // Check sweeping death ring boundary
+                if (mitosis.state !== 'idle') {
+                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                    let caught = false;
+                    if (mitosis.direction === 0) {
+                        let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                        if (rx < ringX) caught = true;
+                    } else if (mitosis.direction === 1) {
+                        let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                        if (ry < ringY) caught = true;
+                    } else if (mitosis.direction === 2) {
+                        let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                        if (rx > ringX) caught = true;
+                    } else {
+                        let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                        if (ry > ringY) caught = true;
+                    }
+                    if (caught) {
+                        return { dist: dist, type: 'boundary' };
+                    }
+                }
+                
+                // 2. Query spatial grid for local hazards/rewards
+                let localItems = spatialGrid.queryRange(rx, ry, step + TRACE_HITBOX);
+                for (let item of localItems) {
+                    if (item.type === 'trace') {
+                        if (casterId !== null && item.playerId === casterId) {
+                            let other = players.find(op => op.id === item.playerId);
+                            if (other) {
+                                let isLastSegment = (item.s === other.traceSegments.length - 1);
+                                if (isLastSegment && item.i >= item.segLength - 16) {
+                                    continue;
+                                }
+                            }
+                        }
+                        let dSq = ptSegDistSq(rx, ry, item.x1, item.y1, item.x2, item.y2);
+                        if (dSq < TRACE_HITBOX * TRACE_HITBOX) {
+                            return { dist: dist, type: 'trace' };
+                        }
+                    } else if (item.type === 'organelle') {
+                        let org = item.raw;
+                        if (org.type === 'mitochondria') {
+                            let dx = rx - org.x;
+                            let dy = ry - org.y;
+                            let cosA = Math.cos(-org.rotation);
+                            let sinA = Math.sin(-org.rotation);
+                            let lx = dx * cosA - dy * sinA;
+                            let ly = dx * sinA + dy * cosA;
+                            
+                            let halfL = (org.radius * 1.6) / 2;
+                            let halfW = (org.radius * 0.9) / 2;
+                            let rSq = (halfW + TRACE_HITBOX) * (halfW + TRACE_HITBOX);
+                            
+                            let prevX = -halfL, prevY = 0;
+                            for (let s = 1; s <= 5; s++) {
+                                let t = s / 5;
+                                let bx = Math.pow(1 - t, 2) * (-halfL) + Math.pow(t, 2) * (halfL);
+                                let by = 2 * (1 - t) * t * (org.bendY || 0);
+                                if (ptSegDistSq(lx, ly, prevX, prevY, bx, by) < rSq) {
+                                    return { dist: dist, type: 'organelle' };
+                                }
+                                prevX = bx; prevY = by;
+                            }
+                        } else {
+                            if (Math.hypot(rx - org.x, ry - org.y) < org.radius + TRACE_HITBOX) {
+                                return { dist: dist, type: 'organelle' };
+                            }
+                        }
+                    } else if (item.type === 'virus') {
+                        let vp = item.raw;
+                        if (Math.hypot(rx - vp.x, ry - vp.y) < (vp.radius * 1.4) + TRACE_HITBOX) {
+                            return { dist: dist, type: 'virus' };
+                        }
+                    } else if (item.type === 'vesicle') {
+                        let v = item.raw;
+                        if (Math.hypot(rx - v.x, ry - v.y) < v.radius + TRACE_WIDTH + 6) {
+                            return { dist: dist, type: 'vesicle', raw: v };
+                        }
+                    }
+                }
+            }
+            return { dist: maxDist, type: 'clear' };
+        }
+
+        function updateBotAI(bot, delta) {
+            let fAngle = bot.angle;
+            let lAngle = bot.angle - 0.5; // Left diagonal
+            let rAngle = bot.angle + 0.5; // Right diagonal
+            
+            let maxSense = 350;
+            
+            let fHit = raycast(bot.x, bot.y, fAngle, maxSense, bot.id);
+            let lHit = raycast(bot.x, bot.y, lAngle, maxSense, bot.id);
+            let rHit = raycast(bot.x, bot.y, rAngle, maxSense, bot.id);
+            
+            let fWeight = getRayWeight(fHit, maxSense);
+            let lWeight = getRayWeight(lHit, maxSense);
+            let rWeight = getRayWeight(rHit, maxSense);
+            
+            // Calculate steering force
+            let force = 0;
+            
+            // 1. Proximity hazard avoidance
+            if (lWeight < 1000) {
+                // Danger on left pushes us right (positive force)
+                force += (1000 - lWeight);
+            }
+            if (rWeight < 1000) {
+                // Danger on right pushes us left (negative force)
+                force -= (1000 - rWeight);
+            }
+            if (fWeight < 1000) {
+                // Danger in front pushes us to the clearer side
+                let push = (1000 - fWeight) * 1.5;
+                if (lWeight >= rWeight) {
+                    force -= push;
+                } else {
+                    force += push;
+                }
+            }
+            
+            // 2. Vesicle attraction (only if not in immediate danger)
+            let inDanger = (fWeight < 900 || lWeight < 900 || rWeight < 900);
+            if (!inDanger) {
+                if (lWeight > 1000) {
+                    force -= (lWeight - 1000) * 0.5; // pull left
+                }
+                if (rWeight > 1000) {
+                    force += (rWeight - 1000) * 0.5; // pull right
+                }
+            }
+
+            // 3. Mitosis bridge attraction
+            if (mitosis.state !== 'idle') {
+                let angleToB = Math.atan2(mitosis.cellB.y - bot.y, mitosis.cellB.x - bot.x);
+                let diff = angleToB - bot.angle;
+                diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+                // Add a force pulling us in the direction of Cell B
+                force += diff * 150; 
+            }
+            
+            // Apply steering threshold to prevent wobbling
+            if (force < -10) {
+                bot.angle -= 0.08 * delta; // Turn Left
+            } else if (force > 10) {
+                bot.angle += 0.08 * delta; // Turn Right
+            }
+            
+            // Toggle targetMode dynamically based on forward ray
+            if (fHit.type === 'vesicle') {
+                bot.targetMode = 'self';
+            } else if (fHit.type === 'trace' && fHit.dist < 150) {
+                if (bot.effects.speedTimer > 0) {
+                    bot.targetMode = 'attack';
+                }
+            }
+        }
+        
+        function getRayWeight(hit, maxSense) {
+            let weight = 1000;
+            let d = hit.dist;
+            
+            if (hit.type === 'boundary' || hit.type === 'nucleus' || hit.type === 'trace' || hit.type === 'organelle' || hit.type === 'virus') {
+                let danger = maxSense - d;
+                weight -= danger * danger * 5;
+            } else if (hit.type === 'vesicle') {
+                weight += 2000 * (1.0 - d / maxSense);
+            }
+            
+            return weight;
+        }
+
+        function checkArcCollision(x, y, player) {
+            // Un-rotate BOTH the previous and candidate head positions into the
+            // static (globalRotation) frame, then sweep the whole step.
+            let cosG = Math.cos(-globalRotation), sinG = Math.sin(-globalRotation);
+            let dx2 = x - activeCell.x, dy2 = y - activeCell.y;
+            let ux2 = dx2 * cosG - dy2 * sinG, uy2 = dx2 * sinG + dy2 * cosG; // candidate
+            let dx1 = player.x - activeCell.x, dy1 = player.y - activeCell.y;
+            let ux1 = dx1 * cosG - dy1 * sinG, uy1 = dx1 * sinG + dy1 * cosG; // previous
+
+            const HITBOX_SQ = TRACE_HITBOX * TRACE_HITBOX;
+
+            for (let hb of centralHitboxes) {
+                if (hb.type === 'path') {
+                    let rSq = Math.pow(hb.thick / 2 + TRACE_HITBOX, 2);
+                    for (let i = 0; i < hb.points.length - 1; i++) {
+                        let p1 = hb.points[i], p2 = hb.points[i + 1];
+                        if (segSegDistSq(ux1, uy1, ux2, uy2, p1.x, p1.y, p2.x, p2.y) < rSq) return true;
+                    }
+                } else if (hb.type === 'poly') {
+                    // Collide if the candidate lands inside, OR the swept step passes
+                    // within one trace radius of any edge (covers tunnelling + grazing).
+                    let inside = false;
+                    for (let i = 0, j = hb.points.length - 1; i < hb.points.length; j = i++) {
+                        let xi = hb.points[i].x, yi = hb.points[i].y;
+                        let xj = hb.points[j].x, yj = hb.points[j].y;
+                        if (((yi > uy2) !== (yj > uy2)) && (ux2 < (xj - xi) * (uy2 - yi) / (yj - yi) + xi)) inside = !inside;
+                        if (segSegDistSq(ux1, uy1, ux2, uy2, xi, yi, xj, yj) < HITBOX_SQ) return true;
+                    }
+                    if (inside) return true;
+                }
+            }
+            return false;
+        }
+
+        function isInsideNucleus(x, y) {
+            // If distance to center is >= 130, it's not inside the nucleus at all
+            if (Math.hypot(x - activeCell.x, y - activeCell.y) >= 130 + TRACE_HITBOX) return false;
+
+            // If mitosis is not active, it's always inside
+            if (mitosis.state === 'idle') return true;
+
+            // If mitosis is active, check if it's on the destroyed side of the laser line
+            let timeInEvent = survivalTime - mitosis.eventStartTime;
+            let sweepProgress = timeInEvent / 120.0;
+
+            if (mitosis.direction === 0) { // Sweeps Left to Right (destroying left, keeping right)
+                let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                return x >= ringX; // only collides if it hasn't been crossed by the laser yet
+            } else if (mitosis.direction === 1) { // Sweeps Top to Bottom
+                let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                return y >= ringY;
+            } else if (mitosis.direction === 2) { // Sweeps Right to Left
+                let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                return x <= ringX;
+            } else { // Sweeps Bottom to Top
+                let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                return y <= ringY;
+            }
+        }
+
+        function checkCollision(x, y, player) {
+            // 1. ALWAYS check physical boundaries
+            if (isOutsideCell(x, y)) return true;
+            if (isInsideNucleus(x, y)) return true;
+
+            // 2. If Ghost Mode is active, bypass traces and organelles!
+            if (player.effects.ghostTimer > 0) return false;
+
+            // 3. Normal Collision Logic
+            if (checkArcCollision(x, y, player)) return true;
+
+            // Query spatial grid for nearby obstacles
+            let stepLen = Math.hypot(x - player.x, y - player.y);
+            let qx = (player.x + x) / 2;
+            let qy = (player.y + y) / 2;
+            let queryRadius = stepLen / 2 + 100;
+            let localItems = spatialGrid.queryRange(qx, qy, queryRadius);
+
+            const hx1 = player.x, hy1 = player.y; // head's previous position
+            const hx2 = x, hy2 = y;               // head's candidate position (nextX, nextY)
+            const HITBOX_SQ = TRACE_HITBOX * TRACE_HITBOX;
+
+            for (let item of localItems) {
+                if (item.type === 'organelle') {
+                    let org = item.raw;
+                    if (org.type === 'mitochondria') {
+                        // Transform BOTH head endpoints into the mitochondrion's local space
+                        let cosA = Math.cos(-org.rotation), sinA = Math.sin(-org.rotation);
+                        let dx2 = x - org.x, dy2 = y - org.y;
+                        let lx2 = dx2 * cosA - dy2 * sinA, ly2 = dx2 * sinA + dy2 * cosA; // candidate
+                        let dx1 = player.x - org.x, dy1 = player.y - org.y;
+                        let lx1 = dx1 * cosA - dy1 * sinA, ly1 = dx1 * sinA + dy1 * cosA; // previous
+
+                        let halfL = (org.radius * 1.6) / 2;
+                        let halfW = (org.radius * 0.9) / 2;
+                        let rSq = (halfW + TRACE_HITBOX) * (halfW + TRACE_HITBOX);
+
+                        // Sweep the head segment against the 5-segment curved spine
+                        let prevX = -halfL, prevY = 0;
+                        for (let i = 1; i <= 5; i++) {
+                            let t = i / 5;
+                            let bx = Math.pow(1 - t, 2) * (-halfL) + Math.pow(t, 2) * (halfL);
+                            let by = 2 * (1 - t) * t * (org.bendY || 0);
+                            if (segSegDistSq(lx1, ly1, lx2, ly2, prevX, prevY, bx, by) < rSq) return true;
+                            prevX = bx; prevY = by;
+                        }
+                    } else {
+                        // Circles: distance from the centre to the swept head segment
+                        let rSq = (org.radius + TRACE_HITBOX) * (org.radius + TRACE_HITBOX);
+                        if (ptSegDistSq(org.x, org.y, player.x, player.y, x, y) < rSq) return true;
+                    }
+                } else if (item.type === 'trace') {
+                    // Hunters pass straight through opponent traces
+                    if (player.effects.hunterTimer > 0 && item.playerId !== player.id) continue;
+
+                    let skipFrames = (item.playerId === player.id) ? 15 : 0;
+                    let other = players.find(op => op.id === item.playerId);
+                    if (other) {
+                        let isLastSegment = (item.s === other.traceSegments.length - 1);
+                        if (isLastSegment && item.i >= item.segLength - skipFrames - 1) {
+                            continue;
+                        }
+                    }
+
+                    if (segSegDistSq(hx1, hy1, hx2, hy2, item.x1, item.y1, item.x2, item.y2) < HITBOX_SQ) {
+                        return true;
+                    }
+                }
+            }
+
+            // Hunter eating opponent heads
+            if (player.effects.hunterTimer > 0) {
+                for (let other of players) {
+                    if (other.id !== player.id && other.alive) {
+                        if (Math.hypot(x - other.x, y - other.y) < TRACE_HITBOX * 2.5) {
+                            other.alive = false; // Chomp the opponent's head!
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+        // --- 6. AI, Viruses, & Camera Updates ---
+        function updateDriftingOrganelles(delta) {
+            for (let i = 0; i < organelles.length; i++) {
+                let o = organelles[i];
+                o.vx += (Math.random() - 0.5) * 0.05;
+                o.vy += (Math.random() - 0.5) * 0.05;
+
+                let speed = Math.hypot(o.vx, o.vy);
+                if (speed > 0.3) {
+                    o.vx = (o.vx / speed) * 0.3; o.vy = (o.vy / speed) * 0.3;
+                }
+
+                o.x += o.vx * delta; o.y += o.vy * delta;
+
+                let nearestCell = activeCell;
+                if (mitosis.state !== 'idle') {
+                    let distToA = Math.hypot(o.x - activeCell.x, o.y - activeCell.y);
+                    let distToB = Math.hypot(o.x - mitosis.cellB.x, o.y - mitosis.cellB.y);
+                    if (distToB < distToA) nearestCell = mitosis.cellB;
+                }
+
+                if (isOutsideCell(o.x, o.y, o.radius)) {
+                    let ang = Math.atan2(o.y - nearestCell.y, o.x - nearestCell.x);
+                    o.x = nearestCell.x + Math.cos(ang) * (nearestCell.radiusX - o.radius - 2);
+                    o.y = nearestCell.y + Math.sin(ang) * (nearestCell.radiusY - o.radius - 2);
+                    o.vx *= -1;
+                    o.vy *= -1;
+                }
+
+                // Failsafe: If physics broke and it's completely out of the world, snap it to center
+                if (Math.hypot(o.x - nearestCell.x, o.y - nearestCell.y) > nearestCell.radiusX + 1000) {
+                    o.x = nearestCell.x;
+                    o.y = nearestCell.y;
+                }
+
+                let distToCenter = Math.hypot(o.x - nearestCell.x, o.y - nearestCell.y);
+                if (distToCenter < 380 + o.radius) {
+                    let ang = Math.atan2(o.y - nearestCell.y, o.x - nearestCell.x);
+                    o.vx = Math.cos(ang) * 0.4; o.vy = Math.sin(ang) * 0.4;
+                    o.x = nearestCell.x + Math.cos(ang) * (380 + o.radius);
+                    o.y = nearestCell.y + Math.sin(ang) * (380 + o.radius);
+                }
+
+                for (let j = i + 1; j < organelles.length; j++) {
+                    let o2 = organelles[j];
+                    let dist = Math.hypot(o.x - o2.x, o.y - o2.y);
+                    let minDist = o.radius + o2.radius + 10;
+                    if (dist < minDist) {
+                        let ang = Math.atan2(o.y - o2.y, o.x - o2.x);
+                        o.vx = Math.cos(ang) * 0.3; o.vy = Math.sin(ang) * 0.3;
+                        o2.vx = -Math.cos(ang) * 0.3; o2.vy = -Math.sin(ang) * 0.3;
+
+                        let overlap = minDist - dist;
+                        o.x += Math.cos(ang) * overlap / 2; o.y += Math.sin(ang) * overlap / 2;
+                        o2.x -= Math.cos(ang) * overlap / 2; o2.y -= Math.sin(ang) * overlap / 2;
+                    }
+                }
+
+                if (o.sprite) {
+                    o.sprite.x = o.x;
+                    o.sprite.y = o.y;
+                    o.rotation += o.rotSpeed * delta;   // advance the value the hitbox reads
+                    o.sprite.rotation = o.rotation;     // sprite mirrors it exactly
+                }
+            }
+        }
+
+        function updateVesicles(delta) {
+            if (Math.random() < 0.008 && vesicles.length < 25 && window.golgiData) {
+                let types = ['mitochondria', 'lysosome', 'membrane'];
+                let targetType = types[Math.floor(Math.random() * types.length)];
+                
+                let gx = window.golgiData.x;
+                let gy = window.golgiData.y;
+                let worldX = activeCell.x + gx * Math.cos(globalRotation) - gy * Math.sin(globalRotation);
+                let worldY = activeCell.y + gx * Math.sin(globalRotation) + gy * Math.cos(globalRotation);
+                
+                let spawnAngle = window.golgiData.angle + globalRotation + (Math.random() * 0.8 - 0.4);
+                
+                let vColor = C_MEMB;
+                if (targetType === 'mitochondria') vColor = C_MITO;
+                if (targetType === 'lysosome') vColor = C_LYSO;
+
+                vesicles.push({
+                    x: worldX,
+                    y: worldY,
+                    vx: Math.cos(spawnAngle) * 0.8, 
+                    vy: Math.sin(spawnAngle) * 0.8,
+                    type: targetType, 
+                    radius: 12, 
+                    color: vColor,
+                    rotation: Math.random() * Math.PI * 2
+                });
+            }
+
+            // Spawn vesicles from progenitor in Cell B during mitosis
+            if (mitosis.state !== 'idle' && mitosis.progenitor && mitosis.progenitor.active && 
+                (mitosis.progenitor.state === 'growing' || mitosis.progenitor.state === 'complete') &&
+                Math.random() < 0.008 && vesicles.length < 25 && window.golgiData) {
+                
+                let types = ['mitochondria', 'lysosome', 'membrane'];
+                let targetType = types[Math.floor(Math.random() * types.length)];
+                
+                let p = mitosis.progenitor;
+                let gx = window.golgiData.x * p.scale;
+                let gy = window.golgiData.y * p.scale;
+                let worldX = p.x + gx * Math.cos(globalRotation) - gy * Math.sin(globalRotation);
+                let worldY = p.y + gx * Math.sin(globalRotation) + gy * Math.cos(globalRotation);
+                
+                let spawnAngle = window.golgiData.angle + globalRotation + (Math.random() * 0.8 - 0.4);
+                
+                let vColor = C_MEMB;
+                if (targetType === 'mitochondria') vColor = C_MITO;
+                if (targetType === 'lysosome') vColor = C_LYSO;
+                
+                vesicles.push({
+                    x: worldX,
+                    y: worldY,
+                    vx: Math.cos(spawnAngle) * 0.8,
+                    vy: Math.sin(spawnAngle) * 0.8,
+                    type: targetType,
+                    radius: 12,
+                    color: vColor,
+                    rotation: Math.random() * Math.PI * 2
+                });
+            }
+
+            dynamicLayer.clear();
+            for (let i = vesicles.length - 1; i >= 0; i--) {
+                let v = vesicles[i];
+                v.x += v.vx * delta;
+                v.y += v.vy * delta;
+                v.rotation += 0.02 * delta;
+
+                let fused = false;
+                
+                if (isOutsideCell(v.x, v.y, v.radius)) {
+                    if (v.type === 'membrane') fused = true;
+                    else {
+                        let nearestCell = activeCell;
+                        if (mitosis.state !== 'idle') {
+                            let distToA = Math.hypot(v.x - activeCell.x, v.y - activeCell.y);
+                            let distToB = Math.hypot(v.x - mitosis.cellB.x, v.y - mitosis.cellB.y);
+                            if (distToB < distToA) nearestCell = mitosis.cellB;
+                        }
+                        let ang = Math.atan2(v.y - nearestCell.y, v.x - nearestCell.x);
+                        v.x = nearestCell.x + Math.cos(ang) * (nearestCell.radiusX - v.radius - 2);
+                        v.y = nearestCell.y + Math.sin(ang) * (nearestCell.radiusY - v.radius - 2);
+                        v.vx *= -1;
+                        v.vy *= -1;
+                    }
+                }
+
+                for (let org of organelles) {
+                    if (Math.hypot(v.x - org.x, v.y - org.y) < org.radius + v.radius) {
+                        if (org.type === v.type) fused = true;
+                        else {
+                            let ang = Math.atan2(v.y - org.y, v.x - org.x);
+                            v.vx = Math.cos(ang); v.vy = Math.sin(ang);
+                        }
+                    }
+                }
+
+                if (fused) {
+                    let fuseAng = Math.atan2(v.y - activeCell.y, v.x - activeCell.x);
+                    // The vesicle has fused with the membrane!
+                    // (Splash particles logic removed to prevent them from becoming deadly pac-man viruses)
+                    vesicles.splice(i, 1);
+                } else {
+                    if (v.type === 'mitochondria') {
+                        dynamicLayer.lineStyle({width: v.radius*0.8, color: C_MITO, alpha: 0.6, cap: PIXI.LINE_CAP.ROUND});
+                        let px1 = v.x + Math.cos(v.rotation)*v.radius*0.5;
+                        let py1 = v.y + Math.sin(v.rotation)*v.radius*0.5;
+                        let px2 = v.x - Math.cos(v.rotation)*v.radius*0.5;
+                        let py2 = v.y - Math.sin(v.rotation)*v.radius*0.5;
+                        dynamicLayer.moveTo(px1, py1);
+                        dynamicLayer.lineTo(px2, py2);
+                        dynamicLayer.lineStyle({width: v.radius*0.4, color: 0x55efc4, alpha: 0.9, cap: PIXI.LINE_CAP.ROUND});
+                        dynamicLayer.moveTo(px1, py1);
+                        dynamicLayer.lineTo(px2, py2);
+                    } else if (v.type === 'lysosome') {
+                        dynamicLayer.beginFill(0x0d0d1a, 0.6);
+                        dynamicLayer.lineStyle(2, 0xff4757, 0.6);
+                        dynamicLayer.drawCircle(v.x, v.y, v.radius);
+                        dynamicLayer.endFill();
+                        dynamicLayer.beginFill(0xffffff, 0.9);
+                        dynamicLayer.lineStyle(0);
+                        dynamicLayer.drawCircle(v.x - 2, v.y - 2, v.radius * 0.3);
+                        dynamicLayer.drawCircle(v.x + 3, v.y + 1, v.radius * 0.2);
+                        dynamicLayer.endFill();
+                    } else {
+                        dynamicLayer.beginFill(v.color, 0.8);
+                        dynamicLayer.lineStyle(2, 0x1e3799, 0.9);
+                        dynamicLayer.drawCircle(v.x, v.y, v.radius);
+                        dynamicLayer.endFill();
+                    }
+                }
+            }
+        }
+
+        function spawnVesicles(x, y, count, type, color) {
+            for (let i = 0; i < count; i++) {
+                let angle = Math.random() * Math.PI * 2;
+                let speed = 2.0 + Math.random() * 2.0;
+                vesicles.push({
+                    x: x, y: y,
+                    vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                    type: type, radius: 10, color: color,
+                    rotation: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        // --- THE INFECTION EVENT SYSTEM ---
+        function updateInfection(delta, deltaSec) {
+            virusLayer.clear();
+
+            if (survivalTime >= infection.nextWarningTime && infection.state === 'none') {
+                infection.state = 'warning';
+                infection.triggerTime = survivalTime;
+                warningElement.innerText = "WARNING: VIRUS ATTACHED! BREACH IN 5 SECONDS!";
+                warningElement.style.display = 'block';
+
+                let spawnAngle = Math.random() * Math.PI * 2;
+                infection.x = activeCell.x + Math.cos(spawnAngle) * activeCell.radiusX;
+                infection.y = activeCell.y + Math.sin(spawnAngle) * activeCell.radiusY;
+                infection.angle = Math.atan2(activeCell.y - infection.y, activeCell.x - infection.x);
+            }
+
+            if (infection.state === 'warning') {
+                virusLayer.beginFill(0xe67e22);
+                virusLayer.lineStyle(2, 0xd35400);
+                let r = 50;
+                virusLayer.drawPolygon([
+                    infection.x + r, infection.y, infection.x + r / 2, infection.y + r * 0.866,
+                    infection.x - r / 2, infection.y + r * 0.866, infection.x - r, infection.y,
+                    infection.x - r / 2, infection.y - r * 0.866, infection.x + r / 2, infection.y - r * 0.866,
+                ]);
+                virusLayer.lineStyle(4, 0xffa502);
+                for (let i = 0; i < 6; i++) {
+                    let a = i * (Math.PI / 3) + globalRotation;
+                    virusLayer.moveTo(infection.x + Math.cos(a) * r, infection.y + Math.sin(a) * r);
+                    virusLayer.lineTo(infection.x + Math.cos(a) * (r + 25), infection.y + Math.sin(a) * (r + 25));
+                    virusLayer.beginFill(0xff4757);
+                    virusLayer.drawCircle(infection.x + Math.cos(a) * (r + 25), infection.y + Math.sin(a) * (r + 25), 8);
+                    virusLayer.endFill();
+                }
+
+                if (survivalTime >= infection.triggerTime + 5.0) {
+                    warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES!";
+                    warningElement.style.display = 'block';
+                    infection.textClearTime = survivalTime + 3.0;
+
+                    let inwardAngle = Math.atan2(activeCell.y - infection.y, activeCell.x - infection.x);
+                    let safeStartX = infection.x + Math.cos(inwardAngle) * 20;
+                    let safeStartY = infection.y + Math.sin(inwardAngle) * 20;
+
+                    for (let i = 0; i < 30; i++) {
+                        let pAngle = Math.random() * Math.PI * 2;
+                        let speed = (3.0 + Math.random() * 2.0);
+                        infection.particles.push({
+                            x: safeStartX, y: safeStartY,
+                            vx: Math.cos(pAngle) * speed, vy: Math.sin(pAngle) * speed,
+                            radius: 6
+                        });
+                    }
+
+                    infection.nextWarningTime = survivalTime + 120.0;
+                    infection.state = 'none';
+                }
+            }
+
+            if (infection.textClearTime && survivalTime >= infection.textClearTime) {
+                warningElement.innerText = "";
+                warningElement.style.display = 'none';
+                infection.textClearTime = 0;
+            }
+
+            for (let i = infection.particles.length - 1; i >= 0; i--) {
+                let vp = infection.particles[i];
+
+                vp.vx += (Math.random() - 0.5) * 0.8;
+                vp.vy += (Math.random() - 0.5) * 0.8;
+
+                let speed = Math.hypot(vp.vx, vp.vy);
+                let maxSpeed = 4.5;
+                if (speed > maxSpeed) {
+                    vp.vx = (vp.vx / speed) * maxSpeed; vp.vy = (vp.vy / speed) * maxSpeed;
+                } else if (speed < 1.5) {
+                    vp.vx = (vp.vx / Math.max(speed, 0.1)) * 1.5; vp.vy = (vp.vy / Math.max(speed, 0.1)) * 1.5;
+                }
+
+                vp.x += vp.vx * delta; vp.y += vp.vy * delta;
+
+                let currSpeed = Math.hypot(vp.vx, vp.vy);
+                let moveAngle = Math.atan2(vp.vy, vp.vx);
+
+                let nearestCell = activeCell;
+                if (mitosis.state !== 'idle') {
+                    let distToA = Math.hypot(vp.x - activeCell.x, vp.y - activeCell.y);
+                    let distToB = Math.hypot(vp.x - mitosis.cellB.x, vp.y - mitosis.cellB.y);
+                    if (distToB < distToA) nearestCell = mitosis.cellB;
+                }
+
+                if (isOutsideCell(vp.x, vp.y, vp.radius)) {
+                    let ang = Math.atan2(nearestCell.y - vp.y, nearestCell.x - vp.x);
+                    ang += (Math.random() - 0.5) * 1.0;
+                    vp.vx = Math.cos(ang) * currSpeed; vp.vy = Math.sin(ang) * currSpeed;
+                    vp.x += Math.cos(ang) * 5; vp.y += Math.sin(ang) * 5;
+                }
+
+                if (Math.hypot(vp.x - nearestCell.x, vp.y - nearestCell.y) < 130 + vp.radius) {
+                    let ang = Math.atan2(vp.y - nearestCell.y, vp.x - nearestCell.x);
+                    vp.vx = Math.cos(ang) * currSpeed; vp.vy = Math.sin(ang) * currSpeed;
+                }
+
+                let destroyed = false;
+                for (let o of organelles) {
+                    if (Math.hypot(vp.x - o.x, vp.y - o.y) < o.radius + vp.radius) {
+                        if (o.type === 'lysosome') {
+                            destroyed = true; break;
+                        } else {
+                            let ang = Math.atan2(vp.y - o.y, vp.x - o.x);
+                            vp.vx = Math.cos(ang) * currSpeed; vp.vy = Math.sin(ang) * currSpeed;
+                        }
+                    }
+                }
+
+                if (destroyed) {
+                    infection.particles.splice(i, 1);
+                    continue;
+                }
+
+                virusLayer.beginFill(0xff4757);
+                let mouthWobble = Math.abs(Math.sin(survivalTime * 20)) * 0.6;
+                let visualRadius = vp.radius * 1.4;
+                virusLayer.moveTo(vp.x, vp.y);
+                virusLayer.arc(vp.x, vp.y, visualRadius, moveAngle + 0.2 + mouthWobble, moveAngle - 0.2 - mouthWobble + Math.PI * 2);
+                virusLayer.lineTo(vp.x, vp.y);
+                virusLayer.endFill();
+            }
+        }
+
+        function updateMitosis(deltaSec) {
+            // 1. TRIGGER THE EVENT
+            if (survivalTime >= mitosis.nextTriggerTime && mitosis.state === 'idle') {
+                mitosis.state = 'forming';
+                mitosis.eventStartTime = survivalTime;
+
+                warningElement.innerText = "CELL DIVISION INITIATED! PREPARE TO MIGRATE!";
+                warningElement.style.color = "#00d2d3";
+                warningElement.style.display = 'block';
+                setTimeout(() => warningElement.style.display = 'none', 5000);
+
+                let dir = Math.floor(Math.random() * 4);
+                let offset = 3400; // Increased to create a distinct tunnel!
+
+                mitosis.direction = dir;
+                mitosis.cellB = { x: activeCell.x, y: activeCell.y };
+                mitosis.bridge.maxWidth = 600;
+
+                if (dir === 0) mitosis.cellB.x += offset;
+                else if (dir === 1) mitosis.cellB.y += offset;
+                else if (dir === 2) mitosis.cellB.x -= offset;
+                else mitosis.cellB.y -= offset;
+
+                // Draw Cell B base background in backgroundLayer (under cytosol)
+                let cellBBg = new PIXI.Graphics();
+                cellBBg.beginFill(0x0d0d1a);
+                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX, activeCell.radiusY);
+                cellBBg.endFill();
+
+                cellBBg.lineStyle(15, 0x1e3799, 0.4);
+                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
+
+                cellBBg.lineStyle(8, 0x4a69bd, 0.8);
+                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX, activeCell.radiusY);
+
+                cellBBg.lineStyle(3, 0x82ccdd, 1.0);
+                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
+
+                backgroundLayer.addChildAt(cellBBg, 0); // Put it under cytosol!
+
+                // Spawn cytosol particles in Cell B
+                for (let i = 0; i < 800; i++) {
+                    let px = mitosis.cellB.x + (Math.random() * 2 - 1) * activeCell.radiusX;
+                    let py = mitosis.cellB.y + (Math.random() * 2 - 1) * activeCell.radiusY;
+
+                    if ((Math.pow(px - mitosis.cellB.x, 2) / Math.pow(activeCell.radiusX, 2)) + (Math.pow(py - mitosis.cellB.y, 2) / Math.pow(activeCell.radiusY, 2)) <= 1) {
+                        let blob = new PIXI.Graphics();
+                        let radius = 10 + Math.random() * 50;
+
+                        let colorRoll = Math.random();
+                        let color = 0x1e3799; // Base blue
+                        let alpha = 0.1 + Math.random() * 0.2;
+
+                        if (colorRoll > 0.95) {
+                            color = 0x82ccdd; // Bright Cyan
+                            alpha = 0.4 + Math.random() * 0.3;
+                            radius = 5 + Math.random() * 20;
+                        } else if (colorRoll > 0.7) {
+                            color = 0x6c5ce7; // Purple
+                            alpha = 0.2 + Math.random() * 0.2;
+                        } else if (colorRoll > 0.5) {
+                            color = 0x4a69bd; // Medium blue
+                        }
+
+                        blob.beginFill(color, alpha);
+                        blob.drawCircle(0, 0, radius);
+                        blob.endFill();
+                        blob.x = px;
+                        blob.y = py;
+                        blob.vx = (Math.random() - 0.5) * 0.6;
+                        blob.vy = (Math.random() - 0.5) * 0.6;
+                        blob.phase = Math.random() * Math.PI * 2;
+                        blob.baseAlpha = alpha;
+                        cytosolContainer.addChild(blob);
+                        cytosolParticles.push(blob);
+                    }
+                }
+
+                // Spawn Organelles in Cell B
+                let cellBOrganellesCount = 0;
+                let cellBAttempts = 0;
+                while (cellBOrganellesCount < 25 && cellBAttempts < 1000) {
+                    cellBAttempts++;
+                    let x = mitosis.cellB.x + (Math.random() * 2 - 1) * activeCell.radiusX * 0.85;
+                    let y = mitosis.cellB.y + (Math.random() * 2 - 1) * activeCell.radiusY * 0.85;
+
+                    let distToCenter = Math.hypot(x - mitosis.cellB.x, y - mitosis.cellB.y);
+                    if (distToCenter < 400) continue;
+
+                    let inCellB = ((Math.pow(x - mitosis.cellB.x, 2) / Math.pow(activeCell.radiusX - 50, 2)) + 
+                                   (Math.pow(y - mitosis.cellB.y, 2) / Math.pow(activeCell.radiusY - 50, 2)) < 1);
+                    if (!inCellB) continue;
+
+                    let isMito = Math.random() > 0.4;
+                    let sizeMult = isMito
+                        ? [1, 2, 3][Math.floor(Math.random() * 3)]
+                        : [0.5, 1.0, 1.5, 2.0][Math.floor(Math.random() * 4)];
+                    let radius = (isMito ? 35 : 25) * sizeMult;
+
+                    let overlap = false;
+                    for (let o of organelles) {
+                        if (Math.hypot(x - o.x, y - o.y) < o.radius + radius + 40) overlap = true;
+                    }
+                    if (overlap) continue;
+
+                    let orgObj = {
+                        type: isMito ? 'mitochondria' : 'lysosome',
+                        x: x, y: y,
+                        vx: (Math.random() - 0.5) * 0.4,
+                        vy: (Math.random() - 0.5) * 0.4,
+                        radius: radius,
+                        color: isMito ? C_MITO : C_LYSO,
+                        rotation: Math.random() * Math.PI * 2,
+                        rotSpeed: (Math.random() - 0.5) * 0.015
+                    };
+                    let sprite = createOrganelleGraphics(orgObj);
+                    orgObj.sprite = sprite;
+                    organellesLayer.addChild(sprite);
+                    organelles.push(orgObj);
+                    cellBOrganellesCount++;
+                }
+
+                // Initialize progenitor in sprouting phase
+                mitosis.progenitor = {
+                    active: true,
+                    x: activeCell.x,
+                    y: activeCell.y,
+                    startX: activeCell.x,
+                    startY: activeCell.y,
+                    targetX: mitosis.cellB.x,
+                    targetY: mitosis.cellB.y,
+                    startTime: survivalTime,
+                    state: 'sprouting',
+                    scale: 0.0
+                };
+
+                // GENERATE MICROTUBULES
+                mitosis.microtubules = [];
+                let isHorizontal = (dir === 0 || dir === 2);
+                let gapLength = 3400 - (activeCell.radiusX * 2); // Roughly the physical gap
+                let numLanes = 3;
+                let tubeLength = gapLength * 0.7; // Don't cover the very ends of the bridge
+
+                for (let i = -1; i <= 1; i++) {
+                    if (i === 0) continue; // Leave the dead center open
+
+                    let laneOffset = i * 150; // Distance from center
+
+                    if (isHorizontal) {
+                        let startX = Math.min(activeCell.x, mitosis.cellB.x) + activeCell.radiusX + (gapLength * 0.15);
+                        mitosis.microtubules.push({
+                            x: startX,
+                            y: activeCell.y + laneOffset - 10,
+                            w: tubeLength,
+                            h: 20 // Thickness
+                        });
+                    } else {
+                        let startY = Math.min(activeCell.y, mitosis.cellB.y) + activeCell.radiusY + (gapLength * 0.15);
+                        mitosis.microtubules.push({
+                            x: activeCell.x + laneOffset - 10,
+                            y: startY,
+                            w: 20, // Thickness
+                            h: tubeLength
+                        });
+                    }
+                }
+            }
+
+            // 2. PHASE TIMERS & THE SNAP
+            if (mitosis.state !== 'idle') {
+                let timeInEvent = survivalTime - mitosis.eventStartTime;
+
+                // Update Progenitor position & growth
+                if (mitosis.progenitor && mitosis.progenitor.active) {
+                    let p = mitosis.progenitor;
+                    let dirAngle = 0;
+                    if (mitosis.direction === 1) dirAngle = Math.PI / 2;
+                    else if (mitosis.direction === 2) dirAngle = Math.PI;
+                    else if (mitosis.direction === 3) dirAngle = -Math.PI / 2;
+
+                    if (timeInEvent < 10) {
+                        p.state = 'sprouting';
+                        let tSprout = timeInEvent / 10.0;
+                        let currDist = 130 + 100 * tSprout;
+                        p.x = activeCell.x + Math.cos(dirAngle) * currDist;
+                        p.y = activeCell.y + Math.sin(dirAngle) * currDist;
+                        p.scale = 0.2 * tSprout;
+                    } else if (timeInEvent < 40) {
+                        if (p.state === 'sprouting') {
+                            p.state = 'traveling';
+                            p.startX = p.x;
+                            p.startY = p.y;
+                            p.travelStartTime = survivalTime;
+                        }
+                        let tTravel = (survivalTime - p.travelStartTime) / 30.0;
+                        if (tTravel >= 1.0) tTravel = 1.0;
+                        p.x = p.startX + (p.targetX - p.startX) * tTravel;
+                        p.y = p.startY + (p.targetY - p.startY) * tTravel;
+                        p.scale = 0.2;
+                    } else {
+                        if (p.state === 'traveling') {
+                            p.state = 'growing';
+                            p.growStartTime = survivalTime;
+                        }
+                        let tGrow = (survivalTime - p.growStartTime) / 30.0; // 30 seconds to grow
+                        if (tGrow >= 1.0) {
+                            tGrow = 1.0;
+                            p.state = 'complete';
+                        }
+                        p.x = p.targetX;
+                        p.y = p.targetY;
+                        p.scale = 0.2 + 0.8 * tGrow;
+                    }
+                }
+
+                // Progenitor state updates only (laser hit is handled in the main shatter logic loop)
+
+                // 60 seconds of a fully open bridge before it starts to close
+                if (timeInEvent >= 60 && mitosis.state === 'forming') {
+                    mitosis.state = 'narrowing';
+                    warningElement.innerText = "BRIDGE NARROWING! CROSS NOW!";
+                    warningElement.style.color = "#ff9f43";
+                    warningElement.style.display = 'block';
+                    setTimeout(() => warningElement.style.display = 'none', 4000);
+                }
+
+                // 120 seconds (2 minutes) total event time -> THE SNAP
+                if (timeInEvent >= 120) {
+                    // --- THE SNAP (WITH BRIDGE SURVIVORS) ---
+
+                    // 1. Define the Bridge bounds so we know what to save
+                    let isHorizontal = (mitosis.direction === 0 || mitosis.direction === 2);
+                    let halfW = mitosis.currentWidth / 2;
+
+                    let inBridge = (obj) => {
+                        if (isHorizontal) {
+                            let minX = Math.min(activeCell.x, mitosis.cellB.x);
+                            let maxX = Math.max(activeCell.x, mitosis.cellB.x);
+                            return (obj.x >= minX && obj.x <= maxX && obj.y >= activeCell.y - halfW && obj.y <= activeCell.y + halfW);
+                        } else {
+                            let minY = Math.min(activeCell.y, mitosis.cellB.y);
+                            let maxY = Math.max(activeCell.y, mitosis.cellB.y);
+                            return (obj.x >= activeCell.x - halfW && obj.x <= activeCell.x + halfW && obj.y >= minY && obj.y <= maxY);
+                        }
+                    };
+
+                    // 2. Rescue the hazards currently trapped inside the bridge or Cell B!
+                    let inCellB = (obj) => ((Math.pow(obj.x - mitosis.cellB.x, 2) / Math.pow(activeCell.radiusX, 2)) + (Math.pow(obj.y - mitosis.cellB.y, 2) / Math.pow(activeCell.radiusY, 2)) <= 1);
+                    let survivingVesicles = vesicles.filter(v => inBridge(v) || inCellB(v));
+                    let survivingViruses = infection.particles.filter(vp => inBridge(vp) || inCellB(vp));
+                    let survivingOrganelles = organelles.filter(o => inBridge(o) || inCellB(o));
+
+                    // 3. Shift the active coordinates to the new home
+                    activeCell.x = mitosis.cellB.x;
+                    activeCell.y = mitosis.cellB.y;
+
+                    // 4. Kill players who didn't make it to Cell B (or teleport them if Dev Mode is on)
+                    players.forEach(p => {
+                        if (p.alive && isOutsideCell(p.x, p.y)) {
+                            if (devMode) {
+                                // Auto-Teleport the dev to the center of the new cell!
+                                p.x = activeCell.x;
+                                p.y = activeCell.y;
+                            } else {
+                                p.alive = false; // Normal players die
+                            }
+                        }
+                    });
+
+                    // 5. Vaporize old hazards, but keep the rescued bridge/cell B survivors!
+                    vesicles = survivingVesicles;
+                    infection.particles = survivingViruses;
+                    if (infection.particles.length === 0) infection.state = 'none';
+
+                    // 6. Rebuild the world! (This draws the Nucleus for the new activeCell)
+                    generateMap(true);
+
+                    // 7. Inject the rescued organelles into the new cell
+                    organelles = survivingOrganelles;
+                    organellesLayer.removeChildren();
+                    organellesLayer.clear();
+                    organelles.forEach(o => organellesLayer.addChild(o.sprite));
+
+                    mitosisLayer.clear(); // Hide the bridge
+
+                    // 8. Reset the cycle for another 4 minutes later
+                    mitosis.state = 'idle';
+                    mitosis.nextTriggerTime = survivalTime + 240;
+                    if (mitosis.progenitor) mitosis.progenitor.active = false;
+                }
+            }
+        }
+
+        function drawMitosisVisuals() {
+            mitosisLayer.clear();
+            if (mitosis.state === 'idle') {
+                if (window.bgMask) {
+                    window.bgMask.clear();
+                    window.bgMask.beginFill(0xffffff);
+                    window.bgMask.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+                    window.bgMask.endFill();
+                }
+                return;
+            }
+
+            // Update mask to cover both cells and the bridge
+            if (window.bgMask) {
+                window.bgMask.clear();
+                window.bgMask.beginFill(0xffffff);
+                window.bgMask.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+                window.bgMask.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX, activeCell.radiusY);
+                
+                let isHorizontal = (mitosis.direction === 0 || mitosis.direction === 2);
+                let halfW = mitosis.currentWidth / 2;
+                if (isHorizontal) {
+                    let minX = Math.min(activeCell.x, mitosis.cellB.x);
+                    let maxX = Math.max(activeCell.x, mitosis.cellB.x);
+                    window.bgMask.drawRect(minX, activeCell.y - halfW, maxX - minX, mitosis.currentWidth);
+                } else {
+                    let minY = Math.min(activeCell.y, mitosis.cellB.y);
+                    let maxY = Math.max(activeCell.y, mitosis.cellB.y);
+                    window.bgMask.drawRect(activeCell.x - halfW, minY, mitosis.currentWidth, maxY - minY);
+                }
+                window.bgMask.endFill();
+            }
+
+            let timeInEvent = survivalTime - mitosis.eventStartTime;
+
+            if (mitosis.state === 'narrowing') {
+                // Shrink from maxWidth to 0 over a 60-second window
+                let narrowProgress = (timeInEvent - 60) / 60.0;
+                mitosis.currentWidth = Math.max(0, mitosis.bridge.maxWidth * (1 - narrowProgress));
+            } else {
+                mitosis.currentWidth = mitosis.bridge.maxWidth;
+            }
+
+            // Draw Cell B background moved to backgroundLayer to allow cytosol rendering on top
+
+            // 3. Draw the Seamless Bridge
+            mitosisLayer.beginFill(0x0d0d1a);
+            mitosisLayer.lineStyle(0);
+
+            let isHorizontal = (mitosis.direction === 0 || mitosis.direction === 2);
+            let gapStart, gapLength;
+
+            if (isHorizontal) {
+                let minX = Math.min(activeCell.x, mitosis.cellB.x);
+                let maxX = Math.max(activeCell.x, mitosis.cellB.x);
+
+                // Start drawing exactly at the edge of the first cell
+                gapStart = minX + activeCell.radiusX - 10;
+                // Stop drawing exactly at the edge of the second cell
+                gapLength = (maxX - activeCell.radiusX + 10) - gapStart;
+
+                // Floor
+                mitosisLayer.drawRect(gapStart, activeCell.y - mitosis.currentWidth / 2, gapLength, mitosis.currentWidth);
+
+                // Walls
+                mitosisLayer.lineStyle(8, 0x4a69bd, 0.8);
+                mitosisLayer.moveTo(gapStart, activeCell.y - mitosis.currentWidth / 2);
+                mitosisLayer.lineTo(gapStart + gapLength, activeCell.y - mitosis.currentWidth / 2);
+                mitosisLayer.moveTo(gapStart, activeCell.y + mitosis.currentWidth / 2);
+                mitosisLayer.lineTo(gapStart + gapLength, activeCell.y + mitosis.currentWidth / 2);
+            } else {
+                let minY = Math.min(activeCell.y, mitosis.cellB.y);
+                let maxY = Math.max(activeCell.y, mitosis.cellB.y);
+
+                gapStart = minY + activeCell.radiusY - 10;
+                gapLength = (maxY - activeCell.radiusY + 10) - gapStart;
+
+                // Floor
+                mitosisLayer.drawRect(activeCell.x - mitosis.currentWidth / 2, gapStart, mitosis.currentWidth, gapLength);
+
+                // Walls
+                mitosisLayer.lineStyle(8, 0x4a69bd, 0.8);
+                mitosisLayer.moveTo(activeCell.x - mitosis.currentWidth / 2, gapStart);
+                mitosisLayer.lineTo(activeCell.x - mitosis.currentWidth / 2, gapStart + gapLength);
+                mitosisLayer.moveTo(activeCell.x + mitosis.currentWidth / 2, gapStart);
+                mitosisLayer.lineTo(activeCell.x + mitosis.currentWidth / 2, gapStart + gapLength);
+            }
+
+            // Draw Microtubules (Static Obstacles)
+            mitosisLayer.beginFill(0x2ecc71); // Green structural color
+            mitosisLayer.lineStyle(2, 0x27ae60, 1);
+            mitosis.microtubules.forEach(tube => {
+                if (mitosis.currentWidth > 350) {
+                    mitosisLayer.drawRect(tube.x, tube.y, tube.w, tube.h);
+                }
+            });
+            mitosisLayer.endFill();
+
+            // 4. Overlapping lines cleanup removed to prevent covering cytosol particles
+
+            // 5. THE DEATH RING (Contractile Wave)
+            let sweepProgress = timeInEvent / 120.0; // Moves from 0.0 to 1.0 over the 120s event
+
+            // FIX: Set a bright red line style so the laser is actually visible!
+            mitosisLayer.lineStyle(8, 0xff4757, 0.8);
+
+            // Toggle visibility of Cell A's nucleus and Golgi/ER based on whether the laser crossed their center
+            let crossedCenter = false;
+            if (mitosis.direction === 0) {
+                let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                crossedCenter = (ringX >= activeCell.x);
+            } else if (mitosis.direction === 1) {
+                let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                crossedCenter = (ringY >= activeCell.y);
+            } else if (mitosis.direction === 2) {
+                let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                crossedCenter = (ringX <= activeCell.x);
+            } else {
+                let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                crossedCenter = (ringY <= activeCell.y);
+            }
+
+            if (crossedCenter) {
+                if (nucleusLayer.visible) {
+                    nucleusLayer.visible = false;
+                    golgiERContainer.visible = false;
+                    // Spawn a massive burst of nuclear/membrane vesicles on destruction!
+                    spawnVesicles(activeCell.x, activeCell.y, 15, 'membrane', 0x6c5ce7);
+                }
+            } else {
+                nucleusLayer.visible = true;
+                golgiERContainer.visible = true;
+            }
+
+            if (mitosis.direction === 0) { // Cell B is Right, laser moves Left to Right
+                let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                let dx = ringX - activeCell.x;
+                let h = activeCell.radiusY * Math.sqrt(Math.max(0, 1 - (dx * dx) / (activeCell.radiusX * activeCell.radiusX)));
+                mitosisLayer.moveTo(ringX, activeCell.y - h);
+                mitosisLayer.lineTo(ringX, activeCell.y + h);
+            } else if (mitosis.direction === 1) { // Cell B is Down, laser moves Top to Bottom
+                let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                let dy = ringY - activeCell.y;
+                let w = activeCell.radiusX * Math.sqrt(Math.max(0, 1 - (dy * dy) / (activeCell.radiusY * activeCell.radiusY)));
+                mitosisLayer.moveTo(activeCell.x - w, ringY);
+                mitosisLayer.lineTo(activeCell.x + w, ringY);
+            } else if (mitosis.direction === 2) { // Cell B is Left, laser moves Right to Left
+                let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                let dx = ringX - activeCell.x;
+                let h = activeCell.radiusY * Math.sqrt(Math.max(0, 1 - (dx * dx) / (activeCell.radiusX * activeCell.radiusX)));
+                mitosisLayer.moveTo(ringX, activeCell.y - h);
+                mitosisLayer.lineTo(ringX, activeCell.y + h);
+            } else { // Cell B is Up, laser moves Bottom to Top
+                let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                let dy = ringY - activeCell.y;
+                let w = activeCell.radiusX * Math.sqrt(Math.max(0, 1 - (dy * dy) / (activeCell.radiusY * activeCell.radiusY)));
+                mitosisLayer.moveTo(activeCell.x - w, ringY);
+                mitosisLayer.lineTo(activeCell.x + w, ringY);
+            }
+
+            // Draw Traveling Progenitor
+            if (mitosis.progenitor && mitosis.progenitor.active) {
+                let p = mitosis.progenitor;
+                let dirAngle = 0;
+                if (mitosis.direction === 1) dirAngle = Math.PI / 2;
+                else if (mitosis.direction === 2) dirAngle = Math.PI;
+                else if (mitosis.direction === 3) dirAngle = -Math.PI / 2;
+
+                // Draw connecting neck if sprouting
+                if (p.state === 'sprouting') {
+                    mitosisLayer.lineStyle(24 * p.scale, 0x6c5ce7, 0.8);
+                    mitosisLayer.moveTo(activeCell.x + Math.cos(dirAngle) * 125, activeCell.y + Math.sin(dirAngle) * 125);
+                    mitosisLayer.lineTo(p.x, p.y);
+                }
+
+                // Draw Progenitor Nucleus
+                mitosisLayer.beginFill(0x130f26, 0.95);
+                mitosisLayer.lineStyle(5 * p.scale, 0x6c5ce7, 0.8);
+                mitosisLayer.drawCircle(p.x, p.y, 130 * p.scale);
+                mitosisLayer.endFill();
+
+                // Progenitor Nucleolus
+                let nucX = p.x + Math.cos(0.5) * 30 * p.scale;
+                let nucY = p.y + Math.sin(0.5) * 30 * p.scale;
+                mitosisLayer.beginFill(0x4834d4, 0.9);
+                mitosisLayer.lineStyle(3 * p.scale, 0x686de0, 0.8);
+                mitosisLayer.drawCircle(nucX, nucY, 35 * p.scale);
+                mitosisLayer.endFill();
+
+                // Draw Progenitor Golgi & ER Arcs
+                if (p.state === 'growing' || p.state === 'complete') {
+                    ARCS.forEach(arc => {
+                        let r = arc.r * p.scale;
+                        let thick = arc.thick * p.scale;
+                        let span = arc.span;
+                        
+                        mitosisLayer.lineStyle({ width: thick, color: arc.color, alpha: 0.85, cap: PIXI.LINE_CAP.ROUND });
+                        
+                        let startAng = globalRotation - span;
+                        let endAng = globalRotation + span;
+                        
+                        mitosisLayer.arc(p.x, p.y, r, startAng, endAng);
+                        
+                        // Arcs ends
+                        mitosisLayer.beginFill(arc.color, 0.9);
+                        mitosisLayer.lineStyle(0);
+                        mitosisLayer.drawCircle(p.x + Math.cos(startAng) * r, p.y + Math.sin(startAng) * r, thick / 2 + 3 * p.scale);
+                        mitosisLayer.drawCircle(p.x + Math.cos(endAng) * r, p.y + Math.sin(endAng) * r, thick / 2 + 3 * p.scale);
+                        mitosisLayer.endFill();
+                    });
+                }
+            }
+        }
+
+        function drawTraces() {
+            trailGlow.clear();
+            trailCore.clear();
+            players.forEach(p => {
+                p.traceSegments.forEach(seg => {
+                    if (seg.length < 2) return;
+                    trailGlow.lineStyle(TRACE_WIDTH + 4, p.color, 0.6);
+                    trailGlow.moveTo(seg[0].x, seg[0].y);
+                    for (let i = 1; i < seg.length; i++) trailGlow.lineTo(seg[i].x, seg[i].y);
+
+                    trailCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
+                    trailCore.moveTo(seg[0].x, seg[0].y);
+                    for (let i = 1; i < seg.length; i++) trailCore.lineTo(seg[i].x, seg[i].y);
+                });
+
+                // Explicitly draw the Player's Head
+                if (p.alive) {
+
+                    // --- TARGET MODE AURA ---
+                    let auraColor = p.targetMode === 'self' ? 0x2ecc71 : 0xe74c3c;
+                    trailGlow.beginFill(auraColor, 0.6);
+                    trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 2.5);
+                    trailGlow.endFill();
+
+                    if (p.effects.hunterTimer > 0) {
+                        trailCore.beginFill(0xf1c40f); // Pacman yellow
+                        let mouthAngle = Math.abs(Math.sin(survivalTime * 15)) * 0.6;
+                        trailCore.moveTo(p.x, p.y);
+                        trailCore.arc(p.x, p.y, TRACE_WIDTH * 2, p.angle + mouthAngle, p.angle + Math.PI * 2 - mouthAngle);
+                        trailCore.lineTo(p.x, p.y);
+                        trailCore.endFill();
+                    } else {
+                        trailCore.beginFill(0xffffff);
+                        trailCore.drawCircle(p.x, p.y, TRACE_WIDTH);
+                        trailCore.endFill();
+                    }
+
+                    // Ghost Mode Visual Indicator (Pulsing Forcefield)
+                    if (p.effects.ghostTimer > 0) {
+                        let pulse = Math.abs(Math.sin(survivalTime * 5)) * 5;
+                        trailGlow.beginFill(p.color, 0.4);
+                        trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 4 + pulse);
+                        trailGlow.endFill();
+                    }
+                }
+            });
+        }
+
+        // --- Dynamic Camera Overrides ---
+        function updateCamera() {
+            let alivePlayers = players.filter(p => p.alive);
+            let isVirus = (infection.state === 'warning');
+
+            // FIX: Only trigger the massive reveal camera for the first 5 seconds!
+            let isMitosisReveal = (typeof mitosis !== 'undefined' && mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+
+            let isEmergency = isVirus || isMitosisReveal;
+
+            // --- CAMERA ENGINE (Shared vs. Split-Screen) ---
+            if (cameraMode === 'shared' || alivePlayers.length <= 1 || isEmergency) {
+                world.visible = true;
+                splitSprites.forEach(s => s.visible = false);
+
+                if (isEmergency) {
+                    let camCenterX = activeCell.x;
+                    let camCenterY = activeCell.y;
+                    let viewSpan = 3000;
+
+                    if (isMitosisReveal) {
+                        camCenterX = (activeCell.x + mitosis.cellB.x) / 2;
+                        camCenterY = (activeCell.y + mitosis.cellB.y) / 2;
+                        viewSpan = 6500;
+                    }
+
+                    let targetZoom = Math.min((app.screen.width - 100) / viewSpan, (app.screen.height - 100) / viewSpan);
+                    world.scale.x += (targetZoom - world.scale.x) * 0.05;
+                    world.scale.y += (targetZoom - world.scale.y) * 0.05;
+
+                    let targetX = (app.screen.width / 2) - (camCenterX * world.scale.x);
+                    let targetY = (app.screen.height / 2) - (camCenterY * world.scale.y);
+
+                    world.x += (targetX - world.x) * 0.05;
+                    world.y += (targetY - world.y) * 0.05;
+                } else if (alivePlayers.length > 0) {
+                    let minX = Math.min(...alivePlayers.map(p => p.x));
+                    let maxX = Math.max(...alivePlayers.map(p => p.x));
+                    let minY = Math.min(...alivePlayers.map(p => p.y));
+                    let maxY = Math.max(...alivePlayers.map(p => p.y));
+
+                    let targetCenterX = (minX + maxX) / 2;
+                    let targetCenterY = (minY + maxY) / 2;
+
+                    let distX = maxX - minX;
+                    let distY = maxY - minY;
+
+                    let zoomX = (app.screen.width - 200) / (distX || 1);
+                    let zoomY = (app.screen.height - 200) / (distY || 1);
+                    let targetZoom = Math.min(zoomX, zoomY, 1.2);
+
+                    world.scale.x += (targetZoom - world.scale.x) * 0.1;
+                    world.scale.y += (targetZoom - world.scale.y) * 0.1;
+                    world.x += ((app.screen.width / 2) - (targetCenterX * world.scale.x) - world.x) * 0.1;
+                    world.y += ((app.screen.height / 2) - (targetCenterY * world.scale.y) - world.y) * 0.1;
+                }
+            } else {
+                // FIX 1: The world MUST be visible for the renderTexture to "see" it
+                world.visible = true;
+
+                let w = app.screen.width;
+                let h = app.screen.height;
+                let columns = alivePlayers.length > 2 ? 2 : 2;
+                let rows = alivePlayers.length > 2 ? 2 : 1;
+                let viewW = Math.floor(w / columns);
+                let viewH = Math.floor(h / rows);
+
+                while (splitSprites.length < alivePlayers.length) {
+                    let rt = PIXI.RenderTexture.create({ width: viewW, height: viewH });
+                    let sprite = new PIXI.Sprite(rt);
+                    app.stage.addChild(sprite); // Add to screen
+                    splitTextures.push(rt);
+                    splitSprites.push(sprite);
+                }
+
+                for (let i = 0; i < alivePlayers.length; i++) {
+                    let p = alivePlayers[i];
+                    let sprite = splitSprites[i];
+                    let rt = splitTextures[i];
+
+                    if (rt.width !== viewW || rt.height !== viewH) rt.resize(viewW, viewH);
+
+                    sprite.x = (i % columns) * viewW;
+                    sprite.y = Math.floor(i / columns) * viewH;
+                    sprite.visible = true;
+
+                    // Center the invisible world on this specific player
+                    let splitZoom = 1.0;
+                    world.scale.set(splitZoom);
+                    world.x = (viewW / 2) - (p.x * splitZoom);
+                    world.y = (viewH / 2) - (p.y * splitZoom);
+
+                    // SNAPSHOT: Because world is visible, this now captures the graphics!
+                    app.renderer.render(world, { renderTexture: rt });
+
+                    // Draw a subtle border around each viewport
+                    let ctx = new PIXI.Graphics();
+                    ctx.lineStyle(2, 0x00d2d3, 0.5);
+                    ctx.drawRect(0, 0, viewW, viewH);
+                    app.renderer.render(ctx, { renderTexture: rt, clear: false });
+                }
+
+                // FIX 2: Now that snapshots are taken, hide the main world so it doesn't draw over our split UI
+                world.visible = false;
+
+                for (let i = alivePlayers.length; i < splitSprites.length; i++) {
+                    splitSprites[i].visible = false;
+                }
+            }
+        }
+
+
+        // --- 7. Main Loop & Input ---
+        const keys = {};
+        window.addEventListener('keydown', e => {
+            keys[e.key] = true;
+            if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Tab", "½"].includes(e.key)) e.preventDefault();
+
+            // --- DEBUG / DEV MODE HOTKEYS ---
+            if (e.key === '½' || e.key === '`' || e.key === '~') {
+                devMode = !devMode;
+                document.getElementById('devIndicator').style.display = devMode ? 'block' : 'none';
+            }
+            if (devMode && e.key === 'Tab') {
+                survivalTime += 15.0; // Instantly jump 15 seconds forward
+            }
+
+            // --- DYNAMIC TOGGLE LOGIC ---
+            players.forEach(p => {
+                let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+                if (!p.alive || p.isBot || infection.state === 'warning' || isMitosisReveal) return;
+
+                if (e.key === p.controls.toggle || e.key === p.controls.toggleAlt) {
+                    p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
+                }
+            });
+        });
+        window.addEventListener('keyup', e => keys[e.key] = false);
+
+        // PEEK LOGIC: Show UI on hover, hide when leaving
+        uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
+        uiElement.addEventListener('mouseleave', () => {
+            if (isPlaying) uiElement.classList.add('hidden-ui');
+        });
+
+        window.toggleFullScreen = function () {
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => console.log(err));
+            else if (document.exitFullscreen) document.exitFullscreen();
+        };
+
+        function gameLoop(delta) {
+            if (!isPlaying) return;
+
+            // Rebuild spatial grid once per frame at the start
+            rebuildSpatialGrid();
+
+            let deltaSec = app.ticker.deltaMS / 1000;
+
+            // --- FUZZER SOAK-TEST UTILITY ---
+            if (devMode && (keys['f'] || keys['F'])) {
+                delta *= 4.0;
+                deltaSec *= 4.0;
+
+                if (mitosis.state === 'idle') {
+                    mitosis.nextTriggerTime = 0.1;
+                }
+
+                if (infection.state === 'none') {
+                    infection.nextWarningTime = Math.min(infection.nextWarningTime, survivalTime + 1.0);
+                }
+
+                let aliveCount = players.filter(p => p.alive).length;
+                if (aliveCount === 0) {
+                    startRound();
+                    return;
+                }
+            }
+            let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+            let isCellFrozen = (infection.state === 'warning') || isMitosisReveal;
+
+            if (!isCellFrozen) {
+                globalRotation += 0.0015 * delta;
+                rotatingContainer.rotation = globalRotation;
+                drawTraces();
+                updateDriftingOrganelles(delta);
+                updateVesicles(delta);
+            }
+            updateMitosis(deltaSec);
+            drawMitosisVisuals();
+
+            updateInfection(delta, deltaSec);
+            updateCamera();
+
+            // The master clock must run in ALL modes so the virus and combos work!
+            survivalTime += deltaSec;
+
+            let totalPlayers = currentMode + aiCount;
+            // Only update the UI text to show the timer if it's a Solo game and not frozen
+            if (totalPlayers === 1 && !isCellFrozen) {
+                if (!players.some(p => p.alive) && !devMode) {
+                    uiElement.classList.add('visible');
+                    uiElement.classList.remove('hidden-ui');
+                    document.getElementById('scoreboard').innerText = `You Survived: ${survivalTime.toFixed(1)}s!`;
+                    app.ticker.stop();
+                } else {
+                    scoreText.innerText = `Survival Time: ${survivalTime.toFixed(1)}s`;
+                }
+            }
+
+            let activePlayers = players.filter(p => p.alive);
+            if (totalPlayers === 1 && activePlayers.length === 0) {
+                isPlaying = false;
+                uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
+                scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s`;
+                return;
+            } else if (totalPlayers > 1 && activePlayers.length <= 1) {
+                isPlaying = false;
+                uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
+                if (activePlayers.length === 1) {
+                    playerWins[activePlayers[0].id]++; // Add a point to the survivor
+                }
+
+                // Build the dynamic score string based on how many players there are
+                let scoreStr = `P1: ${playerWins[1]} | P2: ${playerWins[2]}`;
+                if (totalPlayers >= 3) scoreStr += ` | P3: ${playerWins[3]}`;
+                if (totalPlayers >= 4) scoreStr += ` | P4: ${playerWins[4]}`;
+                scoreText.innerText = scoreStr;
+                return;
+            }
+
+            uiBarsLayer.clear();
+
+            // --- DEATH RING SHATTER LOGIC (Organelles & Golgi) ---
+            if (mitosis.state !== 'idle') {
+                let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                let ringX = 0, ringY = 0;
+
+                if (mitosis.direction === 0) ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                else if (mitosis.direction === 1) ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                else if (mitosis.direction === 2) ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                else ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+
+                // Shatter Organelles
+                for (let i = organelles.length - 1; i >= 0; i--) {
+                    let org = organelles[i];
+                    let caught = false;
+                    if (mitosis.direction === 0 && org.x < ringX) caught = true;
+                    else if (mitosis.direction === 1 && org.y < ringY) caught = true;
+                    else if (mitosis.direction === 2 && org.x > ringX) caught = true;
+                    else if (mitosis.direction === 3 && org.y > ringY) caught = true;
+
+                    if (caught) {
+                        spawnVesicles(org.x, org.y, 5, org.type, org.color);
+                        if (org.sprite) {
+                            organellesLayer.removeChild(org.sprite);
+                            org.sprite.destroy();
+                        }
+                        organelles.splice(i, 1);
+                    }
+                }
+
+                // Shatter Golgi Arcs
+                let arcsChanged = false;
+                for (let i = activeArcs.length - 1; i >= 0; i--) {
+                    let arc = activeArcs[i];
+                    let caught = false;
+
+                    if (arc.type === 'ER') {
+                        let steps = 20;
+                        for (let s = 0; s <= steps; s++) {
+                            let a = -arc.span + (s / steps) * (arc.span * 2);
+                            let px = activeCell.x + Math.cos(globalRotation + a) * arc.r;
+                            let py = activeCell.y + Math.sin(globalRotation + a) * arc.r;
+
+                            if (mitosis.direction === 0 && px < ringX) caught = true;
+                            else if (mitosis.direction === 1 && py < ringY) caught = true;
+                            else if (mitosis.direction === 2 && px > ringX) caught = true;
+                            else if (mitosis.direction === 3 && py > ringY) caught = true;
+
+                            if (caught) break;
+                        }
+                    } else if (arc.type === 'Golgi' && window.golgiData && window.golgiData.layers) {
+                        let layerObj = window.golgiData.layers.find(l => l.radius === arc.r);
+                        if (layerObj) {
+                            for (let pt of layerObj.points) {
+                                let rx = pt.lx * Math.cos(window.golgiData.rot) - pt.ly * Math.sin(window.golgiData.rot) + window.golgiData.x;
+                                let ry = pt.lx * Math.sin(window.golgiData.rot) + pt.ly * Math.cos(window.golgiData.rot) + window.golgiData.y;
+                                let px = activeCell.x + rx * Math.cos(globalRotation) - ry * Math.sin(globalRotation);
+                                let py = activeCell.y + rx * Math.sin(globalRotation) + ry * Math.cos(globalRotation);
+
+                                if (mitosis.direction === 0 && px < ringX) caught = true;
+                                else if (mitosis.direction === 1 && py < ringY) caught = true;
+                                else if (mitosis.direction === 2 && px > ringX) caught = true;
+                                else if (mitosis.direction === 3 && py > ringY) caught = true;
+
+                                if (caught) break;
+                            }
+                        }
+                    }
+
+                    if (caught) {
+                        for (let v = 0; v < 10; v++) {
+                            let a = Math.random() * Math.PI * 2;
+                            spawnVesicles(activeCell.x + Math.cos(a) * arc.r, activeCell.y + Math.sin(a) * arc.r, 1, 'membrane', C_MEMB);
+                        }
+                        activeArcs.splice(i, 1);
+                        arcsChanged = true;
+                    }
+                }
+                if (arcsChanged) drawArcs();
+            }
+
+            players.forEach(p => {
+                if (!p.alive) return;
+
+                if (!isCellFrozen) {
+                    if (p.effects.speedTimer > 0) p.effects.speedTimer -= deltaSec;
+                    else p.effects.speedLevel = 1;
+
+                    if (p.effects.golgiTimer > 0) p.effects.golgiTimer -= deltaSec;
+
+                    // NEW: Ghost Mode Timer countdown!
+                    if (p.effects.ghostTimer > 0) p.effects.ghostTimer -= deltaSec;
+
+                    if (p.effects.hunterTimer > 0) p.effects.hunterTimer -= deltaSec;
+                }
+
+                let barOffset = 20;
+
+                // 1. Ghost Mode Bar (Highest Priority - Flashes White/Purple!)
+                if (p.effects.ghostTimer > 0) {
+                    let ghostColor = Math.floor(survivalTime * 10) % 2 === 0 ? 0xffffff : 0xa29bfe;
+                    uiBarsLayer.beginFill(ghostColor);
+                    // Ghost mode maxes at 10 seconds, so we divide by 10.0 to get the percentage
+                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.ghostTimer / 10.0), 5);
+                    uiBarsLayer.endFill();
+                    barOffset += 8; // Push the next bar up
+                }
+
+                // 1.5 Hunter Mode Bar (High Priority - Flashes Yellow/Orange)
+                if (p.effects.hunterTimer > 0) {
+                    let hunterColor = Math.floor(survivalTime * 10) % 2 === 0 ? 0xf1c40f : 0xe67e22;
+                    uiBarsLayer.beginFill(hunterColor);
+                    // Hunter mode maxes at 10 seconds, so we divide by 10.0 to get the percentage
+                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.hunterTimer / 10.0), 5);
+                    uiBarsLayer.endFill();
+                    barOffset += 8;
+                }
+
+                // 2. Golgi Timer Bar (Membrane crossing)
+                if (p.effects.golgiTimer > 0) {
+                    uiBarsLayer.beginFill(0x00cec9);
+                    // Golgi mode maxes at 15 seconds
+                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.golgiTimer / 15.0), 5);
+                    uiBarsLayer.endFill();
+                    barOffset += 8; // Push the next bar up
+                }
+
+                // 3. Speed Timer Bar
+                if (p.effects.speedTimer > 0) {
+                    if (p.effects.speedLevel === 2 && Math.floor(survivalTime * 10) % 2 === 0) uiBarsLayer.beginFill(0xf1c40f);
+                    else uiBarsLayer.beginFill(0xe17055);
+                    // Speed maxes at 15 seconds
+                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.speedTimer / 15.0), 5);
+                    uiBarsLayer.endFill();
+                }
+
+                if (isCellFrozen) return;
+
+                if (p.isBot) {
+                    updateBotAI(p, delta);
+                } else {
+                    if (keys[p.controls.left] || keys[p.controls.leftAlt]) p.angle -= 0.08 * delta;
+                    if (keys[p.controls.right] || keys[p.controls.rightAlt]) p.angle += 0.08 * delta;
+                }
+
+                let effectSpeedBonus = p.effects.speedTimer > 0 ? (p.effects.speedLevel === 2 ? 2.0 : 1.0) : 0;
+                let actualSpeed = currentSpeed + effectSpeedBonus;
+
+                let nextX = p.x + Math.cos(p.angle) * actualSpeed * delta;
+                let nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
+                let isGhost = p.effects.ghostTimer > 0;
+
+                // 1. Trace and Organelle Collisions
+                if (!p.isGap && !isGhost && !devMode && checkCollision(nextX, nextY, p)) { // <-- Added !devMode
+                    p.alive = false;
+                    return;
+                }
+
+                // 1.5 Microtubule Scaffolding Collision
+                if (mitosis.state !== 'idle' && !p.isGap && !isGhost && !devMode && mitosis.currentWidth > 350) { // <-- Added !devMode
+                    for (let tube of mitosis.microtubules) {
+                        if (nextX > tube.x - TRACE_HITBOX && nextX < tube.x + tube.w + TRACE_HITBOX &&
+                            nextY > tube.y - TRACE_HITBOX && nextY < tube.y + tube.h + TRACE_HITBOX) {
+                            p.alive = false;
+                            return;
+                        }
+                    }
+                }
+
+                // 2. Viral Swarm Collisions (Added Ghost & Dev Immunity)
+                if (infection.particles.length > 0 && !isGhost && !devMode) { // <-- Added !devMode
+                    for (let i = infection.particles.length - 1; i >= 0; i--) {
+                        let vp = infection.particles[i];
+                        if (Math.hypot(nextX - vp.x, nextY - vp.y) < (vp.radius * 1.4) + TRACE_HITBOX) {
+                            if (p.effects.hunterTimer > 0) {
+                                infection.particles.splice(i, 1);
+                            } else {
+                                p.alive = false;
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Vesicle Collection Logic
+                for (let i = vesicles.length - 1; i >= 0; i--) {
+                    let v = vesicles[i];
+                    if (Math.hypot(nextX - v.x, nextY - v.y) < v.radius + TRACE_WIDTH + 6) {
+
+                        if (v.type === 'membrane') {
+                            if (p.effects.ghostTimer > 0) {
+                                p.effects.ghostTimer = Math.min(10.0, p.effects.ghostTimer + 3.0);
+                            } else {
+                                if (survivalTime > p.effects.blueWindow) p.effects.blueCount = 0;
+                                p.effects.blueCount++;
+                                p.effects.blueWindow = survivalTime + 10.0;
+
+                                if (p.effects.blueCount >= 3) {
+                                    p.effects.ghostTimer = 10.0;
+                                    p.effects.blueCount = 0;
+                                }
+                                p.effects.golgiTimer = Math.min(15.0, p.effects.golgiTimer + EFFECT_DURATION);
+                            }
+                        }
+                        else if (v.type === 'lysosome') {
+                            if (survivalTime > p.effects.redWindow) p.effects.redCount = 0;
+                            p.effects.redCount++;
+                            p.effects.redWindow = survivalTime + 10.0;
+
+                            if (p.effects.redCount >= 5) {
+                                p.effects.hunterTimer = 10.0;
+                                p.effects.redCount = 0;
+                            } else if (p.effects.redCount === 3) {
+                                deleteOldestTrace(p, 0.5); // 50% wipe
+                            }
+                            if (p.traceSegments.length > 1) p.traceSegments.shift();
+                        }
+                        else if (v.type === 'mitochondria') {
+                            let targets = [];
+
+                            if (p.targetMode === 'self' || currentMode === 1) {
+                                targets.push(p);
+                            } else {
+                                let opponents = players.filter(op => op.id !== p.id && op.alive);
+                                if (opponents.length > 0) {
+                                    targets.push(opponents[Math.floor(Math.random() * opponents.length)]);
+                                } else {
+                                    targets.push(p);
+                                }
+                            }
+
+                            targets.forEach(target => {
+                                if (target.effects.speedLevel === 2) {
+                                    target.effects.speedTimer = Math.min(10.0, target.effects.speedTimer + 3.0);
+                                    target.effects.lastMitoHit = survivalTime;
+                                } else {
+                                    if (target.effects.lastMitoHit && (survivalTime - target.effects.lastMitoHit) < 3.0) target.effects.speedLevel = 2;
+                                    else target.effects.speedLevel = 1;
+
+                                    target.effects.speedTimer = Math.min(15.0, target.effects.speedTimer + EFFECT_DURATION);
+                                    target.effects.lastMitoHit = survivalTime;
+                                }
+                            });
+                        }
+                        vesicles.splice(i, 1);
+                    }
+                }
+
+                // 4. Trace Drawing & Gap Management
+                if (p.isGap) {
+                    p.gapCounter -= delta;
+                    if (p.gapCounter <= 0) {
+                        p.isGap = false;
+                        p.traceSegments.push([]);
+                    }
+                } else if (Math.random() < GAP_CHANCE && !isGhost) {
+                    p.isGap = true;
+                    p.gapCounter = GAP_LENGTH;
+                }
+
+                if (isGhost) {
+                    if (!p.wasGhost) p.wasGhost = true;
+                } else if (p.wasGhost) {
+                    p.wasGhost = false;
+                    p.traceSegments.push([]); // Start a fresh line after Ghost Mode ends
+                }
+
+                // 5. Apply Final Movement
+                if (!p.isGap && !isGhost) {
+                    p.traceSegments[p.traceSegments.length - 1].push({ x: nextX, y: nextY });
+                }
+
+                p.x = nextX;
+                p.y = nextY;
+
+                // --- DEATH RING COLLISION ---
+                if (mitosis.state !== 'idle' && p.alive && !isGhost) {
+                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                    let caught = false;
+
+                    if (mitosis.direction === 0) {
+                        let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                        if (p.x < ringX) caught = true;
+                    } else if (mitosis.direction === 1) {
+                        let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                        if (p.y < ringY) caught = true;
+                    } else if (mitosis.direction === 2) {
+                        let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                        if (p.x > ringX) caught = true;
+                    } else {
+                        let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                        if (p.y > ringY) caught = true;
+                    }
+
+                    if (caught && !devMode) p.alive = false; // <-- Added !devMode
+                }
+            });
+
+            // Animate Background Elements once per frame globally
+            if (!isCellFrozen) {
+                cytosolParticles.forEach(blob => {
+                    blob.x += blob.vx * delta;
+                    blob.y += blob.vy * delta;
+                    blob.scale.set(1.0 + Math.sin(survivalTime * 2 + blob.phase) * 0.1);
+                    blob.alpha = blob.baseAlpha + Math.sin(survivalTime + blob.phase) * 0.1;
+                });
+
+                membraneProtrusionsList.forEach(p => {
+                    p.phase += p.speed * deltaSec;
+                    let scale = Math.max(0, Math.sin(p.phase));
+                    p.redraw(p.maxRadius * scale);
+                });
+            }
+
+            drawTraces();
+        }
+        app.ticker.add(gameLoop);
+
+        // --- 8. Start & UI ---
+        window.updateUI = function () {
+            currentMode = parseInt(modeSelect.value);
+            aiCount = parseInt(aiSelect.value);
+            if (currentMode + aiCount > 4) {
+                aiCount = 4 - currentMode;
+                aiSelect.value = aiCount.toString();
+            }
+
+            currentSpeed = parseFloat(speedSelect.value);
+            cameraMode = document.getElementById('cameraSelect').value;
+
+            let totalPlayers = currentMode + aiCount;
+            if (totalPlayers === 1) {
+                document.getElementById('controlsText').innerHTML = "P1 (Blue): L/R Arrows | Toggle: Down Arrow";
+                if (!isPlaying) scoreText.innerText = "Survival Time: 0.0s";
+            } else {
+                let controls = "P1: L/R/Down | P2: A/D/S";
+                if (totalPlayers >= 3) controls += " | P3: G/J/H";
+                if (totalPlayers === 4) controls += " | P4: 4/6/5";
+
+                controls += " <br> <span style='color:#a29bfe; font-size:14px;'>3rd Key: Toggle Boost Target (Green=Self, Red=Attack)</span>";
+
+                document.getElementById('controlsText').innerHTML = controls;
+
+                if (!isPlaying) {
+                    let scoreStr = `P1: ${playerWins[1]} | P2: ${playerWins[2]}`;
+                    if (totalPlayers >= 3) scoreStr += ` | P3: ${playerWins[3]}`;
+                    if (totalPlayers >= 4) scoreStr += ` | P4: ${playerWins[4]}`;
+                    scoreText.innerText = scoreStr;
+                }
+            }
+        };
+
+        window.startRound = function () {
+            // 1. Clear previous round data
+            trailGlow.clear(); trailCore.clear(); uiBarsLayer.clear(); virusLayer.clear();
+            vesicles = []; dynamicLayer.clear();
+
+            // 2. Reset the Virus Cycle (Set to 30s for testing)
+            infection = {
+                state: 'none',
+                x: 0, y: 0, angle: 0,
+                particles: [],
+                nextWarningTime: 60,
+                triggerTime: 0
+            };
+            // --- MITOSIS RESET ---
+            mitosis.state = 'idle';
+            mitosis.nextTriggerTime = 240; // Production: 4 minutes
+            mitosis.eventStartTime = 0;
+            mitosis.currentWidth = 600;
+
+            warningElement.innerText = "";
+            warningElement.style.display = 'none';
+
+            globalRotation = Math.random() * Math.PI * 2;
+            survivalTime = 0;
+            updateUI();
+
+            world.scale.set(0.5);
+            splitSprites.forEach(s => s.visible = false);
+
+            // Reset player array to avoid duplicates
+            players = [];
+
+            const playerConfigs = [
+                {
+                    id: 1, x: activeCell.x - 600, y: activeCell.y, angle: 0,
+                    color: 0x0984e3, coreColor: 0x74b9ff,
+                    controls: { left: 'ArrowLeft', right: 'ArrowRight', toggle: 'ArrowDown' }
+                },
+                {
+                    id: 2, x: activeCell.x + 600, y: activeCell.y, angle: Math.PI,
+                    color: 0xd63031, coreColor: 0xff7675,
+                    controls: { left: 'a', right: 'd', leftAlt: 'A', rightAlt: 'D', toggle: 's', toggleAlt: 'S' }
+                },
+                {
+                    id: 3, x: activeCell.x, y: activeCell.y - 500, angle: Math.PI / 2,
+                    color: 0x00b894, coreColor: 0x55efc4,
+                    controls: { left: 'g', right: 'j', leftAlt: 'G', rightAlt: 'J', toggle: 'h', toggleAlt: 'H' }
+                },
+                {
+                    id: 4, x: activeCell.x, y: activeCell.y + 500, angle: -Math.PI / 2,
+                    color: 0xfdc100, coreColor: 0xffe2a9,
+                    controls: { left: '4', right: '6', toggle: '5' }
+                }
+            ];
+
+            let totalPlayers = currentMode + aiCount;
+            for (let i = 0; i < totalPlayers; i++) {
+                let config = playerConfigs[i];
+                let isBot = (i >= currentMode);
+                players.push({
+                    id: config.id, x: config.x, y: config.y, angle: config.angle,
+                    color: config.color, coreColor: config.coreColor, targetMode: 'self',
+                    controls: config.controls, isBot: isBot,
+                    alive: true, traceSegments: [[]], isGap: false, gapCounter: 0,
+                    effects: {
+                        speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
+                        blueCount: 0, blueWindow: 0, ghostTimer: 0,
+                        redCount: 0, redWindow: 0, hunterTimer: 0
+                    }
+                });
+            }
+
+            generateMap();
+            isPlaying = true;
+            uiElement.classList.add('hidden-ui'); // AUTO-HIDE MENU ON START
+            app.ticker.start(); // Unfreeze the engine!
+        };
+
+        generateMap();
+        world.scale.set(0.3);
+        world.x = SCREEN_WIDTH / 2 - activeCell.x * 0.3;
+        world.y = SCREEN_HEIGHT / 2 - activeCell.y * 0.3;
+
+        function deleteOldestTrace(player, percentage) {
+            let totalPoints = 0;
+            player.traceSegments.forEach(seg => totalPoints += seg.length);
+
+            let pointsToRemove = Math.floor(totalPoints * percentage);
+
+            while (pointsToRemove > 0 && player.traceSegments.length > 0) {
+                let firstSeg = player.traceSegments[0];
+                if (firstSeg.length <= pointsToRemove) {
+                    pointsToRemove -= firstSeg.length;
+                    player.traceSegments.shift(); // Remove entire segment
+                    if (player.traceSegments.length === 0) player.traceSegments.push([]);
+                } else {
+                    firstSeg.splice(0, pointsToRemove); // Remove partial segment
+                    pointsToRemove = 0;
+                }
+            }
+        }
+
+    </script>
+</body>
+
+</html>
