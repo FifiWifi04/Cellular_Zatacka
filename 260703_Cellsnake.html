@@ -1223,6 +1223,11 @@
             // only returned once no unvisited cell can beat it (t >= bestDist).
             let endX = startX + dirX * maxDist, endY = startY + dirY * maxDist;
             let bestDist = maxDist, bestType = null, bestRaw = undefined;
+            // Nearest vesicle seen so far, tracked independently of bestDist:
+            // a reward is not an obstacle and must not clamp how far the ray
+            // marches. Filtered against the final hazard distance below, since
+            // a closer hazard discovered later can still occlude it.
+            let rewardDist = Infinity, rewardRaw = undefined;
 
             // Analytic pre-pass: microtubules + ER/Golgi walls, each tested once
             // per ray against the full segment (not per DDA step). Whichever hit
@@ -1375,7 +1380,7 @@
                             let hitT = raySegT(startX, startY, endX, endY, v.x, v.y, v.x, v.y, v.radius + TRACE_WIDTH + 6);
                             if (hitT >= 0) {
                                 let hitDist = hitT * maxDist;
-                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'vesicle'; bestRaw = v; }
+                                if (hitDist < rewardDist) { rewardDist = hitDist; rewardRaw = v; }
                             }
                         }
                     }
@@ -1394,98 +1399,86 @@
                 }
             }
 
-            if (bestType !== null) {
-                return { dist: bestDist, type: bestType, raw: bestRaw };
-            }
-            return { dist: maxDist, type: 'clear' };
+            let hazard = (bestType !== null) ? { dist: bestDist, type: bestType } : { dist: maxDist, type: 'clear' };
+            let reward = (rewardRaw !== undefined && rewardDist < bestDist) ? { dist: rewardDist, raw: rewardRaw } : null;
+            return { hazard, reward };
         }
 
         function updateBotAI(bot, delta) {
+            const W_AVOID   = 1.0;   // lateral hazard asymmetry
+            const W_FORWARD = 1.6;   // forward hazard escape
+            const W_REWARD  = 0.35;  // vesicle attraction
+            const W_BRIDGE  = 0.5;   // mitosis pull
+            const PANIC     = 0.25;  // below this forward hazard score, rewards are ignored
+            const MAX_TURN  = 0.08;  // must equal the human turn rate (gameLoop: p.angle -= 0.08 * delta) — keep in sync if that ever changes
+
             let fAngle = bot.angle;
             let lAngle = bot.angle - 0.5; // Left diagonal
             let rAngle = bot.angle + 0.5; // Right diagonal
-            
+
             let maxSense = 350;
-            
-            let fHit = raycast(bot.x, bot.y, fAngle, maxSense, bot.id);
-            let lHit = raycast(bot.x, bot.y, lAngle, maxSense, bot.id);
-            let rHit = raycast(bot.x, bot.y, rAngle, maxSense, bot.id);
-            
-            let fWeight = getRayWeight(fHit, maxSense);
-            let lWeight = getRayWeight(lHit, maxSense);
-            let rWeight = getRayWeight(rHit, maxSense);
-            
-            // Calculate steering force
+
+            let fRay = raycast(bot.x, bot.y, fAngle, maxSense, bot.id);
+            let lRay = raycast(bot.x, bot.y, lAngle, maxSense, bot.id);
+            let rRay = raycast(bot.x, bot.y, rAngle, maxSense, bot.id);
+
+            let fHazard = hazardScore(fRay.hazard, maxSense);
+            let lHazard = hazardScore(lRay.hazard, maxSense);
+            let rHazard = hazardScore(rRay.hazard, maxSense);
+
             let force = 0;
-            
-            // 1. Proximity hazard avoidance
-            if (lWeight < 1000) {
-                // Danger on left pushes us right (positive force)
-                force += (1000 - lWeight);
-            }
-            if (rWeight < 1000) {
-                // Danger on right pushes us left (negative force)
-                force -= (1000 - rWeight);
-            }
-            if (fWeight < 1000) {
-                // Danger in front pushes us to the clearer side
-                let push = (1000 - fWeight) * 1.5;
-                if (lWeight >= rWeight) {
-                    force -= push;
-                } else {
-                    force += push;
-                }
-            }
-            
-            // 2. Vesicle attraction (only if not in immediate danger)
-            let inDanger = (fWeight < 900 || lWeight < 900 || rWeight < 900);
-            if (!inDanger) {
-                if (lWeight > 1000) {
-                    force -= (lWeight - 1000) * 0.5; // pull left
-                }
-                if (rWeight > 1000) {
-                    force += (rWeight - 1000) * 0.5; // pull right
-                }
+
+            // 1. Lateral avoidance — positive force turns right
+            force += (rHazard - lHazard) * W_AVOID;
+
+            // 2. Forward escape — push toward whichever side is clearer
+            if (fHazard < 1) {
+                let push = (1 - fHazard) * W_FORWARD;
+                force += (rHazard >= lHazard) ? push : -push;
             }
 
-            // 3. Mitosis bridge attraction
+            // 3. Reward pull — only when clear of immediate danger on all three rays
+            if (fHazard > PANIC && lHazard > PANIC && rHazard > PANIC) {
+                let lReward = rewardScore(lRay.reward, maxSense);
+                let rReward = rewardScore(rRay.reward, maxSense);
+                force += (rReward - lReward) * W_REWARD;
+            }
+
+            // 4. Mitosis bridge attraction
             if (mitosis.state !== 'idle') {
                 let angleToB = Math.atan2(mitosis.cellB.y - bot.y, mitosis.cellB.x - bot.x);
                 let diff = angleToB - bot.angle;
                 diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-                // Add a force pulling us in the direction of Cell B
-                force += diff * 150; 
+                force += (diff / Math.PI) * W_BRIDGE;
             }
-            
-            // Apply steering threshold to prevent wobbling
-            if (force < -10) {
-                bot.angle -= 0.08 * delta; // Turn Left
-            } else if (force > 10) {
-                bot.angle += 0.08 * delta; // Turn Right
+
+            // Proportional steering with a dead-zone to kill wobble
+            let turn = Math.max(-1, Math.min(1, force));
+            if (Math.abs(turn) > 0.05) {
+                bot.angle += turn * MAX_TURN * delta;
             }
-            
-            // Toggle targetMode dynamically based on forward ray
-            if (fHit.type === 'vesicle') {
+
+            // Toggle targetMode dynamically based on the forward ray
+            if (fRay.reward && fRay.reward.dist < fRay.hazard.dist) {
                 bot.targetMode = 'self';
-            } else if (fHit.type === 'trace' && fHit.dist < 150) {
+            } else if (fRay.hazard.type === 'trace' && fRay.hazard.dist < 150) {
                 if (bot.effects.speedTimer > 0) {
                     bot.targetMode = 'attack';
                 }
             }
         }
-        
-        function getRayWeight(hit, maxSense) {
-            let weight = 1000;
-            let d = hit.dist;
-            
-            if (hit.type === 'boundary' || hit.type === 'nucleus' || hit.type === 'trace' || hit.type === 'organelle' || hit.type === 'virus' || hit.type === 'microtubule' || hit.type === 'wall') {
-                let danger = maxSense - d;
-                weight -= danger * danger * 5;
-            } else if (hit.type === 'vesicle') {
-                weight += 2000 * (1.0 - d / maxSense);
-            }
-            
-            return weight;
+
+        // 0 = wall in your face, 1 = nothing within maxSense
+        function hazardScore(hazard, maxSense) {
+            if (hazard.type === 'clear') return 1;
+            let n = Math.min(1, hazard.dist / maxSense);
+            return n * n; // quadratic: cheap far away, urgent up close
+        }
+
+        // 0 = no reward, 1 = reward touching the head
+        function rewardScore(reward, maxSense) {
+            if (!reward) return 0;
+            return 1 - Math.min(1, reward.dist / maxSense);
         }
 
         function checkArcCollision(x, y, player) {
