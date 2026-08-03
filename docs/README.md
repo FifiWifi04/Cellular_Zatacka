@@ -59,10 +59,14 @@ Track C  T11 → T12/T13/T14/T15    Phase 3 generation-gated content
 Track D  T16 → T17/T18            Phase 4 juice
 Track E  T19, T20                 Phase 5 UX
 Track F  T21                      Phase 2.2 additive blending (vector renderer)
+Track G  T22                      sim/render split — enables Phase 7, speeds up tests
+Track H  T23 → T24 → T25 → T26 → T27    Phase 6 mobile (independent of everything)
+Track I  T28 → T29 → T30 → T31 → T32    Phase 7 multiplayer (needs T22)
 ```
 
-**T09, T20, T21, and T05 are independent** — take one of those if the head of a
-track is blocked.
+**T09, T20, T21, T23, and T05 are independent** — take one of those if the head
+of a track is blocked. **T23 opens all of Phase 6**, which depends on nothing and
+can run in parallel with Phase 1–5 work.
 
 Phase 2.1 (the sprite/asset swap) is **parked** — see
 [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). Phase

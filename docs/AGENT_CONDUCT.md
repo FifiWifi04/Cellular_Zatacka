@@ -125,6 +125,23 @@ comparing against `centralHitboxes`. If you compare a world coordinate directly
 against a cell-local hitbox, the collision will be silently wrong by up to the
 full rotation angle and will *look* fine for the first few seconds of a round.
 
+### 4.4a New systems: keep update and draw in separate functions
+
+Simulation and rendering are currently fused — `updateVesicles()` calls
+`dynamicLayer.clear()` and draws while it simulates. T22 untangles this, and
+Phase 7 (multiplayer) cannot happen until it does.
+
+**Do not add to the debt.** Any new system you write must be two functions:
+
+```
+function updateThing(dt) { /* state only — no PIXI, no layers, no sprites */ }
+function drawThing()     { /* reads state, draws — never mutates state */ }
+```
+
+This costs nothing to do up front and is expensive to retrofit. It applies to
+every Phase 3 mechanic (the malignant mass, necrosis, calcification, the gravity
+well) and to Phase 4's particles.
+
 ### 4.4 Physics state is authoritative; visuals only mirror it
 
 This rule exists because a mitochondrion's drawn shape once drifted out of sync

@@ -93,6 +93,32 @@ later returns FAIL, revisit anything that landed in that window.
 |----|------|-----------|--------|
 | T21 | [Extend additive blending on the vector renderer](tasks/T21-additive-blending.md) | — | `READY` |
 
+### Track G — Architecture (enables Phase 7, speeds up testing)
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T22 | [Separate simulation from rendering](tasks/T22-sim-render-split.md) ⏳ *resumable* | T06a | `BLOCKED` |
+
+### Track H — Phase 6: Mobile
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T23 | [Viewport, touch input, orientation](tasks/T23-mobile-viewport-touch.md) | — | `READY` |
+| T24 | [Touch-friendly menu and HUD](tasks/T24-touch-ui.md) | T23 | `BLOCKED` |
+| T25 | [Incremental trace rendering](tasks/T25-trace-render-perf.md) | T24 | `BLOCKED` |
+| T26 | [Graphics quality tiers](tasks/T26-quality-tier.md) | T25 | `BLOCKED` |
+| T27 | [Installable PWA (offline, home screen)](tasks/T27-pwa.md) | T26 | `BLOCKED` |
+
+### Track I — Phase 7: Multiplayer
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `BLOCKED` |
+| T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `BLOCKED` |
+| T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `BLOCKED` |
+| T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `BLOCKED` |
+| T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `BLOCKED` |
+
 ### Parked
 
 | ID | Task | Reason |
@@ -112,11 +138,20 @@ T04 ──► T10     │      │         ├─► T13
 T09 (indep.)    │      │         └─► T15
 T20 (indep.)    │      └─► T16 ──┬─► T17
 T21 (indep.)    │                └─► T18
-                └─► T06b  👤 owner verdict — gates nothing downstream
+                ├─► T06b  👤 owner verdict — gates nothing downstream
+                └─► T22 ──► T28 ──► T29 ──► T30 ──► T31 ──► T32   (Phase 7)
+
+T23 ──► T24 ──► T25 ──► T26 ──► T27                              (Phase 6, independent)
 ```
 
-Four tasks are independent and can be picked up at any time if the head of a
-track is blocked: **T09**, **T20**, **T21**, and (before T04 lands) **T05**.
+Five entry points are independent and can be picked up at any time if the head of
+a track is blocked: **T09**, **T20**, **T21**, **T23** (which opens all of
+Phase 6), and — before T04 lands — **T05**.
+
+**Phase 6 (mobile) depends on nothing.** It can run in parallel with Phase 1–5
+work at any time. **Phase 7 (multiplayer) depends on T22**, the sim/render split,
+which is why T22 is worth doing before Phase 3 content piles up on top of the
+fused architecture.
 
 ---
 

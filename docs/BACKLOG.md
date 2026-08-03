@@ -106,3 +106,39 @@ them.
 - **`favicon.ico` 404 is the one expected console entry** over `http://`. It
   does not appear over `file://`. The harness filters it — note the URL is in
   the console message's `location`, not its `text`.
+
+---
+
+## Found while scoping Phases 6 and 7 — 2026-08-03
+
+- **Gap and vesicle spawn are frame-rate dependent, not time dependent.**
+  `GAP_CHANCE = 0.008` is rolled once per player per *frame*; `GAP_LENGTH = 12`
+  counts *frames*, not distance; and both vesicle-spawn sites roll
+  `Math.random() < 0.008` per frame. A device at 30fps therefore gets half the
+  gaps, half the vesicles, and gaps half as long in world distance. This is a
+  live fairness bug on any slow device, not just a multiplayer problem.
+  Addressed by T28. — 2026-08-03
+
+- **`drawTraces()` is O(total trace points) every frame, twice.** It clears and
+  re-emits every point of every trace for both `trailGlow` and `trailCore`. At
+  60fps, 4 players, 2 minutes ≈ 28,800 points ≈ 57,600 `lineTo` calls per frame,
+  growing for the whole round — and `trailGlow` carries a `BlurFilter`, so the
+  growing path is re-filtered too. Addressed by T25. — 2026-08-03
+
+- **Simulation and rendering are fused**, so the game cannot be stepped without a
+  renderer. Blocks multiplayer entirely and caps soak-test throughput at ~0.38x
+  real time. Addressed by T22; `AGENT_CONDUCT.md` §4.4a stops new systems from
+  adding to the debt. — 2026-08-03
+
+- **No pause exists.** There is `app.ticker.stop()` on solo game-over and an
+  `isPlaying` flag, but nothing player-initiated. T24 adds one for mobile; note
+  that a local pause must not pause remote players once Phase 7 lands.
+  — 2026-08-03
+
+- **Render interpolation between fixed simulation steps** — deferred out of T28
+  deliberately so the fixed step can be validated alone. Worth doing once T28 is
+  stable, especially for high-refresh displays. — 2026-08-03
+
+- **Host migration** for Phase 7 — explicitly out of scope for v1 (T32 ends the
+  match if the host leaves). Revisit only if sessions prove long enough for it to
+  matter. — 2026-08-03

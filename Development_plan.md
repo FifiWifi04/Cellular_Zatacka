@@ -35,6 +35,12 @@ Objective: Execute the following 5-Phase production roadmap sequentially. Do not
     - Center a gravity well that exerts a constant, inward pull vector on all spawned vesicles.
 
 ## PHASE 4: Visual Polish & "Juice"
+> **Mobile budget (added 2026-08-03).** Everything in this phase is full-screen
+> GPU work, on top of the `AdvancedBloomFilter` already applied to `world`.
+> Phase 6 targets mobile, where full-screen post-processing is the most expensive
+> thing a 2D game can do. Build 4.2 and 4.3 so they can be **switched off or
+> scaled down** — see `docs/tasks/T26-quality-tier.md`. Designing the off-switch
+> in now is far cheaper than retrofitting it.
 4.1 Implement a lightweight Camera Screenshake utility. Trigger screen rumble on player elimination, virus explosions, and the Mitosis "Snap".
 4.2 Deploy a PixiJS particle emitter splash system for trace locomotion, vesicle collection, and membrane collisions.
 4.3 Apply full-screen post-processing filters (e.g., slight chromatic aberration or blur) exclusively during the 1-minute `infection.state === 'warning'` window.
@@ -42,3 +48,34 @@ Objective: Execute the following 5-Phase production roadmap sequentially. Do not
 ## PHASE 5: User Experience & Deployment
 5.1 Re-engineer HTML UI landing menus. Add a prominent "Quick Play" button that skips configurations and launches a 1-player match against an AI Bot instantly.
 5.2 Build a clean, scannable control-mapping splash screen displaying input keys for Players 1 through 4.
+
+---
+
+## PHASE 6: Mobile
+*Independent of Phases 1-5 — can be built in parallel at any time.*
+6.1 Viewport meta, touch steering (screen halves feeding the existing `keys`
+    object), gesture suppression, orientation handling.
+6.2 Touch-usable menu and HUD, replacing the mouse-hover peek, plus a pause.
+6.3 Incremental trace rendering. `drawTraces()` currently re-emits every point of
+    every trace twice per frame — ~57,600 `lineTo` calls per frame at 4 players
+    after two minutes. This is the mobile blocker, and it helps desktop too.
+6.4 Graphics quality tiers with automatic detection and a manual override.
+6.5 Installable PWA: manifest, service worker, offline play, home-screen launch.
+
+**Scope:** one player per device. Multi-player on mobile requires Phase 7.
+
+## PHASE 7: Online Multiplayer
+*Depends on the simulation/rendering split (`docs/tasks/T22-sim-render-split.md`).*
+7.1 Fixed-timestep simulation. Fixes live bugs: gap chance, gap length and
+    vesicle spawn are all rolled **per frame**, so a 30fps device gets half the
+    gaps, half the vesicles, and gaps half as long in world distance.
+7.2 WebRTC transport, room codes, lobby. **Host-authoritative, not lockstep** —
+    `Math.sin`/`cos`/`atan2` are not bit-identical across JS engines, so lockstep
+    would desync between browsers.
+7.3 State synchronisation. Traces are never sent: they are emergent from head
+    positions, so bandwidth is ~1.5 KB/s for four players.
+7.4 Client-side prediction for your own head; interpolation for everyone else.
+    Death, collection and effects are never predicted.
+7.5 Disconnect handling, rejoin, and honest failure. No silent freezes.
+
+**Out of scope for v1:** host migration. If the host leaves, the match ends.
