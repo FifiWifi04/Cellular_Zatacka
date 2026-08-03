@@ -946,10 +946,15 @@
             constructor(cellSize = 128) {
                 this.cellSize = cellSize;
                 this.cells = new Map();
+                this.stamp = 0;
             }
 
             clear() {
                 this.cells.clear();
+            }
+
+            getCell(cx, cy) {
+                return this.cells.get(cx + ',' + cy);
             }
 
             getKey(x, y) {
@@ -1043,6 +1048,38 @@
                 ptSegDistSq(cx, cy, ax, ay, bx, by), ptSegDistSq(dx, dy, ax, ay, bx, by)
             );
         }
+        // Smallest t in [0,1] at which segment (ax,ay)->(bx,by) comes within `r`
+        // of segment (cx,cy)->(dx,dy), or -1 if it never does. Pass cx==dx,cy==dy
+        // for a point target. Cheap-rejects on the full-segment distance; the
+        // distance from a point moving along (ax,ay)->(bx,by) to the fixed
+        // segment (cx,cy)->(dx,dy) is convex in t, so the closest approach can
+        // fall strictly inside (0,1) with BOTH endpoints outside `r` (this is
+        // the common case for a thick target like a mitochondrion spine cutting
+        // across the middle of a grid cell) — ternary-search the minimum first,
+        // then bisect from t=0 down to it for the entry parameter.
+        function raySegT(ax, ay, bx, by, cx, cy, dx, dy, r) {
+            let rSq = r * r;
+            if (segSegDistSq(ax, ay, bx, by, cx, cy, dx, dy) >= rSq) return -1;
+            if (ptSegDistSq(ax, ay, cx, cy, dx, dy) < rSq) return 0;
+            let lo = 0, hi = 1;
+            for (let iter = 0; iter < 16; iter++) {
+                let m1 = lo + (hi - lo) / 3;
+                let m2 = hi - (hi - lo) / 3;
+                let d1 = ptSegDistSq(ax + (bx - ax) * m1, ay + (by - ay) * m1, cx, cy, dx, dy);
+                let d2 = ptSegDistSq(ax + (bx - ax) * m2, ay + (by - ay) * m2, cx, cy, dx, dy);
+                if (d1 < d2) hi = m2; else lo = m1;
+            }
+            let tMin = (lo + hi) / 2;
+            let eLo = 0, eHi = tMin;
+            for (let iter = 0; iter < 10; iter++) {
+                let mid = (eLo + eHi) / 2;
+                let mx = ax + (bx - ax) * mid;
+                let my = ay + (by - ay) * mid;
+                if (ptSegDistSq(mx, my, cx, cy, dx, dy) < rSq) eHi = mid;
+                else eLo = mid;
+            }
+            return eHi;
+        }
 
         function rebuildSpatialGrid() {
             spatialGrid.clear();
@@ -1058,7 +1095,8 @@
                             playerId: p.id,
                             s: s,
                             i: i,
-                            segLength: seg.length
+                            segLength: seg.length,
+                            _seen: -1
                         });
                     }
                 });
@@ -1070,7 +1108,8 @@
                 if (org.type === 'mitochondria') r = org.radius * 1.6;
                 spatialGrid.insertCircle(org.x, org.y, r, {
                     type: 'organelle',
-                    raw: org
+                    raw: org,
+                    _seen: -1
                 });
             });
 
@@ -1078,7 +1117,8 @@
             vesicles.forEach(v => {
                 spatialGrid.insertCircle(v.x, v.y, v.radius, {
                     type: 'vesicle',
-                    raw: v
+                    raw: v,
+                    _seen: -1
                 });
             });
 
@@ -1087,114 +1127,205 @@
                 infection.particles.forEach(vp => {
                     spatialGrid.insertCircle(vp.x, vp.y, vp.radius, {
                         type: 'virus',
-                        raw: vp
+                        raw: vp,
+                        _seen: -1
                     });
                 });
             }
         }
 
         function raycast(startX, startY, angle, maxDist, casterId = null) {
-            let cos = Math.cos(angle);
-            let sin = Math.sin(angle);
-            let step = 12;
-            let steps = Math.ceil(maxDist / step);
-            
-            for (let i = 0; i <= steps; i++) {
-                let dist = i * step;
-                if (dist > maxDist) dist = maxDist;
-                let rx = startX + cos * dist;
-                let ry = startY + sin * dist;
-                
-                // 1. Check boundary collision
-                if (isOutsideCell(rx, ry)) {
-                    return { dist: dist, type: 'boundary' };
-                }
-                
-                // Check nuclear core
-                if (Math.hypot(rx - activeCell.x, ry - activeCell.y) < 130 + TRACE_HITBOX) {
-                    return { dist: dist, type: 'nucleus' };
+            let dirX = Math.cos(angle);
+            let dirY = Math.sin(angle);
+            let cellSize = spatialGrid.cellSize;
+
+            let cx = Math.floor(startX / cellSize);
+            let cy = Math.floor(startY / cellSize);
+
+            let stepX, tDeltaX, tMaxX;
+            if (dirX > 0) {
+                stepX = 1;
+                tDeltaX = cellSize / dirX;
+                tMaxX = ((cx + 1) * cellSize - startX) / dirX;
+            } else if (dirX < 0) {
+                stepX = -1;
+                tDeltaX = cellSize / -dirX;
+                tMaxX = (cx * cellSize - startX) / dirX;
+            } else {
+                stepX = 0;
+                tDeltaX = Infinity;
+                tMaxX = Infinity;
+            }
+
+            let stepY, tDeltaY, tMaxY;
+            if (dirY > 0) {
+                stepY = 1;
+                tDeltaY = cellSize / dirY;
+                tMaxY = ((cy + 1) * cellSize - startY) / dirY;
+            } else if (dirY < 0) {
+                stepY = -1;
+                tDeltaY = cellSize / -dirY;
+                tMaxY = (cy * cellSize - startY) / dirY;
+            } else {
+                stepY = 0;
+                tDeltaY = Infinity;
+                tMaxY = Infinity;
+            }
+
+            let caster = casterId !== null ? players.find(p => p.id === casterId) : null;
+
+            spatialGrid.stamp++;
+            let stamp = spatialGrid.stamp;
+
+            const ANALYTIC_STEP = 8;
+            let t = 0;
+
+            // Items are tested against the FULL ray (start -> maxDist), not the
+            // local sub-segment of the cell where they are first encountered: a
+            // wide object (e.g. a mitochondrion spine, ~180px) is inserted into
+            // several cells via its bounding box, and its true intersection may
+            // fall in a LATER cell than the one that first sees it. Since dedup
+            // (`_seen`) only tests an item once per ray, testing only the local
+            // sub-segment would permanently miss that later intersection.
+            // Consequently a hit found while visiting one cell is not necessarily
+            // the nearest hit overall (an unvisited, nearer cell may still hold a
+            // closer item), so results are collected into a running best and
+            // only returned once no unvisited cell can beat it (t >= bestDist).
+            let endX = startX + dirX * maxDist, endY = startY + dirY * maxDist;
+            let bestDist = maxDist, bestType = null, bestRaw = undefined;
+
+            while (t < bestDist) {
+                let tExit = Math.min(tMaxX, tMaxY, maxDist);
+
+                // Cheap analytic checks (smooth fields, coarse sampling is fine)
+                let analyticEnd = Math.min(tExit, bestDist);
+                let sampleT = t;
+                while (true) {
+                    let rx = startX + dirX * sampleT;
+                    let ry = startY + dirY * sampleT;
+
+                    if (isOutsideCell(rx, ry)) {
+                        if (sampleT < bestDist) { bestDist = sampleT; bestType = 'boundary'; bestRaw = undefined; }
+                        break;
+                    }
+                    if (Math.hypot(rx - activeCell.x, ry - activeCell.y) < 130 + TRACE_HITBOX) {
+                        if (sampleT < bestDist) { bestDist = sampleT; bestType = 'nucleus'; bestRaw = undefined; }
+                        break;
+                    }
+                    if (mitosis.state !== 'idle') {
+                        let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                        let caught = false;
+                        if (mitosis.direction === 0) {
+                            let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                            if (rx < ringX) caught = true;
+                        } else if (mitosis.direction === 1) {
+                            let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                            if (ry < ringY) caught = true;
+                        } else if (mitosis.direction === 2) {
+                            let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                            if (rx > ringX) caught = true;
+                        } else {
+                            let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                            if (ry > ringY) caught = true;
+                        }
+                        if (caught) {
+                            if (sampleT < bestDist) { bestDist = sampleT; bestType = 'boundary'; bestRaw = undefined; }
+                            break;
+                        }
+                    }
+
+                    if (sampleT >= analyticEnd) break;
+                    sampleT = Math.min(sampleT + ANALYTIC_STEP, analyticEnd);
                 }
 
-                // Check sweeping death ring boundary
-                if (mitosis.state !== 'idle') {
-                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
-                    let caught = false;
-                    if (mitosis.direction === 0) {
-                        let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
-                        if (rx < ringX) caught = true;
-                    } else if (mitosis.direction === 1) {
-                        let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
-                        if (ry < ringY) caught = true;
-                    } else if (mitosis.direction === 2) {
-                        let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
-                        if (rx > ringX) caught = true;
-                    } else {
-                        let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
-                        if (ry > ringY) caught = true;
-                    }
-                    if (caught) {
-                        return { dist: dist, type: 'boundary' };
-                    }
-                }
-                
-                // 2. Query spatial grid for local hazards/rewards
-                let localItems = spatialGrid.queryRange(rx, ry, step + TRACE_HITBOX);
-                for (let item of localItems) {
-                    if (item.type === 'trace') {
-                        if (casterId !== null && item.playerId === casterId) {
-                            let other = players.find(op => op.id === item.playerId);
-                            if (other) {
-                                let isLastSegment = (item.s === other.traceSegments.length - 1);
+                // Grid items in this cell, tested against the full ray
+                let cellItems = spatialGrid.getCell(cx, cy);
+                if (cellItems) {
+                    for (let k = 0; k < cellItems.length; k++) {
+                        let item = cellItems[k];
+                        if (item._seen === stamp) continue;
+                        item._seen = stamp;
+
+                        if (item.type === 'trace') {
+                            if (caster !== null && item.playerId === casterId) {
+                                let isLastSegment = (item.s === caster.traceSegments.length - 1);
                                 if (isLastSegment && item.i >= item.segLength - 16) {
                                     continue;
                                 }
                             }
-                        }
-                        let dSq = ptSegDistSq(rx, ry, item.x1, item.y1, item.x2, item.y2);
-                        if (dSq < TRACE_HITBOX * TRACE_HITBOX) {
-                            return { dist: dist, type: 'trace' };
-                        }
-                    } else if (item.type === 'organelle') {
-                        let org = item.raw;
-                        if (org.type === 'mitochondria') {
-                            let dx = rx - org.x;
-                            let dy = ry - org.y;
-                            let cosA = Math.cos(-org.rotation);
-                            let sinA = Math.sin(-org.rotation);
-                            let lx = dx * cosA - dy * sinA;
-                            let ly = dx * sinA + dy * cosA;
-                            
-                            let halfL = (org.radius * 1.6) / 2;
-                            let halfW = (org.radius * 0.9) / 2;
-                            let rSq = (halfW + TRACE_HITBOX) * (halfW + TRACE_HITBOX);
-                            
-                            let prevX = -halfL, prevY = 0;
-                            for (let s = 1; s <= 5; s++) {
-                                let t = s / 5;
-                                let bx = Math.pow(1 - t, 2) * (-halfL) + Math.pow(t, 2) * (halfL);
-                                let by = 2 * (1 - t) * t * (org.bendY || 0);
-                                if (ptSegDistSq(lx, ly, prevX, prevY, bx, by) < rSq) {
-                                    return { dist: dist, type: 'organelle' };
+                            let hitT = raySegT(startX, startY, endX, endY, item.x1, item.y1, item.x2, item.y2, TRACE_HITBOX);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'trace'; bestRaw = undefined; }
+                            }
+                        } else if (item.type === 'organelle') {
+                            let org = item.raw;
+                            if (org.type === 'mitochondria') {
+                                let cosA = Math.cos(-org.rotation);
+                                let sinA = Math.sin(-org.rotation);
+                                let halfL = (org.radius * 1.6) / 2;
+                                let halfW = (org.radius * 0.9) / 2;
+                                let r = halfW + TRACE_HITBOX;
+
+                                let dxA = startX - org.x, dyA = startY - org.y;
+                                let lxA = dxA * cosA - dyA * sinA;
+                                let lyA = dxA * sinA + dyA * cosA;
+                                let dxB = endX - org.x, dyB = endY - org.y;
+                                let lxB = dxB * cosA - dyB * sinA;
+                                let lyB = dxB * sinA + dyB * cosA;
+
+                                let prevX = -halfL, prevY = 0;
+                                for (let s = 1; s <= 5; s++) {
+                                    let tt = s / 5;
+                                    let bx = Math.pow(1 - tt, 2) * (-halfL) + Math.pow(tt, 2) * (halfL);
+                                    let by = 2 * (1 - tt) * tt * (org.bendY || 0);
+                                    let hitT = raySegT(lxA, lyA, lxB, lyB, prevX, prevY, bx, by, r);
+                                    if (hitT >= 0) {
+                                        let hitDist = hitT * maxDist;
+                                        if (hitDist < bestDist) { bestDist = hitDist; bestType = 'organelle'; bestRaw = undefined; }
+                                    }
+                                    prevX = bx; prevY = by;
                                 }
-                                prevX = bx; prevY = by;
+                            } else {
+                                let hitT = raySegT(startX, startY, endX, endY, org.x, org.y, org.x, org.y, org.radius + TRACE_HITBOX);
+                                if (hitT >= 0) {
+                                    let hitDist = hitT * maxDist;
+                                    if (hitDist < bestDist) { bestDist = hitDist; bestType = 'organelle'; bestRaw = undefined; }
+                                }
                             }
-                        } else {
-                            if (Math.hypot(rx - org.x, ry - org.y) < org.radius + TRACE_HITBOX) {
-                                return { dist: dist, type: 'organelle' };
+                        } else if (item.type === 'virus') {
+                            let vp = item.raw;
+                            let hitT = raySegT(startX, startY, endX, endY, vp.x, vp.y, vp.x, vp.y, (vp.radius * 1.4) + TRACE_HITBOX);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'virus'; bestRaw = undefined; }
                             }
-                        }
-                    } else if (item.type === 'virus') {
-                        let vp = item.raw;
-                        if (Math.hypot(rx - vp.x, ry - vp.y) < (vp.radius * 1.4) + TRACE_HITBOX) {
-                            return { dist: dist, type: 'virus' };
-                        }
-                    } else if (item.type === 'vesicle') {
-                        let v = item.raw;
-                        if (Math.hypot(rx - v.x, ry - v.y) < v.radius + TRACE_WIDTH + 6) {
-                            return { dist: dist, type: 'vesicle', raw: v };
+                        } else if (item.type === 'vesicle') {
+                            let v = item.raw;
+                            let hitT = raySegT(startX, startY, endX, endY, v.x, v.y, v.x, v.y, v.radius + TRACE_WIDTH + 6);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'vesicle'; bestRaw = v; }
+                            }
                         }
                     }
                 }
+
+                if (tExit >= maxDist || tExit >= bestDist) break;
+
+                if (tMaxX < tMaxY) {
+                    t = tMaxX;
+                    tMaxX += tDeltaX;
+                    cx += stepX;
+                } else {
+                    t = tMaxY;
+                    tMaxY += tDeltaY;
+                    cy += stepY;
+                }
+            }
+
+            if (bestType !== null) {
+                return { dist: bestDist, type: bestType, raw: bestRaw };
             }
             return { dist: maxDist, type: 'clear' };
         }
