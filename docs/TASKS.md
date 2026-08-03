@@ -38,8 +38,8 @@ sign of a stale board.
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
 | T01 | [DDA ray-march in `raycast()`](tasks/T01-dda-raymarch.md) | — | `DONE` |
-| T02 | [Wall sensing: microtubules + ER/Golgi](tasks/T02-wall-sensing.md) | T01 | `READY` |
-| T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `BLOCKED` |
+| T02 | [Wall sensing: microtubules + ER/Golgi](tasks/T02-wall-sensing.md) | T01 | `DONE` |
+| T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `READY` |
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `READY` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
 | T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) ⏳ *resumable* · 👤 *owner-run* | T04, T05 | `BLOCKED` → becomes `OWNER-RUN` |

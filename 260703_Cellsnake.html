@@ -320,7 +320,8 @@
             direction: 0,
             currentWidth: 600,
             microtubules: [],
-            progenitor: { active: false }
+            progenitor: { active: false },
+            nucleusDestroyed: false
         };
 
         let devMode = false;
@@ -1081,6 +1082,35 @@
             return eHi;
         }
 
+        // Smallest t in [0,1] where segment (ax,ay)->(bx,by) enters the AABB
+        // {rx,ry,rw,rh} (rx,ry = top-left corner) expanded by `pad`, or -1 if
+        // it never does. Standard slab test.
+        function segAabbT(ax, ay, bx, by, rx, ry, rw, rh, pad) {
+            let minX = rx - pad, maxX = rx + rw + pad;
+            let minY = ry - pad, maxY = ry + rh + pad;
+            let dx = bx - ax, dy = by - ay;
+            let tMin = 0, tMax = 1;
+            if (dx === 0) {
+                if (ax < minX || ax > maxX) return -1;
+            } else {
+                let tx1 = (minX - ax) / dx, tx2 = (maxX - ax) / dx;
+                if (tx1 > tx2) { let tmp = tx1; tx1 = tx2; tx2 = tmp; }
+                if (tx1 > tMin) tMin = tx1;
+                if (tx2 < tMax) tMax = tx2;
+                if (tMin > tMax) return -1;
+            }
+            if (dy === 0) {
+                if (ay < minY || ay > maxY) return -1;
+            } else {
+                let ty1 = (minY - ay) / dy, ty2 = (maxY - ay) / dy;
+                if (ty1 > ty2) { let tmp = ty1; ty1 = ty2; ty2 = tmp; }
+                if (ty1 > tMin) tMin = ty1;
+                if (ty2 < tMax) tMax = ty2;
+                if (tMin > tMax) return -1;
+            }
+            return tMin;
+        }
+
         function rebuildSpatialGrid() {
             spatialGrid.clear();
 
@@ -1193,6 +1223,46 @@
             // only returned once no unvisited cell can beat it (t >= bestDist).
             let endX = startX + dirX * maxDist, endY = startY + dirY * maxDist;
             let bestDist = maxDist, bestType = null, bestRaw = undefined;
+
+            // Analytic pre-pass: microtubules + ER/Golgi walls, each tested once
+            // per ray against the full segment (not per DDA step). Whichever hit
+            // is nearest clamps bestDist before the DDA loop below even starts,
+            // so it only needs to march up to that clamp.
+            const tubesLive = (mitosis.state !== 'idle' && mitosis.currentWidth > 350);
+            if (tubesLive) {
+                for (let i = 0; i < mitosis.microtubules.length; i++) {
+                    let tube = mitosis.microtubules[i];
+                    let hitT = segAabbT(startX, startY, endX, endY, tube.x, tube.y, tube.w, tube.h, TRACE_HITBOX);
+                    if (hitT >= 0) {
+                        let hitDist = hitT * maxDist;
+                        if (hitDist < bestDist) { bestDist = hitDist; bestType = 'microtubule'; bestRaw = undefined; }
+                    }
+                }
+            }
+
+            if (centralHitboxes.length > 0) {
+                // centralHitboxes (ER/Golgi) live in the cell-local, un-rotated
+                // frame (trap §4.3) — un-rotate the ray endpoints, not the walls.
+                let cosG = Math.cos(-globalRotation), sinG = Math.sin(-globalRotation);
+                let dxA = startX - activeCell.x, dyA = startY - activeCell.y;
+                let uAx = dxA * cosG - dyA * sinG, uAy = dxA * sinG + dyA * cosG;
+                let dxB = endX - activeCell.x, dyB = endY - activeCell.y;
+                let uBx = dxB * cosG - dyB * sinG, uBy = dxB * sinG + dyB * cosG;
+
+                for (let i = 0; i < centralHitboxes.length; i++) {
+                    let hb = centralHitboxes[i];
+                    if (hb.type !== 'path') continue;
+                    let r = hb.thick / 2 + TRACE_HITBOX;
+                    for (let j = 0; j < hb.points.length - 1; j++) {
+                        let p1 = hb.points[j], p2 = hb.points[j + 1];
+                        let hitT = raySegT(uAx, uAy, uBx, uBy, p1.x, p1.y, p2.x, p2.y, r);
+                        if (hitT >= 0) {
+                            let hitDist = hitT * maxDist;
+                            if (hitDist < bestDist) { bestDist = hitDist; bestType = 'wall'; bestRaw = undefined; }
+                        }
+                    }
+                }
+            }
 
             while (t < bestDist) {
                 let tExit = Math.min(tMaxX, tMaxY, maxDist);
@@ -1408,7 +1478,7 @@
             let weight = 1000;
             let d = hit.dist;
             
-            if (hit.type === 'boundary' || hit.type === 'nucleus' || hit.type === 'trace' || hit.type === 'organelle' || hit.type === 'virus') {
+            if (hit.type === 'boundary' || hit.type === 'nucleus' || hit.type === 'trace' || hit.type === 'organelle' || hit.type === 'virus' || hit.type === 'microtubule' || hit.type === 'wall') {
                 let danger = maxSense - d;
                 weight -= danger * danger * 5;
             } else if (hit.type === 'vesicle') {
@@ -2325,6 +2395,16 @@
                     golgiERContainer.visible = false;
                     // Spawn a massive burst of nuclear/membrane vesicles on destruction!
                     spawnVesicles(activeCell.x, activeCell.y, 15, 'membrane', 0x6c5ce7);
+                    // sweepProgress (and thus crossedCenter) is monotonic within one
+                    // mitosis event, so the `else` below never restores visibility
+                    // after this — safe to drop the sensor/physics hitboxes here too.
+                    centralHitboxes = [];
+                    // The per-arc "Shatter Golgi Arcs" pass in gameLoop calls
+                    // drawArcs() whenever it catches an unshattered arc, which
+                    // repopulates centralHitboxes from whatever's left in
+                    // activeArcs — undoing this clear. This flag tells that call
+                    // site to re-clear immediately after, every time.
+                    mitosis.nucleusDestroyed = true;
                 }
             } else {
                 nucleusLayer.visible = true;
@@ -2768,7 +2848,13 @@
                         arcsChanged = true;
                     }
                 }
-                if (arcsChanged) drawArcs();
+                if (arcsChanged) {
+                    drawArcs();
+                    // drawArcs() rebuilds centralHitboxes from whatever remains in
+                    // activeArcs; once the nucleus is destroyed those hitboxes must
+                    // stay gone regardless (see drawMitosisVisuals()).
+                    if (mitosis.nucleusDestroyed) centralHitboxes = [];
+                }
             }
 
             players.forEach(p => {
@@ -2848,11 +2934,10 @@
                     return;
                 }
 
-                // 1.5 Microtubule Scaffolding Collision
+                // 1.5 Microtubule Scaffolding Collision (swept: p.x,p.y -> nextX,nextY)
                 if (mitosis.state !== 'idle' && !p.isGap && !isGhost && !devMode && mitosis.currentWidth > 350) { // <-- Added !devMode
                     for (let tube of mitosis.microtubules) {
-                        if (nextX > tube.x - TRACE_HITBOX && nextX < tube.x + tube.w + TRACE_HITBOX &&
-                            nextY > tube.y - TRACE_HITBOX && nextY < tube.y + tube.h + TRACE_HITBOX) {
+                        if (segAabbT(p.x, p.y, nextX, nextY, tube.x, tube.y, tube.w, tube.h, TRACE_HITBOX) >= 0) {
                             p.alive = false;
                             return;
                         }
@@ -3060,6 +3145,7 @@
             mitosis.nextTriggerTime = 240; // Production: 4 minutes
             mitosis.eventStartTime = 0;
             mitosis.currentWidth = 600;
+            mitosis.nucleusDestroyed = false;
 
             warningElement.innerText = "";
             warningElement.style.display = 'none';
