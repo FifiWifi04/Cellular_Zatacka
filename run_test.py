@@ -40,12 +40,12 @@ def main():
         driver.get(url)
         time.sleep(2)
         
-        # Inject JS to enable Dev Mode, hold F key, and start the round
+        # Inject JS to enable Dev Mode, toggle the fuzzer, and start the round
         print("Injecting devMode parameters & fast-forwarding...")
         driver.execute_script("""
             devMode = true;
             document.getElementById('devIndicator').style.display = 'block';
-            keys['f'] = true;
+            fuzzActive = true;
             startRound();
         """)
         

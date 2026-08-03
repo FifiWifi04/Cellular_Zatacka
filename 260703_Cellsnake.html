@@ -196,6 +196,28 @@
     <div id="game-container"></div>
 
     <script>
+        // --- 0. Fuzzer instrumentation (T04) ---
+        // Declared before anything else can throw, so the error trap catches
+        // init-time failures too.
+        let fuzzStats = {
+            rounds: 0, elapsed: 0, tracePoints: 0, gridCells: 0, worldChildren: 0,
+            vesicles: 0, organelles: 0, virusParticles: 0, heapMB: null, errors: 0
+        };
+        window.fuzzStats = fuzzStats;
+        window.addEventListener('error', e => { fuzzStats.errors++; console.error('[FUZZ]', e.message); });
+        window.addEventListener('unhandledrejection', e => { fuzzStats.errors++; });
+
+        // Recursive display-object count under a PIXI container -- the leak canary
+        // for startRound()'s removeChildren() calls (T05).
+        function countDisplayObjects(container) {
+            let count = container.children.length;
+            for (let i = 0; i < container.children.length; i++) {
+                let child = container.children[i];
+                if (child.children) count += countDisplayObjects(child);
+            }
+            return count;
+        }
+
         // --- 1. Init PixiJS ---
         // Grab the initial container size instead of hardcoding 800x600
         const gameContainer = document.getElementById('game-container');
@@ -324,7 +346,13 @@
             nucleusDestroyed: false
         };
 
-        let devMode = false;
+        let devMode = false;    // master switch: enables the hotkeys + the HUD, nothing else
+        let godMode = false;    // disables death checks
+        let fuzzActive = false; // runs the soak loop
+        let fuzzStartWallTime = null;
+        let fuzzTopUpTimer = 0;
+        let fuzzToggleTimer = 0;
+        let fuzzStatsTimer = 0;
         const scoreText = document.getElementById('scoreboard');
         const warningElement = document.getElementById('globalWarning');
         const modeSelect = document.getElementById('modeSelect');
@@ -2645,6 +2673,17 @@
 
 
         // --- 7. Main Loop & Input ---
+        function updateDevIndicator() {
+            let txt = `⚙ DEV [god:${godMode ? 'on' : 'off'} fuzz:${fuzzActive ? 'on' : 'off'}]`;
+            if (fuzzActive) {
+                txt += ` | rounds:${fuzzStats.rounds} t:${fuzzStats.elapsed.toFixed(0)}s ` +
+                    `trace:${fuzzStats.tracePoints} cells:${fuzzStats.gridCells} wc:${fuzzStats.worldChildren} ` +
+                    `ves:${fuzzStats.vesicles} org:${fuzzStats.organelles} virus:${fuzzStats.virusParticles} ` +
+                    `heap:${fuzzStats.heapMB !== null ? fuzzStats.heapMB.toFixed(1) + 'MB' : 'n/a'} err:${fuzzStats.errors}`;
+            }
+            document.getElementById('devIndicator').innerText = txt;
+        }
+
         const keys = {};
         window.addEventListener('keydown', e => {
             keys[e.key] = true;
@@ -2654,9 +2693,32 @@
             if (e.key === '½' || e.key === '`' || e.key === '~') {
                 devMode = !devMode;
                 document.getElementById('devIndicator').style.display = devMode ? 'block' : 'none';
+                updateDevIndicator();
             }
             if (devMode && e.key === 'Tab') {
                 survivalTime += 15.0; // Instantly jump 15 seconds forward
+            }
+            if (devMode && (e.key === 'g' || e.key === 'G')) {
+                godMode = !godMode;
+                updateDevIndicator();
+            }
+            if (devMode && (e.key === 'f' || e.key === 'F')) {
+                fuzzActive = !fuzzActive;
+                if (fuzzActive) {
+                    fuzzStartWallTime = performance.now();
+                    fuzzStats.rounds = 0;
+                    fuzzTopUpTimer = 0;
+                    fuzzToggleTimer = 0;
+                    fuzzStatsTimer = 0;
+                    // Maximise trace count -- the main driver of grid rebuild cost.
+                    if (players.length < 4) {
+                        document.getElementById('modeSelect').value = '1';
+                        document.getElementById('aiSelect').value = '3';
+                        updateUI();
+                        startRound();
+                    }
+                }
+                updateDevIndicator();
             }
 
             // --- DYNAMIC TOGGLE LOGIC ---
@@ -2691,7 +2753,8 @@
             let deltaSec = app.ticker.deltaMS / 1000;
 
             // --- FUZZER SOAK-TEST UTILITY ---
-            if (devMode && (keys['f'] || keys['F'])) {
+            if (fuzzActive) {
+                let realDeltaSec = deltaSec; // wall-clock, captured before dilation below
                 delta *= 4.0;
                 deltaSec *= 4.0;
 
@@ -2699,14 +2762,76 @@
                     mitosis.nextTriggerTime = 0.1;
                 }
 
-                if (infection.state === 'none') {
+                // Only force the next breach while under the natural per-breach max
+                // (30, see the breach spawn loop below) -- that loop is unconditional,
+                // so forcing breaches once already at the cap would grow it unbounded.
+                if (infection.state === 'none' && infection.particles.length < 30) {
                     infection.nextWarningTime = Math.min(infection.nextWarningTime, survivalTime + 1.0);
                 }
 
-                let aliveCount = players.filter(p => p.alive).length;
-                if (aliveCount === 0) {
-                    startRound();
-                    return;
+                // Top up hazards to their documented maximum. Gated on a timer so
+                // this spawns at most once per (dilated) second, never per frame.
+                fuzzTopUpTimer -= realDeltaSec;
+                if (fuzzTopUpTimer <= 0) {
+                    fuzzTopUpTimer = 1.0;
+
+                    if (vesicles.length < 25 && window.golgiData) {
+                        let vTypes = ['mitochondria', 'lysosome', 'membrane'];
+                        for (let i = vesicles.length; i < 25; i++) {
+                            let vAngle = Math.random() * Math.PI * 2;
+                            let vDist = Math.random();
+                            let vx = activeCell.x + Math.cos(vAngle) * activeCell.radiusX * vDist;
+                            let vy = activeCell.y + Math.sin(vAngle) * activeCell.radiusY * vDist;
+                            let vType = vTypes[Math.floor(Math.random() * vTypes.length)];
+                            let vColor = vType === 'mitochondria' ? C_MITO : (vType === 'lysosome' ? C_LYSO : C_MEMB);
+                            spawnVesicles(vx, vy, 1, vType, vColor);
+                        }
+                    }
+
+                    // 30 particles per breach is the natural maximum updateInfection()
+                    // ever produces (see its breach-spawn loop) -- do not invent a
+                    // larger cap.
+                    if (infection.particles.length < 30) {
+                        for (let i = infection.particles.length; i < 30; i++) {
+                            let pAngle = Math.random() * Math.PI * 2;
+                            let pSpeed = 3.0 + Math.random() * 2.0;
+                            infection.particles.push({
+                                x: activeCell.x, y: activeCell.y,
+                                vx: Math.cos(pAngle) * pSpeed, vy: Math.sin(pAngle) * pSpeed,
+                                radius: 6
+                            });
+                        }
+                    }
+                }
+
+                // Rapid state toggles, every 0.5s of fuzz time -- most likely to
+                // expose splitSprites / RenderTexture lifecycle bugs.
+                fuzzToggleTimer -= realDeltaSec;
+                if (fuzzToggleTimer <= 0) {
+                    fuzzToggleTimer = 0.5;
+                    let aliveForToggle = players.filter(p => p.alive);
+                    if (aliveForToggle.length > 0) {
+                        let victim = aliveForToggle[Math.floor(Math.random() * aliveForToggle.length)];
+                        victim.targetMode = (victim.targetMode === 'self') ? 'attack' : 'self';
+                    }
+                    cameraMode = (cameraMode === 'shared') ? 'split' : 'shared';
+                }
+
+                // fuzzStats HUD, once per second of fuzz wall-clock time -- not per frame.
+                fuzzStatsTimer -= realDeltaSec;
+                if (fuzzStatsTimer <= 0) {
+                    fuzzStatsTimer = 1.0;
+                    fuzzStats.elapsed = (performance.now() - fuzzStartWallTime) / 1000;
+                    let tp = 0;
+                    for (let p of players) for (let seg of p.traceSegments) tp += seg.length;
+                    fuzzStats.tracePoints = tp;
+                    fuzzStats.gridCells = spatialGrid.cells.size;
+                    fuzzStats.worldChildren = countDisplayObjects(world);
+                    fuzzStats.vesicles = vesicles.length;
+                    fuzzStats.organelles = organelles.length;
+                    fuzzStats.virusParticles = infection.particles.length;
+                    fuzzStats.heapMB = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : null;
+                    updateDevIndicator();
                 }
             }
             let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
@@ -2731,7 +2856,7 @@
             let totalPlayers = currentMode + aiCount;
             // Only update the UI text to show the timer if it's a Solo game and not frozen
             if (totalPlayers === 1 && !isCellFrozen) {
-                if (!players.some(p => p.alive) && !devMode) {
+                if (!players.some(p => p.alive) && !godMode) {
                     uiElement.classList.add('visible');
                     uiElement.classList.remove('hidden-ui');
                     document.getElementById('scoreboard').innerText = `You Survived: ${survivalTime.toFixed(1)}s!`;
@@ -2743,11 +2868,24 @@
 
             let activePlayers = players.filter(p => p.alive);
             if (totalPlayers === 1 && activePlayers.length === 0) {
+                // A round ending here would set isPlaying = false and app.ticker is
+                // already stopped above, so a fuzz restart must escape the current
+                // tick via setTimeout rather than call startRound() inline (T04).
+                if (fuzzActive) {
+                    fuzzStats.rounds++;
+                    setTimeout(startRound, 0);
+                    return;
+                }
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
                 scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s`;
                 return;
             } else if (totalPlayers > 1 && activePlayers.length <= 1) {
+                if (fuzzActive) {
+                    fuzzStats.rounds++;
+                    setTimeout(startRound, 0);
+                    return;
+                }
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
                 if (activePlayers.length === 1) {
@@ -2922,13 +3060,13 @@
                 let isGhost = p.effects.ghostTimer > 0;
 
                 // 1. Trace and Organelle Collisions
-                if (!p.isGap && !isGhost && !devMode && checkCollision(nextX, nextY, p)) { // <-- Added !devMode
+                if (!p.isGap && !isGhost && !godMode && checkCollision(nextX, nextY, p)) { // <-- Added !godMode
                     p.alive = false;
                     return;
                 }
 
                 // 1.5 Microtubule Scaffolding Collision (swept: p.x,p.y -> nextX,nextY)
-                if (mitosis.state !== 'idle' && !p.isGap && !isGhost && !devMode && mitosis.currentWidth > 350) { // <-- Added !devMode
+                if (mitosis.state !== 'idle' && !p.isGap && !isGhost && !godMode && mitosis.currentWidth > 350) { // <-- Added !godMode
                     for (let tube of mitosis.microtubules) {
                         if (segAabbT(p.x, p.y, nextX, nextY, tube.x, tube.y, tube.w, tube.h, TRACE_HITBOX) >= 0) {
                             p.alive = false;
@@ -2938,7 +3076,7 @@
                 }
 
                 // 2. Viral Swarm Collisions (Added Ghost & Dev Immunity)
-                if (infection.particles.length > 0 && !isGhost && !devMode) { // <-- Added !devMode
+                if (infection.particles.length > 0 && !isGhost && !godMode) { // <-- Added !godMode
                     for (let i = infection.particles.length - 1; i >= 0; i--) {
                         let vp = infection.particles[i];
                         if (Math.hypot(nextX - vp.x, nextY - vp.y) < (vp.radius * 1.4) + TRACE_HITBOX) {
@@ -3062,7 +3200,7 @@
                         if (p.y > ringY) caught = true;
                     }
 
-                    if (caught && !devMode) p.alive = false; // <-- Added !devMode
+                    if (caught && !godMode) p.alive = false; // <-- Added !godMode
                 }
             });
 

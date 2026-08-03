@@ -43,7 +43,7 @@ sign of a stale board.
 | T01 | [DDA ray-march in `raycast()`](tasks/T01-dda-raymarch.md) | — | `DONE` |
 | T02 | [Wall sensing: microtubules + ER/Golgi](tasks/T02-wall-sensing.md) | T01 | `DONE` |
 | T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `DONE` |
-| T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `READY` |
+| T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `DONE` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
 | T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `BLOCKED` |
 | T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `BLOCKED` |
@@ -60,7 +60,7 @@ later returns FAIL, revisit anything that landed in that window.
 | T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `BLOCKED` |
 | T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `BLOCKED` |
 | T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `READY` |
-| T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `BLOCKED` |
+| T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `READY` |
 
 ### Track C — Phase 3 content (generation-gated)
 

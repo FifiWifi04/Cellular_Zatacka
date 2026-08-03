@@ -109,6 +109,18 @@ them.
 
 ---
 
+## Found while hardening the fuzzer (T04) — 2026-08-03
+
+- **`performance.memory.usedJSHeapSize` climbed steadily across an 8.4-minute
+  fuzz soak** (≈61MB → ≈486MB over 22 restarts), while `fuzzStats.worldChildren`
+  stayed flat across restarts (~700 right after `startRound()`, ~1300-1400
+  mid-round, both bands repeating identically many rounds apart). The flat
+  `worldChildren` says this is **not** the PixiJS display-object leak T05
+  targets. It's more likely GC lag from per-frame trace-point/vesicle/particle
+  allocation under the fuzzer's dilated clock, but T04 only measures — T06a's
+  longer soak should watch whether `heapMB` keeps climbing past ~500MB or
+  plateaus once GC catches up.
+
 ## Found while scoping Phases 6 and 7 — 2026-08-03
 
 - **Gap and vesicle spawn are frame-rate dependent, not time dependent.**
