@@ -18,8 +18,8 @@ them.
 
 - **`run_test.py` has hard-coded Windows paths.** The `cwd` for the HTTP server
   and the screenshot `output_dir` are absolute paths to one machine
-  (`c:\Users\au516150\...`). The script cannot run anywhere else. Fixed as part of
-  T06; if you touch it earlier, fix it then. — 2026-08-02
+  (`c:\Users\au516150\...`). The script cannot run anywhere else. Superseded: `tools/soak.py`
+  and `tools/verify_harness.py` replace it; `run_test.py` is now unused legacy. — 2026-08-02
 
 - **`walkthrough.md` describes Phase 2 as complete, but none of it is in the
   code.** See `docs/tasks/P01-asset-pipeline-parked.md` for the full analysis.
@@ -46,11 +46,11 @@ them.
 - **`checkCollision()` calls `players.find()` per grid item.** Currently cheap
   because segment counts are low, but it is a linear scan inside the hottest loop
   in the file. T01 hoists it in `raycast()`; the same hoist should be applied here
-  if T06 shows it mattering. — 2026-08-02
+  if T06a shows it mattering. — 2026-08-02
 
 - **Incremental spatial-grid updates.** `rebuildSpatialGrid()` is a full rebuild
   every frame — correct by construction, and that is worth a lot. Only consider
-  incremental updates if T06's profiling shows the rebuild as a genuine hotspot
+  incremental updates if T06a's profiling shows the rebuild as a genuine hotspot
   *after* T07's trace cap has landed. Incremental removal is where bugs hide.
   — 2026-08-02
 

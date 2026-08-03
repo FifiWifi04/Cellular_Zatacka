@@ -1,6 +1,6 @@
 # T07 — Bound trace growth (per-player point cap)
 
-**Track:** B · **Depends on:** T06 · **Risk:** medium (changes gameplay) · **Est. diff:** ~50 lines
+**Track:** B · **Depends on:** T06a · **Risk:** medium (changes gameplay) · **Est. diff:** ~50 lines
 
 Read `docs/AGENT_CONDUCT.md` before starting.
 
@@ -20,9 +20,9 @@ walks every segment of every player every frame and calls `insertSegment()` per
 point-pair, so per-frame cost is linear in total trace length. In a long round
 with 4 players that is a steadily rising floor under the whole frame budget.
 
-T06's run B measures exactly this. Use its numbers to pick the cap.
+T06a's run B measures exactly this. Use its numbers to pick the cap.
 
-**Read T06's report before choosing constants.** If run B shows no meaningful
+**Read `docs/reports/soak-B/soak.csv` before choosing constants.** If run B shows no meaningful
 degradation at 30 minutes, consider setting the cap generously high (memory
 bound only) and note that in the commit message.
 
@@ -42,7 +42,7 @@ trace branch — specifically the self-immunity logic that depends on
 ### The cap
 
 ```
-const MAX_TRACE_POINTS = 3600;   // ≈60s of trace at Normal speed; tune from T06
+const MAX_TRACE_POINTS = 3600;   // ≈60s of trace at Normal speed; tune from T06a
 ```
 
 Applied **per player**, counted across all of that player's `traceSegments`.

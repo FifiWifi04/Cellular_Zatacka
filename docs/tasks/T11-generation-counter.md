@@ -1,6 +1,6 @@
 # T11 — Generation counter infrastructure
 
-**Track:** C · **Depends on:** T06 · **Risk:** low · **Est. diff:** ~60 lines
+**Track:** C · **Depends on:** T06a · **Risk:** low · **Est. diff:** ~60 lines
 
 Read `docs/AGENT_CONDUCT.md` before starting.
 

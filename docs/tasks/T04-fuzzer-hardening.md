@@ -177,7 +177,7 @@ Do not change any gameplay constant. Do not change `startRound()`'s behaviour.
    frame.
 6. **10-minute smoke run.** Leave fuzz on for 10 minutes. `fuzzStats.errors`
    must be 0. Record `rounds`, `worldChildren` at start vs. end, and `heapMB` at
-   start vs. end in the commit message — this is the input T06 builds on.
+   start vs. end in the commit message — this is the input T06a builds on.
 7. Update `run_test.py` to set `fuzzActive` via the new toggle rather than
    `keys['f'] = true`.
 
@@ -191,4 +191,4 @@ Do not change any gameplay constant. Do not change `startRound()`'s behaviour.
 - [ ] Global `error` / `unhandledrejection` traps installed
 - [ ] 10-minute smoke run clean, numbers in commit message
 - [ ] `run_test.py` updated
-- [ ] `docs/TASKS.md`: T04 → `DONE`, T10 → `READY`; T06 → `READY` if T05 done
+- [ ] `docs/TASKS.md`: T04 → `DONE`, T10 → `READY`; T06a → `READY` if T05 done

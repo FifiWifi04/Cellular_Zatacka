@@ -32,7 +32,7 @@ with up to hundreds of blob `Graphics`, the nucleus, the ER/Golgi
 `Container` + `Graphics` from `drawArcs()`, and 25 organelle `Graphics`. A fuzz
 loop restarting rounds every few seconds will accumulate all of it.
 
-This is the "mathematically stable" evidence the Phase 1 gate asks for, and T06
+This is the "mathematically stable" evidence the Phase 1 gate asks for, and T06a
 cannot produce a meaningful report until this is fixed.
 
 ---
@@ -177,7 +177,7 @@ This task is verified by numbers, not by eye.
 - [ ] `cytosolParticles` / `membraneProtrusionsList` reset alongside their containers
 - [ ] 30-restart run: no errors, map fully renders, `worldChildren` flat
 - [ ] Before/after numbers in the commit message
-- [ ] `docs/TASKS.md`: T05 → `DONE`; T06 → `READY` if T04 done
+- [ ] `docs/TASKS.md`: T05 → `DONE`; T06a → `READY` if T04 done
 
 ## Rollback
 

@@ -92,7 +92,7 @@ the arena. Stop growing at the cap.
 
 - Add a `'mass'` hit type using the same `segAabbT` pre-pass as microtubules
   (analytic, once per ray, not per DDA step). With up to 40 blocks this is 40
-  tests per ray — acceptable, but if T06 shows it costing, insert the blocks into
+  tests per ray — acceptable, but if T06a's data shows it costing, insert the blocks into
   `spatialGrid` in `rebuildSpatialGrid()` instead and let the DDA find them.
   **Prefer the grid insert** — it is barely more code and it scales.
 - Weight it in the hazard branch of the scoring function.

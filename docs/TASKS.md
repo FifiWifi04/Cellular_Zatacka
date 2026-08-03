@@ -21,8 +21,11 @@ by owner decision) · `OWNER-RUN` (must be run by a human, not a scheduled agent
 
 **`OWNER-RUN` tasks:** a scheduled session must **skip** these and take the next
 `READY` task instead. If the only remaining work is `OWNER-RUN`, report that and
-stop. Currently only T06 — its soak runs are 30 minutes each, which exceeds the
-10-minute command ceiling a scheduled session has.
+stop. Currently only **T06b** (the Phase 1 PASS/FAIL verdict), because it is a
+judgement about the project rather than a measurement. Its data collection was
+split out into T06a, which a scheduled session *can* run — that is deliberately
+what T07, T11 and T16 depend on, so the routine is never blocked waiting on a
+human decision.
 
 **Resumable tasks** are marked ⏳. They span several sessions and carry their own
 `## Progress` checklist, committed after each stage. They stay `READY` until every
@@ -42,15 +45,19 @@ sign of a stale board.
 | T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `BLOCKED` |
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `READY` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
-| T06 | [Soak run + memory profile (gate evidence)](tasks/T06-soak-report.md) ⏳ *resumable* · 👤 *owner-run* | T04, T05 | `BLOCKED` → becomes `OWNER-RUN` |
+| T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `BLOCKED` |
+| T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `BLOCKED` |
 
-**Phase 1 gate:** T01–T06 all `DONE`, with T06's report committed.
+**Phase 1 gate:** T01–T06a all `DONE`, and T06b's verdict committed as PASS.
+T07/T11/T16 intentionally depend on **T06a** (the evidence exists), not on T06b
+(the human verdict), so work continues while the report awaits sign-off. If T06b
+later returns FAIL, revisit anything that landed in that window.
 
 ### Track B — Structural hygiene (cheap, unblocks Phase 3)
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06 | `BLOCKED` |
+| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `BLOCKED` |
 | T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `BLOCKED` |
 | T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `READY` |
 | T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `BLOCKED` |
@@ -59,7 +66,7 @@ sign of a stale board.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T11 | [Generation counter infrastructure](tasks/T11-generation-counter.md) | T06 | `BLOCKED` |
+| T11 | [Generation counter infrastructure](tasks/T11-generation-counter.md) | T06a | `BLOCKED` |
 | T12 | [Gen 2 — membrane calcification](tasks/T12-gen2-calcification.md) | T11 | `BLOCKED` |
 | T13 | [Gen 2 — organelle necrosis (lethal static walls)](tasks/T13-gen2-necrosis.md) | T11 | `BLOCKED` |
 | T14 | [Gen 3 — the malignant mass](tasks/T14-gen3-malignant-mass.md) | T11 | `BLOCKED` |
@@ -69,7 +76,7 @@ sign of a stale board.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T16 | [Camera screenshake utility](tasks/T16-screenshake.md) | T06 | `BLOCKED` |
+| T16 | [Camera screenshake utility](tasks/T16-screenshake.md) | T06a | `BLOCKED` |
 | T17 | [Particle emitter splash system](tasks/T17-particles.md) | T16 | `BLOCKED` |
 | T18 | [Warning-window post-processing filter](tasks/T18-warning-filter.md) | T16 | `BLOCKED` |
 
@@ -97,14 +104,15 @@ sign of a stale board.
 ## Dependency graph
 
 ```
-T01 ──► T02 ──► T03 ──────────────► T19
-T04 ──┬────────► T06 ──┬─► T07 ──► T08
-T05 ──┘               ├─► T11 ──┬─► T12
-T04 ──► T10           │         ├─► T13
-                      │         ├─► T14
-T09  (independent)    │         └─► T15
-T20  (independent)    └─► T16 ──┬─► T17
-T21  (independent)              └─► T18
+T01 ──► T02 ──► T03 ───────────────► T19
+T04 ──┬───────► T06a ──┬─► T07 ──► T08
+T05 ──┘         │      ├─► T11 ──┬─► T12
+T04 ──► T10     │      │         ├─► T13
+                │      │         ├─► T14
+T09 (indep.)    │      │         └─► T15
+T20 (indep.)    │      └─► T16 ──┬─► T17
+T21 (indep.)    │                └─► T18
+                └─► T06b  👤 owner verdict — gates nothing downstream
 ```
 
 Four tasks are independent and can be picked up at any time if the head of a

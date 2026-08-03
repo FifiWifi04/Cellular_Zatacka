@@ -45,8 +45,9 @@ STEP 1 — READ THE RULES
 
 STEP 2 — PICK YOUR TASK
   Take the LOWEST-NUMBERED task on the board whose status is READY.
-  SKIP any task marked OWNER-RUN (currently T06) — those need a human and a
-  longer runtime than you have; take the next READY task instead.
+  SKIP any task marked OWNER-RUN (currently T06b, the Phase 1 PASS/FAIL
+  verdict) — that is a judgement for the owner, not a measurement. Take the
+  next READY task instead.
   If no task is READY, stop and report which dependencies are blocking, and
   name any OWNER-RUN task that is waiting on the owner.
 
@@ -58,7 +59,7 @@ STEP 2 — PICK YOUR TASK
       for a commit starting with that task's ID (e.g. "T04:"). If such a commit
       exists, the board is stale: fix the board, push that fix alone, and stop.
 
-  - HAS "## Progress" (a RESUMABLE multi-session task, e.g. T06):
+  - HAS "## Progress" (a RESUMABLE multi-session task, e.g. T06a):
       Partial commits with that task's ID are EXPECTED and do not mean the board
       is stale. Do not apply the check above. Read the checklist, start at the
       first unticked stage, and follow that task file's own "How to run this task
@@ -98,11 +99,14 @@ STEP 5 — VERIFY IN A REAL BROWSER (you have Bash only — there is no browser 
   5b. Write a SHORT script per check that imports the harness:
         import sys; sys.path.insert(0, "tools")
         from verify_harness import game
-        with game(players=1, bots=1) as g:
+        with game(players=1, bots=3, immortal=True) as g:
             g.run_game_seconds(30)
             print(g.stats())
             g.screenshot("after30s")
             g.assert_console_clean()
+      (bots=3/immortal keeps the round alive: with players=1,bots=1 nobody
+       steers the human, it hits the membrane, and the round ends in seconds.
+       Drop immortal=True whenever the check is ABOUT collisions.)
 
   5c. Run each script via Bash SYNCHRONOUSLY, UNDER 10 MINUTES per invocation —
       that is your hard command ceiling. Split long checks across several short
@@ -143,9 +147,9 @@ STOP CONDITIONS — stop and report rather than pressing on:
     Unverified work on this codebase is worse than no work: record why in
     docs/BACKLOG.md, commit only that, and stop.
   - The task file says the step needs an owner decision.
-  - The only remaining work is OWNER-RUN (T06). Report that it is waiting on
-    the owner and stop. Do not attempt it, and do not start Track C or D on an
-    unfinished Phase 1 gate.
+  - The only remaining work is OWNER-RUN (T06b). Report that it is waiting on
+    the owner and stop. Note that Track C and D depend on T06a, not T06b, so
+    they should already be READY if the soak data is committed.
 ```
 
 ---
@@ -174,7 +178,11 @@ Learned the hard way — the first routine produced no-ops for these reasons:
   Adding `BashOutput` and `KillBash` would let sessions manage long background
   processes and is worth doing if you can.
 - **Commands are capped at 10 minutes.** Anything longer must be split, or
-  marked `OWNER-RUN` on the board (currently only T06).
+  marked `OWNER-RUN` on the board (currently only T06b).
+- **Long soaks run detached.** T06a launches `tools/soak.py` with `nohup ... &`
+  so it outlives the 10-minute foreground cap, then polls the CSV it flushes.
+- **No GPU.** The game simulates at ~0.38x real time at 640x480, so a 10-minute
+  invocation buys roughly 3.5 game-minutes. Budget checks accordingly.
 - **Repo write access.** The session must be able to push to
   `claude/html-game-phase-1-43obou`.
 
@@ -186,8 +194,8 @@ before the next one builds on it, and at 8 tasks/day the whole 21-task board is
 consumed in under three days with no review window. 6h finishes Phase 1 in about
 a day and a half and still leaves room to inspect.
 
-**Sessions must not overlap.** Some tasks are long — T06 alone runs three
-30-minute soak tests. If a firing is still running when the next one fires, the
+**Sessions must not overlap.** Some tasks are long — T06a runs three soaks, each
+detached and polled. If a firing is still running when the next one fires, the
 second will see a dirty tree or a stale board. Step 0 catches this and stops
 safely, but the firing is wasted. Prefer 6h for that reason too.
 
@@ -195,14 +203,14 @@ safely, but the firing is wasted. Prefer 6h for that reason too.
 
 | Task | Why it needs you |
 |---|---|
-| T06 | **`OWNER-RUN` — scheduled sessions skip it entirely.** Its 30-minute soaks exceed the 10-minute command ceiling, and it ends in a PASS/FAIL gate verdict that is yours to make. Run it interactively. Note that T07, T11 and T16 stay `BLOCKED` until you do, so the routine will run out of Track A work and fall through to T09/T20/T21. |
+| T06b | **`OWNER-RUN` — scheduled sessions skip it entirely.** The PASS/FAIL verdict on Phase 1 is yours. It no longer blocks anything: T07, T11 and T16 depend on **T06a** (the data), which a routine can run, so work continues while the report waits for you. If your verdict is FAIL, review whatever landed in the meantime. |
 | T07 | The trace cap is a real gameplay change. The task defaults to a conservative memory-bound value and asks before shipping the aggressive one. |
 | T12 | Highest-risk task on the board — it changes the arena boundary. Worth reviewing personally. |
 | T21 | Acceptance is subjective. "Revert it, it looked worse" is a valid outcome and needs your eye. |
 | P01 | Parked. Must never be picked up. |
 
-**Order matters in Track A.** T01 → T02 → T03 all edit the same function, and T06
-needs both T04 and T05. The board enforces this through the READY/BLOCKED
+**Order matters in Track A.** T01 → T02 → T03 all edit the same function, and T06a
+needs both T04 and T05 (its driver aborts in ~15s if T04 has not landed). The board enforces this through the READY/BLOCKED
 statuses — do not hand-edit statuses to parallelise.
 
 **If a session stops with nothing done**, that is the design working. Read its

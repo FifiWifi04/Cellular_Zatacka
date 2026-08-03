@@ -1,6 +1,6 @@
 # T16 — Camera screenshake utility
 
-**Track:** D (Phase 4 juice) · **Depends on:** T06 · **Risk:** medium (camera) · **Est. diff:** ~60 lines
+**Track:** D (Phase 4 juice) · **Depends on:** T06a · **Risk:** medium (camera) · **Est. diff:** ~60 lines
 
 Read `docs/AGENT_CONDUCT.md` before starting — **especially §4.5**, which exists
 because of this exact task.

@@ -9,7 +9,7 @@ Start here.
 | [`tasks/`](tasks/) | One file per task, in execution order. Each is self-contained. |
 | [`BACKLOG.md`](BACKLOG.md) | Incidental findings. Append here instead of fixing things outside your task. |
 | [`SESSION_PROMPT.md`](SESSION_PROMPT.md) | Copy-paste prompt for a scheduled/routine agent session. |
-| `reports/` | Created by T06 — soak-test data and the Phase 1 gate report. |
+| `reports/` | Created by T06a/T06b — soak data and the Phase 1 gate report. |
 
 Project-level context lives in the repository root:
 `Development_plan.md` (the 5-phase roadmap) and `walkthrough.md` (history — note
@@ -53,7 +53,7 @@ optional — they are the questions whose answers change the design.
 
 ```
 Track A  T01 → T02 → T03          finish Phase 1's bot + sensor
-         T04, T05 → T06           finish Phase 1's fuzzer + gate evidence
+         T04, T05 → T06a → T06b   finish Phase 1's fuzzer, evidence, then the verdict
 Track B  T07 → T08, T09, T10      structural hygiene
 Track C  T11 → T12/T13/T14/T15    Phase 3 generation-gated content
 Track D  T16 → T17/T18            Phase 4 juice
@@ -68,5 +68,7 @@ Phase 2.1 (the sprite/asset swap) is **parked** — see
 [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). Phase
 2.2 is not: it is T21, and it works on the current vector renderer.
 
-**Phase 1 is not done until T06 produces a PASS.** Do not start Track C or D
-before that, regardless of how ready they look.
+**Phase 1 is not signed off until T06b returns a PASS.** Track C and D depend on
+**T06a** (the evidence) rather than on the verdict, so the routine keeps moving
+while the report waits for you — but a FAIL means revisiting whatever landed in
+that window.
