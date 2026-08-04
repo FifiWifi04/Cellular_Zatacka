@@ -11,6 +11,19 @@ Read `docs/AGENT_CONDUCT.md` before starting.
 One quality setting that scales the expensive visual effects down for weak
 devices and up for strong ones, defaulting sensibly without asking the player.
 
+> **Partly landed already (2026-08-04), by owner request.** A `Glow: Low /
+> Medium / High` dropdown now exists in the menu, driving `QUALITY_TIERS` and
+> `applyGlowQuality(tier)`. It covers the **bloom filter and the trail-halo
+> blur**, and defaults to **Low** — the owner found High's original tuning too
+> intense and harder to read. High preserves the original values exactly.
+>
+> **What is left for this task:** fold the remaining effects into the same
+> `QUALITY_TIERS` table — trace RenderTexture scale (T25), particle budget
+> (T17), the warning-window filter (T18), and cytosol blob count — plus
+> automatic device detection and promote/demote by measured frame time. Extend
+> `applyGlowQuality`, do not add a second mechanism, and consider renaming it
+> `applyQuality` once it governs more than glow.
+
 ## Why
 
 The game runs a **full-screen `AdvancedBloomFilter`** on `world`

@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 9652c7f5e767184c -->
+<!-- standalone-build-inputs: 52d036f17ee142cd -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3420,6 +3420,12 @@ void main() {
                 <option value="2.5">Speed: Fast</option>
                 <option value="3.5">Speed: Very Fast</option>
             </select>
+
+            <select id="qualitySelect" onchange="updateUI()">
+                <option value="low" selected>Glow: Low</option>
+                <option value="medium">Glow: Medium</option>
+                <option value="high">Glow: High</option>
+            </select>
             <button onclick="startRound()">Start Game</button>
             <button class="fullscreen-btn" onclick="toggleFullScreen()">Fullscreen</button>
         </div>
@@ -3532,17 +3538,42 @@ void main() {
         trailLayer.addChild(trailGlow);
         trailLayer.addChild(trailCore);
 
-        // --- GLOBAL BLOOM FILTER ---
+        // --- GLOBAL BLOOM FILTER + GLOW QUALITY TIERS ---
+        // High is the original tuning. Low is the default: the bloom threshold is
+        // raised so fewer pixels bloom at all, and both the bloom and the trail
+        // halo are cheaper (lower `quality` and `blur` are the two settings that
+        // actually cost frame time). Medium sits midway on every value.
+        const QUALITY_TIERS = {
+            low:    { threshold: 0.6,  bloomScale: 0.6, brightness: 1.0, blur: 4, quality: 2, trailBlur: 2 },
+            medium: { threshold: 0.45, bloomScale: 1.0, brightness: 1.1, blur: 6, quality: 3, trailBlur: 3 },
+            high:   { threshold: 0.3,  bloomScale: 1.5, brightness: 1.2, blur: 8, quality: 4, trailBlur: 4 }
+        };
+        let glowQuality = 'low';
+        let bloomFilter = null;   // module-scope so applyGlowQuality can retune it
+
         if (typeof PIXI.filters.AdvancedBloomFilter !== 'undefined') {
-            const bloomFilter = new PIXI.filters.AdvancedBloomFilter({
-                threshold: 0.3,
-                bloomScale: 1.5,
-                brightness: 1.2,
-                blur: 8,
-                quality: 4
-            });
+            bloomFilter = new PIXI.filters.AdvancedBloomFilter(QUALITY_TIERS.low);
             world.filters = [bloomFilter];
         }
+
+        // Visual only — never touches gameplay, collision or timing.
+        window.applyGlowQuality = function (tier) {
+            let t = QUALITY_TIERS[tier];
+            if (!t) return;
+            glowQuality = tier;
+            if (bloomFilter) {
+                bloomFilter.threshold = t.threshold;
+                bloomFilter.bloomScale = t.bloomScale;
+                bloomFilter.brightness = t.brightness;
+                bloomFilter.blur = t.blur;
+                bloomFilter.quality = t.quality;
+            }
+            blurFilter.blur = t.trailBlur;
+        };
+
+        // updateUI() is not called at startup, so apply the default tier here or
+        // the trail halo would stay at the High value until a dropdown is touched.
+        applyGlowQuality('low');
 
         // --- 3. Game State & Constants ---
         let activeCell = { x: 1500, y: 1500, radiusX: 1400, radiusY: 1200, radius: 1400 };
@@ -6501,6 +6532,7 @@ void main() {
 
             currentSpeed = parseFloat(speedSelect.value);
             cameraMode = document.getElementById('cameraSelect').value;
+            applyGlowQuality(document.getElementById('qualitySelect').value);
 
             let totalPlayers = currentMode + aiCount;
             if (totalPlayers === 1) {

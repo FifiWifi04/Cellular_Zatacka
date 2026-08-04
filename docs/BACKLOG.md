@@ -214,3 +214,18 @@ them.
   arrays, accumulated listeners, or per-round state on `window` are the
   candidates. Full analysis in `docs/tasks/T06a-soak-measurement.md`. Needs a
   task once T06b weighs it. — 2026-08-04
+
+## Glow quality tiers landed early — 2026-08-04
+
+- **`Glow: Low / Medium / High` dropdown added at owner request**, ahead of
+  T26. Drives `QUALITY_TIERS` + `applyGlowQuality(tier)` covering the
+  `AdvancedBloomFilter` and the trail-halo `BlurFilter`. **Default is Low** —
+  the original tuning (now High) washed out the scene: at High the ER reads as
+  one solid glow blob and mitochondria in the periphery are barely visible,
+  which is a legibility problem, not only a taste one. T26 still owns folding
+  the remaining effects in plus auto-detection. — 2026-08-04
+
+- **`updateUI()` is never called at page load**, only from the select
+  `onchange` handlers and `startRound()`. Anything that needs to be applied at
+  startup must call it explicitly — `applyGlowQuality('low')` does. Worth
+  remembering for any future menu setting. — 2026-08-04
