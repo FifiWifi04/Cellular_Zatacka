@@ -58,8 +58,25 @@ real browser before committing. If you find an unrelated bug, write it in
   `file://` the console is completely clean. If a change requires loading
   something over the network, the task is wrong — stop and report.
 - Do not create new `.js` or `.css` files for game code, and do not split
-  `260703_Cellsnake.html`. `vendor/` (third-party libraries, never edited) and
-  `tools/` (the verification harness) are the only exceptions.
+  `260703_Cellsnake.html`. `vendor/` (third-party libraries, never edited),
+  `tools/` (harness and build scripts) and `dist/` (generated, never hand-edited)
+  are the only exceptions.
+
+**If you change `260703_Cellsnake.html` or anything in `vendor/`, rebuild the
+standalone distributable in the same commit:**
+
+```
+python3 tools/build_standalone.py          # rebuild dist/Cellular_Zatacka.html
+python3 tools/build_standalone.py --check  # exits 1 if dist/ is stale
+```
+
+`dist/Cellular_Zatacka.html` inlines both libraries into one file, so a person
+can download that single file and play — no folder, no network. The source HTML
+alone does **not** work standalone: it loads `vendor/*.js` by relative path, so
+on its own it renders the menu and then dies with `PIXI is not defined`, with
+Start doing nothing because the script threw before `window.startRound` was
+assigned. A stale `dist/` silently ships an old game, which is worse than none —
+`--check` is in the definition of done for that reason.
 - Anything you add goes next to the code it belongs with, in the existing
   `// --- N. Section ---` structure.
 
@@ -233,6 +250,8 @@ A task is not done because the code looks right. Run all of these:
 - [ ] Exactly one task implemented, nothing else
 - [ ] All items in that task's `## Verification` section pass
 - [ ] Browser console clean
+- [ ] `python3 tools/build_standalone.py --check` passes (rebuild if you touched
+      the game file or `vendor/`)
 - [ ] Diff contains no reformatting, no renames, no unrelated changes
 - [ ] Both the physics path and the sensor path updated, if a hazard changed
 - [ ] Any incidental findings written to `docs/BACKLOG.md`

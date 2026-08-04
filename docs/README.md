@@ -11,6 +11,10 @@ Start here.
 | [`SESSION_PROMPT.md`](SESSION_PROMPT.md) | Copy-paste prompt for a scheduled/routine agent session. |
 | `reports/` | Created by T06a/T06b — soak data and the Phase 1 gate report. |
 
+**Want to just play it?** Download **`dist/Cellular_Zatacka.html`** — one
+self-contained file, no folder, no network, opens straight from disk. The source
+`260703_Cellsnake.html` needs `vendor/` beside it and will not run alone.
+
 Project-level context lives in the repository root:
 `Development_plan.md` (the 5-phase roadmap) and `walkthrough.md` (history — note
 that its Phase 2 section describes work that is **not** in the current code; see

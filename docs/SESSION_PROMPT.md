@@ -125,6 +125,10 @@ STEP 5 — VERIFY IN A REAL BROWSER (you have Bash only — there is no browser 
 STEP 6 — COMMIT AND PUSH
   (Resumable tasks override this — commit per stage as their task file says,
   and leave the board at READY until the final stage.)
+  - If you changed 260703_Cellsnake.html or vendor/, rebuild the standalone:
+      python3 tools/build_standalone.py
+    and confirm `python3 tools/build_standalone.py --check` passes. A stale
+    dist/ silently ships an old game to anyone who downloads it.
   - Update docs/TASKS.md: your task READY -> DONE, and flip any newly unblocked
     task BLOCKED -> READY.
   - ONE commit containing the code change, the board update, and any BACKLOG
