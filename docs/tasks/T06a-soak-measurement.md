@@ -156,3 +156,53 @@ invalidates the comparison.
 *(Raw numbers only — no verdict. That is T06b's job. For each run record: wall
 time, rounds reached, and first/last `worldChildren`, `heapMB`, `tracePoints`,
 `errors`. Add anything that looked wrong, without interpreting it.)*
+
+**Run A** (committed, see `docs/reports/soak-A/`): 60/60 rounds, 1145.4s wall,
+111 samples. `worldChildren` first=1345 last=1345 (range 1292-1388 throughout,
+no growth trend across 60 `startRound()` cycles). `heapMB` first=43.6
+last=260.6 (noisy GC sawtooth, peaks 92-311MB, no runaway). `tracePoints`
+first=8 last=97 (bounded by frequent round churn — traces reset every death).
+`errors` 0 throughout. Final screenshot renders correctly.
+
+## Blocked
+
+**Run B cannot be completed as this task file specifies — found 2026-08-04.**
+
+Followed the procedure exactly: `python3 tools/soak.py B --rounds 1
+--minutes-cap 40`. The run executed for the full 2400s cap with 0 console
+errors, and the interesting series behaved as expected — `tracePoints` grew
+from 8 to 22,367 and `gridCells` from ~270 to ~36,250 over the run, `heapMB`
+peaks trended upward over time (364 → 620 → 809 → 1024MB across the run,
+noisy but clearly climbing) — this is exactly the "traces grow unbounded"
+stress case the run is designed to surface, and is itself useful evidence for
+T07. But `soak.py` never wrote a `COMPLETE` marker: it printed `INCOMPLETE —
+hit the 40.0min cap at 0/1 rounds` and exited 1.
+
+Root cause: `fuzzStats.rounds` only increments in `gameLoop`'s round-end
+branch (`if (fuzzActive) { fuzzStats.rounds++; setTimeout(startRound, 0); }`),
+which is only reached when `activePlayers.length <= 1` — i.e. players dying.
+Run B sets `immortal=True`, which sets `godMode = true`, which disables every
+`!devMode`/`!godMode` death check in `gameLoop`. No player can ever die, so
+`activePlayers.length` never drops, so `fuzzStats.rounds` stays `0` for the
+entire run — confirmed directly: every one of the 240 samples in the run read
+`rounds=0`. `soak.py`'s only completion path is `s["rounds"] >= a.rounds`
+(soak.py:146), so with `--rounds 1` the target is mathematically unreachable
+for any `immortal=True` config, at any `--minutes-cap`, including a cap of
+hours. This is not a slow run or a flaky run — it cannot ever complete as
+specified.
+
+This directly contradicts this task file's own instructions above ("give it
+`--rounds 1 --minutes-cap 40` and let the wall-clock cap end it") — the prose
+describes cap-triggered ending as the intended stop condition for run B, but
+`soak.py`'s code treats hitting the cap as failure unconditionally, for every
+config. One of the two is wrong; deciding which is an owner call (see
+`docs/BACKLOG.md`, "Found while running T06a soak run B"), since the fix
+touches either the task file's stated procedure or `tools/soak.py` itself,
+and this task's own rules forbid patching the driver mid-series
+(`AGENT_CONDUCT.md` + this file's "Files touched" section).
+
+Per this file's own rule, the truncated `docs/reports/soak-B/` (no `COMPLETE`
+marker) was deleted rather than committed or analysed further. Stage A stands
+as already committed. Stages B, C and D are left undone; C does not depend on
+B and could be picked up independently, but this session is stopping here to
+report the blocker rather than improvising a workaround.

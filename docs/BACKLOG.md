@@ -173,3 +173,23 @@ them.
   merge path, not `drawMitosisVisuals()`. Left in place with a comment per the
   task's instruction; noting here so nobody goes looking for it in the wrong
   function. — 2026-08-04
+
+## Found while running T06a soak run B — 2026-08-04
+
+- **`tools/soak.py` can never write `COMPLETE` for an `immortal=True` config,
+  no matter the `--minutes-cap`.** `fuzzStats.rounds` only increments in
+  `gameLoop`'s round-end branch, which requires `activePlayers.length <= 1`
+  (solo) or `<= 1` (multi) — i.e. players dying. `immortal=True` sets
+  `godMode`, which disables every `!devMode`/`!godMode` death check, so no
+  player ever dies and `rounds` stays `0` for the run's entire duration
+  (confirmed: `rounds=0` at every sample across a full 2400s/40min run B).
+  `soak.py`'s completion check is `s["rounds"] >= a.rounds`, so with the
+  `--rounds 1` the task file specifies, the target is mathematically
+  unreachable and the run always ends `INCOMPLETE` at the wall-clock cap,
+  regardless of how long the cap is. T06a's own procedure ("give it `--rounds
+  1 --minutes-cap 40` and let the wall-clock cap end it") contradicts the
+  driver's actual behavior, which treats a cap-hit as failure for every
+  config, not just B. Not patched here per `AGENT_CONDUCT.md`'s instruction
+  not to modify `tools/soak.py` mid-series; needs an owner decision — e.g. a
+  `--allow-cap-complete` flag, or accepting round 0 as done for immortal runs.
+  See `## Blocked` in `docs/tasks/T06a-soak-measurement.md`. — 2026-08-04
