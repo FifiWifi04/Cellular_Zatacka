@@ -193,3 +193,24 @@ them.
   not to modify `tools/soak.py` mid-series; needs an owner decision — e.g. a
   `--allow-cap-complete` flag, or accepting round 0 as done for immortal runs.
   See `## Blocked` in `docs/tasks/T06a-soak-measurement.md`. — 2026-08-04
+
+## Found while unblocking T06a Stage B — 2026-08-04
+
+- **RESOLVED: `tools/soak.py` could never complete an immortal config.** Run B
+  sets `immortal=True`, so `godMode` disables every death check, so
+  `fuzzStats.rounds` never increments, so the only completion path
+  (`rounds >= target`) was unreachable at any cap. The task file said "let the
+  wall-clock cap end it" while the driver treated the cap as failure — a direct
+  contradiction between prose and tool. Fixed: per-config `done_when` of
+  `("rounds", n)` or `("minutes", m)`, plus guards that refuse an
+  immortal+rounds config and refuse a mismatched `--rounds`/`--minutes`
+  override. Cost one wasted 40-minute run. — 2026-08-04
+
+- **A second memory leak, not the display-object one.** Run A's heap sawtooth
+  *floor* rises monotonically 44 → 124 MB over 58 rounds (~1.4 MB/round) while
+  `worldChildren` stays flat at 1310–1388. A rising floor is retention; GC lag
+  would show rising peaks over a stable floor. T05 fixed the PixiJS
+  display-object leak, so this is something else — closures holding reassigned
+  arrays, accumulated listeners, or per-round state on `window` are the
+  candidates. Full analysis in `docs/tasks/T06a-soak-measurement.md`. Needs a
+  task once T06b weighs it. — 2026-08-04

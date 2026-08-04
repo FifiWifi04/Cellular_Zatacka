@@ -37,7 +37,7 @@ separate task.
 ## Progress
 
 - [x] **Stage A** — run A committed with its `COMPLETE` marker
-- [ ] **Stage B** — run B committed with its `COMPLETE` marker (blocked, see `## Blocked` below — needs an owner decision on `tools/soak.py`, not reattempted here)
+- [ ] **Stage B** — run B committed with its `COMPLETE` marker (was blocked by a tooling contradiction; **fixed 2026-08-04, re-run it** — see `## Resolved` below)
 - [x] **Stage C** — run C committed with its `COMPLETE` marker
 - [ ] **Stage D** — `## Observations` filled in; board updated; T06b set `OWNER-RUN`
 
@@ -108,10 +108,23 @@ a failure.
 
 ### Targets
 
-Default `--rounds 60` for A and C. Run B has no natural round cycling (nothing
-dies), so give it `--rounds 1 --minutes-cap 40` and let the wall-clock cap end
-it — for B the interesting series is `tracePoints` and `gridCells` over time, not
-round count.
+**Each config carries its own completion criterion — run it with no arguments.**
+`python3 tools/soak.py A`, `... B`, `... C`.
+
+| Run | Completes at | Why |
+|---|---|---|
+| A | 60 rounds | Deaths are on, so rounds cycle |
+| B | 20 minutes | **Immortal — nothing dies, so `rounds` never increments.** A rounds target here is unreachable at any cap. For B the interesting series is `tracePoints` and `gridCells` over time, not round count. |
+| C | 60 rounds | Deaths are on |
+
+Override with `--rounds` (rounds-mode configs) or `--minutes` (minutes-mode
+configs) only. Passing the wrong one aborts immediately rather than silently
+running the default target.
+
+> A rounds target on an immortal config blocked Stage B for a full session and
+> wasted a 40-minute run. The driver now refuses the combination. If you hit
+> something similar, stop and report as that session correctly did — do not
+> improvise around it.
 
 Budget realistically: this sandbox has no GPU and simulates at roughly **0.38×
 real time** at the default 640×480 viewport. Note the actual wall time each run
@@ -180,45 +193,62 @@ round throughput here, ~5.1s/round, is faster than run A's ~19s/round).
 split-screen composite, ER/Golgi arcs and viral-breach overlay all intact,
 no visual corruption.
 
-## Blocked
+## Resolved — was blocked, now fixed (2026-08-04)
 
-**Run B cannot be completed as this task file specifies — found 2026-08-04.**
+**Stage B was correctly reported un-completable, and the diagnosis was exact.**
+`soak.py`'s only completion path was `rounds >= target`, but run B sets
+`immortal=True`, so `godMode` disables every death check, so `activePlayers`
+never drops, so `fuzzStats.rounds` stays 0 forever. A rounds target on an
+immortal config is unreachable at any cap. That session stopped and escalated
+rather than improvising, which is exactly right — the contradiction was in the
+tooling and in this task file, not in the game.
 
-Followed the procedure exactly: `python3 tools/soak.py B --rounds 1
---minutes-cap 40`. The run executed for the full 2400s cap with 0 console
-errors, and the interesting series behaved as expected — `tracePoints` grew
-from 8 to 22,367 and `gridCells` from ~270 to ~36,250 over the run, `heapMB`
-peaks trended upward over time (364 → 620 → 809 → 1024MB across the run,
-noisy but clearly climbing) — this is exactly the "traces grow unbounded"
-stress case the run is designed to surface, and is itself useful evidence for
-T07. But `soak.py` never wrote a `COMPLETE` marker: it printed `INCOMPLETE —
-hit the 40.0min cap at 0/1 rounds` and exited 1.
+**Fix applied to `tools/soak.py`:**
 
-Root cause: `fuzzStats.rounds` only increments in `gameLoop`'s round-end
-branch (`if (fuzzActive) { fuzzStats.rounds++; setTimeout(startRound, 0); }`),
-which is only reached when `activePlayers.length <= 1` — i.e. players dying.
-Run B sets `immortal=True`, which sets `godMode = true`, which disables every
-`!devMode`/`!godMode` death check in `gameLoop`. No player can ever die, so
-`activePlayers.length` never drops, so `fuzzStats.rounds` stays `0` for the
-entire run — confirmed directly: every one of the 240 samples in the run read
-`rounds=0`. `soak.py`'s only completion path is `s["rounds"] >= a.rounds`
-(soak.py:146), so with `--rounds 1` the target is mathematically unreachable
-for any `immortal=True` config, at any `--minutes-cap`, including a cap of
-hours. This is not a slow run or a flaky run — it cannot ever complete as
-specified.
+- Each config declares `done_when` as `("rounds", n)` or `("minutes", m)`.
+  Run B completes on **20 minutes**; A and C on **60 rounds**.
+- A config that is `immortal` *and* rounds-targeted is now refused outright.
+- Passing `--rounds` to a minutes-mode config (or vice versa) aborts immediately
+  instead of being silently ignored while the default target runs.
+- `### Targets` above was rewritten to match. Run `python3 tools/soak.py B` with
+  no arguments.
 
-This directly contradicts this task file's own instructions above ("give it
-`--rounds 1 --minutes-cap 40` and let the wall-clock cap end it") — the prose
-describes cap-triggered ending as the intended stop condition for run B, but
-`soak.py`'s code treats hitting the cap as failure unconditionally, for every
-config. One of the two is wrong; deciding which is an owner call (see
-`docs/BACKLOG.md`, "Found while running T06a soak run B"), since the fix
-touches either the task file's stated procedure or `tools/soak.py` itself,
-and this task's own rules forbid patching the driver mid-series
-(`AGENT_CONDUCT.md` + this file's "Files touched" section).
+**Stage B is runnable again.** `docs/reports/soak-B/` was correctly deleted, so
+it starts clean.
 
-Per this file's own rule, the truncated `docs/reports/soak-B/` (no `COMPLETE`
-marker) was deleted rather than committed or analysed further. Stage A stands
-as already committed. Stages B, C and D are left undone; C does not depend on
-B and could be picked up independently, but this session is stopping here to
-report the blocker rather than improvising a workaround.
+### Data from the discarded run, worth keeping
+
+That run still measured what B exists to measure: `tracePoints` grew 8 → 22,367
+and `gridCells` ~270 → ~36,250 over 40 minutes, with `heapMB` peaks climbing
+364 → 620 → 809 → 1024 MB. Unbounded trace growth is by design in B and is the
+evidence justifying **T07**. Confirm it in the clean re-run rather than citing
+these numbers.
+
+---
+
+## Leak analysis from run A — Stage D must report this
+
+Run A (60 rounds, 1144 s) shows **`worldChildren` flat but `heapMB` climbing**.
+The discriminator between GC lag and a real leak is the sawtooth *floor*:
+
+| Window | wall s | heap min | heap max | children min | children max | rounds |
+|---|---|---|---|---|---|---|
+| 1 | 182 | **44** | 161 | 1331 | 1378 | 8 |
+| 2 | 369 | **70** | 198 | 1310 | 1379 | 19 |
+| 3 | 554 | **85** | 189 | 1329 | 1374 | 30 |
+| 4 | 741 | **91** | 192 | 712 | 1388 | 38 |
+| 5 | 926 | **101** | 178 | 1292 | 1379 | 47 |
+| 6 | 1113 | **124** | 381 | 671 | 1379 | 58 |
+
+The floor rises monotonically 44 → 124 MB across 58 rounds (~1.4 MB/round).
+**GC lag gives rising peaks over a stable floor; a rising floor means memory is
+being retained.** `worldChildren` holding the same 1310–1388 band throughout says
+T05 fixed the PixiJS display-object leak — so this is a **second, non-display-
+object leak**. Worth checking: arrays reassigned but still captured by a closure,
+accumulated event listeners, or per-round state hanging off `window`.
+
+Run C (60 rounds, 308 s) shows a stable heap band, which is consistent with it
+being too short for the trend to appear rather than with the leak being absent.
+
+**T06b should weigh this in the verdict.** Do not fix it inside T06a — this task
+measures only.

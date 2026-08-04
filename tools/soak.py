@@ -1,15 +1,22 @@
 """Long-running soak driver for the Phase 1 gate (T06a).
 
-Runs the game under the fuzzer and samples window.fuzzStats until a target
-number of ROUNDS has completed, writing every sample to CSV as it goes.
+Runs the game under the fuzzer, sampling window.fuzzStats until the config's own
+completion criterion is met, writing every sample to CSV as it goes.
 
-Why rounds and not minutes: what proves there is no display-object or memory
-leak is many startRound() cycles, not wall-clock time. Rounds are also the only
-target that stays meaningful across machines of different speed — this sandbox
-has no GPU and simulates at roughly 0.11x-0.38x real time depending on viewport.
+Each config declares `done_when` as either ("rounds", n) or ("minutes", m):
 
-    python3 tools/soak.py A --rounds 60
-    python3 tools/soak.py B --rounds 40 --minutes-cap 45
+  - ROUNDS for configs where players die. What proves there is no display-object
+    leak is many startRound() cycles, and a round count stays comparable across
+    machines of different speed. This sandbox has no GPU and simulates at
+    ~0.11x-0.38x real time depending on viewport, so wall time is not comparable.
+  - MINUTES for immortal configs (run B). Nothing can die there, so rounds never
+    increment and a rounds target would be mathematically unreachable — the run
+    could only ever end INCOMPLETE. That contradiction blocked Stage B once;
+    there is now a guard that refuses the combination outright.
+
+    python3 tools/soak.py A                  # 60 rounds
+    python3 tools/soak.py B                  # 20 minutes
+    python3 tools/soak.py B --minutes 5      # override the target
     python3 tools/soak.py --list
 
 Run it DETACHED so it is not killed by the 10-minute foreground command cap:
@@ -34,14 +41,20 @@ from verify_harness import REPO, game  # noqa: E402
 
 # Each config targets a different failure mode. Keep these in step with the
 # table in docs/tasks/T06a-soak-measurement.md.
+# done_when is ("rounds", n) or ("minutes", m). It MUST match the config:
+# an immortal run never completes a round, so a rounds-target for it is
+# mathematically unreachable and the run can only ever end INCOMPLETE.
 CONFIGS = {
-    # label: (players, bots, camera, speed, immortal, why)
-    "A": (1, 3, "shared", "1.5", False,
-          "the real soak - players die and rounds cycle constantly"),
-    "B": (1, 3, "shared", "3.5", True,
-          "nothing dies, so traces grow unbounded - stresses the grid rebuild"),
-    "C": (4, 0, "split", "1.5", False,
-          "exercises the split-screen RenderTexture path"),
+    "A": dict(players=1, bots=3, camera="shared", speed="1.5", immortal=False,
+              done_when=("rounds", 60),
+              why="the real soak - players die and rounds cycle constantly"),
+    "B": dict(players=1, bots=3, camera="shared", speed="3.5", immortal=True,
+              done_when=("minutes", 20),
+              why="nothing dies, so traces grow unbounded - stresses the grid "
+                  "rebuild. Completes on DURATION: rounds never increment here."),
+    "C": dict(players=4, bots=0, camera="split", speed="1.5", immortal=False,
+              done_when=("rounds", 60),
+              why="exercises the split-screen RenderTexture path"),
 }
 
 FIELDS = ["wall_s", "game_s", "rounds", "tracePoints", "gridCells", "worldChildren",
@@ -76,9 +89,14 @@ def enable_fuzzer(g):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("label", nargs="?", choices=sorted(CONFIGS))
-    ap.add_argument("--rounds", type=int, default=60, help="target completed rounds")
-    ap.add_argument("--minutes-cap", type=float, default=60.0,
-                    help="wall-clock safety stop; a run that hits this is INCOMPLETE")
+    ap.add_argument("--rounds", type=int, default=None,
+                    help="override a rounds-target config's target")
+    ap.add_argument("--minutes", type=float, default=None,
+                    help="override a minutes-target config's target")
+    ap.add_argument("--minutes-cap", type=float, default=None,
+                    help="wall-clock safety stop. Defaults to the config's own "
+                         "target x3 (minutes mode) or 60 (rounds mode). Hitting "
+                         "it means INCOMPLETE.")
     ap.add_argument("--interval", type=float, default=10.0, help="seconds between samples")
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
@@ -87,11 +105,42 @@ def main():
 
     if a.list or not a.label:
         for k, v in sorted(CONFIGS.items()):
-            print(f"{k}: players={v[0]} bots={v[1]} camera={v[2]} speed={v[3]} "
-                  f"immortal={v[4]}\n   {v[5]}")
+            mode, target = v["done_when"]
+            print(f"{k}: players={v['players']} bots={v['bots']} camera={v['camera']} "
+                  f"speed={v['speed']} immortal={v['immortal']}\n"
+                  f"   completes at {target} {mode}\n   {v['why']}")
         return 0
 
-    players, bots, camera, speed, immortal, why = CONFIGS[a.label]
+    cfg = CONFIGS[a.label]
+    players, bots = cfg["players"], cfg["bots"]
+    camera, speed = cfg["camera"], cfg["speed"]
+    immortal, why = cfg["immortal"], cfg["why"]
+    done_mode, done_target = cfg["done_when"]
+    # Reject an override that does not match the config's completion mode.
+    # Silently ignoring it is worse: the run starts anyway and burns its full
+    # default target before anyone notices the flag did nothing.
+    if a.rounds is not None and done_mode != "rounds":
+        print(f"ABORT: config {a.label} completes on {done_mode}, not rounds. "
+              f"Use --minutes to override its target.")
+        return 2
+    if a.minutes is not None and done_mode != "minutes":
+        print(f"ABORT: config {a.label} completes on {done_mode}, not minutes. "
+              f"Use --rounds to override its target.")
+        return 2
+    if done_mode == "rounds" and a.rounds is not None:
+        done_target = a.rounds
+    if done_mode == "minutes" and a.minutes is not None:
+        done_target = a.minutes
+    cap = a.minutes_cap if a.minutes_cap is not None else (
+        done_target * 3 if done_mode == "minutes" else 60.0)
+
+    # Guard against the exact contradiction that blocked Stage B: a config that
+    # can never satisfy its own completion criterion.
+    if immortal and done_mode == "rounds":
+        print(f"ABORT: config {a.label} is immortal but targets {done_target} "
+              f"rounds. Nothing can die, so rounds never increment and COMPLETE "
+              f"is unreachable. Use a minutes target for immortal configs.")
+        return 2
     out = os.path.join(REPO, "docs", "reports", f"soak-{a.label}")
     if os.path.exists(os.path.join(out, "COMPLETE")):
         print(f"{out}/COMPLETE already exists — this run is done. Delete the "
@@ -99,11 +148,11 @@ def main():
         return 0
     os.makedirs(out, exist_ok=True)
 
-    print(f"soak {a.label}: {why}\n  target={a.rounds} rounds  cap={a.minutes_cap}min  "
+    print(f"soak {a.label}: {why}\n  target={done_target} {done_mode}  cap={cap}min  "
           f"viewport={a.width}x{a.height}", flush=True)
 
     t0 = time.time()
-    deadline = t0 + a.minutes_cap * 60
+    deadline = t0 + cap * 60
     rows, last_shot, complete, abort = 0, 0.0, False, None
 
     with open(os.path.join(out, "soak.csv"), "w", newline="") as fh:
@@ -143,9 +192,14 @@ def main():
                           f"children={s['worldChildren']:5}  heap={s['heapMB']}MB  "
                           f"errors={s['errors']}", flush=True)
 
-                if s["rounds"] >= a.rounds:
-                    complete = True
-                    break
+                if done_mode == "rounds":
+                    if s["rounds"] >= done_target:
+                        complete = True
+                        break
+                else:                                   # duration-targeted
+                    if s["wall_s"] >= done_target * 60:
+                        complete = True
+                        break
 
                 # The round can end without the fuzzer restarting it (e.g. a
                 # solo game-over stops the ticker). Nudge it rather than stall.
@@ -170,7 +224,7 @@ def main():
             json.dump({"label": a.label, "why": why, "config":
                        {"players": players, "bots": bots, "camera": camera,
                         "speed": speed, "immortal": immortal},
-                       "target_rounds": a.rounds,
+                       "done_when": {"mode": done_mode, "target": done_target},
                        "wall_seconds": round(time.time() - t0, 1),
                        "samples": rows, "final": final,
                        "viewport": f"{a.width}x{a.height}",
@@ -181,9 +235,10 @@ def main():
               f"{round(time.time()-t0)}s wall", flush=True)
         return 0
 
-    print(f"INCOMPLETE — hit the {a.minutes_cap}min cap at {final['rounds']}/"
-          f"{a.rounds} rounds. No COMPLETE marker written. Delete {out} and "
-          f"re-run, or lower --rounds.", flush=True)
+    got = final["rounds"] if done_mode == "rounds" else round((time.time()-t0)/60, 1)
+    print(f"INCOMPLETE — hit the {cap}min cap at {got}/{done_target} {done_mode}. "
+          f"No COMPLETE marker written. Delete {out} and re-run, or lower the "
+          f"target.", flush=True)
     return 1
 
 
