@@ -44,8 +44,8 @@ sign of a stale board.
 | T02 | [Wall sensing: microtubules + ER/Golgi](tasks/T02-wall-sensing.md) | T01 | `DONE` |
 | T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `DONE` |
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `DONE` |
-| T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `READY` |
-| T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `BLOCKED` |
+| T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `DONE` |
+| T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `READY` |
 | T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `BLOCKED` |
 
 **Phase 1 gate:** T01–T06a all `DONE`, and T06b's verdict committed as PASS.

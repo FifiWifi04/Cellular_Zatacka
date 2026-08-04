@@ -244,6 +244,9 @@
             SCREEN_WIDTH = window.innerWidth;
             SCREEN_HEIGHT = window.innerHeight;
             app.renderer.resize(SCREEN_WIDTH, SCREEN_HEIGHT);
+            // Split-screen viewports were sized for the old window; drop them so
+            // updateCamera() rebuilds fresh RenderTextures at the new size (T05).
+            purgeSplitScreen();
         });
 
         // --- 2. Layers & World Camera ---
@@ -271,6 +274,19 @@
         world.addChild(dynamicLayer);
         world.addChild(virusLayer);
         world.addChild(uiBarsLayer);
+
+        // Detach and fully release every child of a container (T05).
+        // texture:false is deliberate -- nothing here owns a texture except the
+        // split-screen RenderTextures, which are handled separately in startRound().
+        function purgeContainer(container) {
+            for (let i = container.children.length - 1; i >= 0; i--) {
+                let child = container.children[i];
+                container.removeChild(child);
+                if (child && !child.destroyed) {
+                    child.destroy({ children: true, texture: false, baseTexture: false });
+                }
+            }
+        }
 
         const trailGlow = new PIXI.Graphics();
         const blurFilter = new PIXI.BlurFilter();
@@ -322,6 +338,19 @@
         let splitTextures = [];
         let splitSprites = [];
         let globalRotation = 0;
+
+        // Destroy the split-screen sprites/RenderTextures and empty both arrays.
+        // updateCamera() recreates them on demand (T05). Safe to call twice.
+        function purgeSplitScreen() {
+            for (let i = 0; i < splitSprites.length; i++) {
+                let sprite = splitSprites[i];
+                let rt = splitTextures[i];
+                if (sprite && !sprite.destroyed) sprite.destroy({ texture: false });
+                if (rt && !rt.destroyed) rt.destroy(true);
+            }
+            splitSprites = [];
+            splitTextures = [];
+        }
 
         // INFECTION STATE OBJECT
         let infection = {
@@ -617,11 +646,11 @@
         }
 
         function generateMap(keepOrganelles = false) {
-            backgroundLayer.removeChildren();
+            purgeContainer(backgroundLayer);
             nucleusLayer.clear();
             nucleusLayer.visible = true;
             golgiERContainer.visible = true;
-            rotatingContainer.removeChildren();
+            purgeContainer(rotatingContainer);
             window.golgiData = null; // Reset Golgi layout parameters for a fresh round!
 
             const cellBg = new PIXI.Graphics();
@@ -883,7 +912,7 @@
             golgiERContainer.mask = null;
 
             if (!keepOrganelles) {
-                organellesLayer.removeChildren(); // Clean up old sprites
+                purgeContainer(organellesLayer); // Clean up old sprites
                 organellesLayer.clear();
 
                 organelles = [];
@@ -2273,6 +2302,9 @@
                     generateMap(true);
 
                     // 7. Inject the rescued organelles into the new cell
+                    // Re-parent, not a teardown: survivingOrganelles keeps these sprites
+                    // alive, so do NOT purgeContainer() here (T05) -- that would destroy
+                    // sprites organelles[] still references and crash next frame.
                     organelles = survivingOrganelles;
                     organellesLayer.removeChildren();
                     organellesLayer.clear();
@@ -3286,7 +3318,7 @@
             updateUI();
 
             world.scale.set(0.5);
-            splitSprites.forEach(s => s.visible = false);
+            purgeSplitScreen();
 
             // Reset player array to avoid duplicates
             players = [];

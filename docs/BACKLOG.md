@@ -154,3 +154,22 @@ them.
 - **Host migration** for Phase 7 — explicitly out of scope for v1 (T32 ends the
   match if the host leaves). Revisit only if sessions prove long enough for it to
   matter. — 2026-08-03
+
+## Found while doing T05 (PixiJS lifecycle) — 2026-08-04
+
+- **`drawArcs()`'s own `rotatingContainer.removeChildren()`** (top of the
+  function) is a second, un-purged teardown of the same container T05 fixed in
+  `generateMap()`. It's a no-op when called from `generateMap()` (the container
+  is already empty by then), but it's also called stand-alone from the
+  arc-shatter path in `gameLoop`/`updateMitosis` every time an ER/Golgi arc
+  breaks mid-round, discarding real `Graphics` built that round without
+  destroying them. Left alone here because it wasn't in T05's task file and it
+  overlaps T09 (ER persistence), which also touches `drawArcs()`. — 2026-08-04
+
+- **Task-file drift:** T05's task file attributes the organelle re-parent site
+  (`organellesLayer.removeChildren(); ...; organelles.forEach(o =>
+  organellesLayer.addChild(o.sprite));`) to `drawMitosisVisuals()`. The code
+  string matched exactly, but it actually lives in `updateMitosis()`'s mitosis
+  merge path, not `drawMitosisVisuals()`. Left in place with a comment per the
+  task's instruction; noting here so nobody goes looking for it in the wrong
+  function. — 2026-08-04
