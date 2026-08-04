@@ -1,0 +1,30 @@
+{
+  "label": "C",
+  "why": "exercises the split-screen RenderTexture path",
+  "config": {
+    "players": 4,
+    "bots": 0,
+    "camera": "split",
+    "speed": "1.5",
+    "immortal": false
+  },
+  "target_rounds": 60,
+  "wall_seconds": 311.4,
+  "samples": 30,
+  "final": {
+    "game_s": 0.8,
+    "rounds": 61,
+    "tracePoints": 8,
+    "gridCells": 124,
+    "worldChildren": 1348,
+    "vesicles": 0,
+    "organelles": 50,
+    "virusParticles": 0,
+    "alive": 4,
+    "heapMB": 78.2,
+    "errors": 0
+  },
+  "viewport": "640x480",
+  "commit": "db4e9c5",
+  "finished_utc": "2026-08-04T12:53:37Z"
+}

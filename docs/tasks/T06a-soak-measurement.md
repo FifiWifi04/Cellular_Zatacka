@@ -37,8 +37,8 @@ separate task.
 ## Progress
 
 - [x] **Stage A** — run A committed with its `COMPLETE` marker
-- [ ] **Stage B** — run B committed with its `COMPLETE` marker
-- [ ] **Stage C** — run C committed with its `COMPLETE` marker
+- [ ] **Stage B** — run B committed with its `COMPLETE` marker (blocked, see `## Blocked` below — needs an owner decision on `tools/soak.py`, not reattempted here)
+- [x] **Stage C** — run C committed with its `COMPLETE` marker
 - [ ] **Stage D** — `## Observations` filled in; board updated; T06b set `OWNER-RUN`
 
 Tick one stage per commit (message `T06a: <stage>`), push, then decide whether
@@ -163,6 +163,22 @@ no growth trend across 60 `startRound()` cycles). `heapMB` first=43.6
 last=260.6 (noisy GC sawtooth, peaks 92-311MB, no runaway). `tracePoints`
 first=8 last=97 (bounded by frequent round churn — traces reset every death).
 `errors` 0 throughout. Final screenshot renders correctly.
+
+**Run C** (committed, see `docs/reports/soak-C/`): 60/60 rounds (61 counted,
+the sample after the 60th round-end tick), 311.4s wall, 30 samples — 4
+players, split-screen, 0 bots, deaths on, exercising the `RenderTexture`
+split-screen path. `worldChildren` first=1359 last=1386 (range 696-1387
+throughout — dips to ~700 correspond to samples caught between a round-end
+and the next `startRound()`'s organelle regeneration, not a leak; no growth
+trend across 61 `startRound()`/split-screen cycles). `heapMB` first=42.2
+last=89.8 (noisy GC sawtooth, peaks 41.8-114.3MB, no runaway, comparable band
+to run A). `tracePoints` first=8 last=12 (bounded by frequent round churn,
+same as run A — all 4 are non-bot "players" with no input driving them, so
+they die into the membrane almost immediately most rounds, which is why
+round throughput here, ~5.1s/round, is faster than run A's ~19s/round).
+`errors` 0 throughout. Final and 307s screenshots both render correctly —
+split-screen composite, ER/Golgi arcs and viral-breach overlay all intact,
+no visual corruption.
 
 ## Blocked
 
