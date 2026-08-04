@@ -1,0 +1,30 @@
+{
+  "label": "A",
+  "why": "the real soak - players die and rounds cycle constantly",
+  "config": {
+    "players": 1,
+    "bots": 3,
+    "camera": "shared",
+    "speed": "1.5",
+    "immortal": false
+  },
+  "target_rounds": 60,
+  "wall_seconds": 1145.4,
+  "samples": 111,
+  "final": {
+    "game_s": 19.7,
+    "rounds": 60,
+    "tracePoints": 97,
+    "gridCells": 279,
+    "worldChildren": 1345,
+    "vesicles": 38,
+    "organelles": 47,
+    "virusParticles": 45,
+    "alive": 2,
+    "heapMB": 260.6,
+    "errors": 0
+  },
+  "viewport": "640x480",
+  "commit": "30ec41a",
+  "finished_utc": "2026-08-04T07:06:28Z"
+}

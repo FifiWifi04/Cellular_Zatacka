@@ -36,7 +36,7 @@ separate task.
 
 ## Progress
 
-- [ ] **Stage A** — run A committed with its `COMPLETE` marker
+- [x] **Stage A** — run A committed with its `COMPLETE` marker
 - [ ] **Stage B** — run B committed with its `COMPLETE` marker
 - [ ] **Stage C** — run C committed with its `COMPLETE` marker
 - [ ] **Stage D** — `## Observations` filled in; board updated; T06b set `OWNER-RUN`
