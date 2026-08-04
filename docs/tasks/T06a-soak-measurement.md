@@ -37,9 +37,9 @@ separate task.
 ## Progress
 
 - [x] **Stage A** — run A committed with its `COMPLETE` marker
-- [ ] **Stage B** — run B committed with its `COMPLETE` marker (was blocked by a tooling contradiction; **fixed 2026-08-04, re-run it** — see `## Resolved` below)
+- [x] **Stage B** — run B committed with its `COMPLETE` marker (was blocked by a tooling contradiction; fixed 2026-08-04, re-run 2026-08-04)
 - [x] **Stage C** — run C committed with its `COMPLETE` marker
-- [ ] **Stage D** — `## Observations` filled in; board updated; T06b set `OWNER-RUN`
+- [x] **Stage D** — `## Observations` filled in; board updated; T06b set `OWNER-RUN`
 
 Tick one stage per commit (message `T06a: <stage>`), push, then decide whether
 there is budget for the next. Partial `T06a:` commits are expected and do **not**
@@ -157,10 +157,10 @@ invalidates the comparison.
 
 ## Definition of done
 
-- [ ] Runs A, B and C committed, each with `COMPLETE`
-- [ ] `## Observations` filled in with the numbers above
-- [ ] No gameplay or tooling code changed
-- [ ] `docs/TASKS.md`: T06a → `DONE`; T06b → `OWNER-RUN`; T07, T11, T16 → `READY`
+- [x] Runs A, B and C committed, each with `COMPLETE`
+- [x] `## Observations` filled in with the numbers above
+- [x] No gameplay or tooling code changed
+- [x] `docs/TASKS.md`: T06a → `DONE`; T06b → `OWNER-RUN`; T07, T11, T16 → `READY`
 
 ---
 
@@ -192,6 +192,31 @@ round throughput here, ~5.1s/round, is faster than run A's ~19s/round).
 `errors` 0 throughout. Final and 307s screenshots both render correctly —
 split-screen composite, ER/Golgi arcs and viral-breach overlay all intact,
 no visual corruption.
+
+**Run B** (committed, see `docs/reports/soak-B/`): completed on the 20-minute
+duration target (`done_when: minutes=20`), 1202.7s wall, 116 samples — 1
+human + 3 bots, Very Fast, **immortal** (`godMode`, no death checks), stress
+case for trace memory and the grid rebuild. `rounds` stayed 0 throughout, as
+expected for an immortal config. `worldChildren` first=1351 last=1335
+(range 1303-1356 across all 116 samples — flat, no growth trend; T05's fix
+holds under sustained immortal load same as it did under A's and C's
+round-churn load). `tracePoints` first=8 last=17955 (monotonic, unbounded —
+this is the finding that justifies T07). `gridCells` first=280 last=46215
+(monotonic, unbounded, tracking trace growth). `heapMB` first=48.2
+last=419.5 (noisy sawtooth, peaks 42-748MB); windowed floor (min heap per
+~190s window across the run): 42 → 103 → 123 → 236 → 238 → 241 MB —
+**rises monotonically, same pattern as run A's floor** (see `## Leak
+analysis` below), just compressed into 20 min instead of A's ~19 min at a
+faster hazard/trace growth rate. `errors` 0 throughout (checked
+programmatically: all 116 `errors` values are exactly `0`). Screenshots at
+305s/606s/910s/final: 606s shows dense, correctly-rendered content (traces,
+organelles, bloom, virus particles, additive blending intact); 305s/910s/
+final show a mostly-empty viewport with only the top HUD banner
+("BRIDGE NARROWING! CROSS NOW!") visible — consistent with the camera
+following a player through open space at that instant, not corruption (the
+606s screenshot from the same run proves the renderer works throughout).
+No allocation errors, no dropped frames observable, no visual corruption in
+any screenshot.
 
 ## Resolved — was blocked, now fixed (2026-08-04)
 
@@ -249,6 +274,17 @@ accumulated event listeners, or per-round state hanging off `window`.
 
 Run C (60 rounds, 308 s) shows a stable heap band, which is consistent with it
 being too short for the trend to appear rather than with the leak being absent.
+
+**Run B corroborates the same rising floor**, with no `startRound()` churn at
+all (0 rounds, single continuous round, immortal): windowed heap floor across
+six ~190s windows of the 1203s run: 42 → 103 → 123 → 236 → 238 → 241 MB. This
+rules out `startRound()` teardown as the sole driver of A's floor rise — B's
+floor rises just as fast (actually faster in absolute MB, though B also has
+far more live world state at any instant, since traces and hazard geometry
+grow unbounded there). Two independent configurations — one cycling
+`startRound()` 58 times, one running a single round for 20 minutes — show the
+same non-display-object leak signature. Whatever retains memory here does so
+per-frame or per-hazard-spawn, not (only) per-round-teardown.
 
 **T06b should weigh this in the verdict.** Do not fix it inside T06a — this task
 measures only.

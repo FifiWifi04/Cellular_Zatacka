@@ -1,0 +1,33 @@
+{
+  "label": "B",
+  "why": "nothing dies, so traces grow unbounded - stresses the grid rebuild. Completes on DURATION: rounds never increment here.",
+  "config": {
+    "players": 1,
+    "bots": 3,
+    "camera": "shared",
+    "speed": "3.5",
+    "immortal": true
+  },
+  "done_when": {
+    "mode": "minutes",
+    "target": 20
+  },
+  "wall_seconds": 1202.7,
+  "samples": 116,
+  "final": {
+    "game_s": 2355.6,
+    "rounds": 0,
+    "tracePoints": 17958,
+    "gridCells": 46213,
+    "worldChildren": 1335,
+    "vesicles": 71,
+    "organelles": 27,
+    "virusParticles": 47,
+    "alive": 4,
+    "heapMB": 429,
+    "errors": 0
+  },
+  "viewport": "640x480",
+  "commit": "42fff14",
+  "finished_utc": "2026-08-04T19:06:39Z"
+}

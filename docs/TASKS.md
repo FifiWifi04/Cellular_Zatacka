@@ -45,8 +45,8 @@ sign of a stale board.
 | T03 | [Hazard/reward channels + weight normalization](tasks/T03-steering-normalization.md) | T02 | `DONE` |
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `DONE` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `DONE` |
-| T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `READY` |
-| T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `BLOCKED` |
+| T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `DONE` |
+| T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `OWNER-RUN` |
 
 **Phase 1 gate:** T01–T06a all `DONE`, and T06b's verdict committed as PASS.
 T07/T11/T16 intentionally depend on **T06a** (the evidence exists), not on T06b
@@ -57,7 +57,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `BLOCKED` |
+| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `READY` |
 | T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `BLOCKED` |
 | T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `READY` |
 | T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `READY` |
@@ -66,7 +66,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T11 | [Generation counter infrastructure](tasks/T11-generation-counter.md) | T06a | `BLOCKED` |
+| T11 | [Generation counter infrastructure](tasks/T11-generation-counter.md) | T06a | `READY` |
 | T12 | [Gen 2 — membrane calcification](tasks/T12-gen2-calcification.md) | T11 | `BLOCKED` |
 | T13 | [Gen 2 — organelle necrosis (lethal static walls)](tasks/T13-gen2-necrosis.md) | T11 | `BLOCKED` |
 | T14 | [Gen 3 — the malignant mass](tasks/T14-gen3-malignant-mass.md) | T11 | `BLOCKED` |
@@ -76,7 +76,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T16 | [Camera screenshake utility](tasks/T16-screenshake.md) | T06a | `BLOCKED` |
+| T16 | [Camera screenshake utility](tasks/T16-screenshake.md) | T06a | `READY` |
 | T17 | [Particle emitter splash system](tasks/T17-particles.md) | T16 | `BLOCKED` |
 | T18 | [Warning-window post-processing filter](tasks/T18-warning-filter.md) | T16 | `BLOCKED` |
 
