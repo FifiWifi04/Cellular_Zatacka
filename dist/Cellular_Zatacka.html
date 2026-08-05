@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 1175ce0d4c1525fa -->
+<!-- standalone-build-inputs: ac23922ddb509f00 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3494,6 +3494,7 @@ void main() {
         app.stage.addChild(world);
 
         const backgroundLayer = new PIXI.Container();
+        const calcifyLayer = new PIXI.Graphics(); // T12: redrawn shrinking membrane, Gen 2+
         const mitosisLayer = new PIXI.Graphics();
         const nucleusLayer = new PIXI.Graphics();
         const golgiERContainer = new PIXI.Container();
@@ -3505,7 +3506,8 @@ void main() {
         const uiBarsLayer = new PIXI.Graphics();
 
         world.addChild(backgroundLayer);
-        world.addChild(mitosisLayer); 
+        world.addChild(calcifyLayer);
+        world.addChild(mitosisLayer);
         world.addChild(nucleusLayer);
         world.addChild(golgiERContainer);
         golgiERContainer.addChild(rotatingContainer);
@@ -3576,7 +3578,10 @@ void main() {
         applyGlowQuality('low');
 
         // --- 3. Game State & Constants ---
-        let activeCell = { x: 1500, y: 1500, radiusX: 1400, radiusY: 1200, radius: 1400, generation: 1 };
+        // T12: baseRadiusX/baseRadiusY are the pristine round-start radii; radiusX/
+        // radiusY stay the live values every other reader already uses, and shrink
+        // toward them from Gen 2 onward (see gameLoop's calcification block).
+        let activeCell = { x: 1500, y: 1500, radiusX: 1400, radiusY: 1200, radius: 1400, baseRadiusX: 1400, baseRadiusY: 1200, generation: 1 };
 
         // T11: single gating point for Phase 3 mechanics -- all of them must call
         // this rather than reading activeCell.generation directly.
@@ -6188,6 +6193,31 @@ void main() {
             let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
             let isCellFrozen = (infection.state === 'warning') || isMitosisReveal;
 
+            // T12: Gen 2+ membrane calcification. Shrinks activeCell.radiusX/radiusY
+            // frame by frame (paused while frozen or mid-mitosis, since the bridge and
+            // cellB geometry are computed from the radii at event start) and redraws
+            // the boundary into its own persistent Graphics -- the baked membrane from
+            // generateMap() is left in place and reads as the old wall being closed in on.
+            calcifyLayer.clear();
+            if (genAtLeast(2)) {
+                if (!isCellFrozen && mitosis.state === 'idle') {
+                    const CALCIFY_RATE = 6;    // px/sec off radiusX; radiusY scales by the same fraction, preserving aspect ratio
+                    const CALCIFY_FLOOR = 0.45; // never shrink below this fraction of base
+                    let floorX = activeCell.baseRadiusX * CALCIFY_FLOOR;
+                    if (activeCell.radiusX > floorX) {
+                        let shrunkX = Math.max(floorX, activeCell.radiusX - CALCIFY_RATE * deltaSec);
+                        activeCell.radiusY *= shrunkX / activeCell.radiusX;
+                        activeCell.radiusX = shrunkX;
+                    }
+                }
+                calcifyLayer.lineStyle(15, 0x1e3799, 0.4);
+                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
+                calcifyLayer.lineStyle(8, 0x4a69bd, 0.8);
+                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+                calcifyLayer.lineStyle(3, 0x82ccdd, 1.0);
+                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
+            }
+
             if (!isCellFrozen) {
                 globalRotation += 0.0015 * delta;
                 rotatingContainer.rotation = globalRotation;
@@ -6638,6 +6668,10 @@ void main() {
             mitosis.nucleusDestroyed = false;
             mitosis.generationCounted = false;
             activeCell.generation = 1; // T11
+            activeCell.baseRadiusX = 1400; // T12: reset in case a previous round calcified
+            activeCell.baseRadiusY = 1200;
+            activeCell.radiusX = activeCell.baseRadiusX;
+            activeCell.radiusY = activeCell.baseRadiusY;
 
             warningElement.innerText = "";
             warningElement.style.display = 'none';

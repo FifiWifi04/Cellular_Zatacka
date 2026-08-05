@@ -154,17 +154,49 @@ clamp in `updateVesicles()`.
 
 ## Definition of done
 
-- [ ] Full list of `radiusX`/`radiusY` readers written into this file under `## Call sites`
-- [ ] Shrink gated on `genAtLeast(2)`, paused during mitosis and freezes
-- [ ] Membrane redrawn each frame into one persistent `Graphics`
-- [ ] Visual edge and lethal edge verified identical at four compass points
-- [ ] `worldChildren` flat over 5 minutes
-- [ ] Gen 1 behaviour bit-identical to before
-- [ ] `docs/TASKS.md`: T12 → `DONE`
+- [x] Full list of `radiusX`/`radiusY` readers written into this file under `## Call sites`
+- [x] Shrink gated on `genAtLeast(2)`, paused during mitosis and freezes
+- [x] Membrane redrawn each frame into one persistent `Graphics`
+- [x] Visual edge and lethal edge verified identical at four compass points
+- [x] `worldChildren` flat over 5 minutes
+- [x] Gen 1 behaviour bit-identical to before
+- [x] `docs/TASKS.md`: T12 → `DONE`
 
 ---
 
 ## Call sites
 
-*(Fill in during the task: every place that reads `activeCell.radiusX` or
-`radiusY`, and whether it needed a change.)*
+*(Every place that reads `activeCell.radiusX`/`radiusY`, and whether it needed a change.)*
+
+- `isOutsideCell()` — boundary test, reads live radii. No change; already correct,
+  and this is what both `checkCollision()` and `raycast()` call, so players and
+  the bot's boundary sense follow the shrink automatically.
+- `generateMap()` — background ellipse, membrane rings, protrusions, cytosol
+  placement, `bgMask`, organelle spawn bounds. Drawn once at round start (or at
+  mitosis split) from the radii at that instant. Left baked/static by design —
+  `calcifyLayer` draws the live boundary on top; the baked ring reads as the old
+  wall being closed in from. No change.
+- `updateDriftingOrganelles()` — uses `nearestCell.radiusX/radiusY` (live) for
+  the wall-bounce and the failsafe snap. No change; already tracks the shrink.
+- `updateVesicles()` — bounces vesicles off `nearestCell.radiusX/radiusY` (live)
+  on both the main and mitosis-progenitor spawn paths. No change; already
+  bounded, no clamp needed.
+- `updateInfection()` — virus spawn position and per-frame particle bounce both
+  read live radii (via `isOutsideCell`/`nearestCell`). No change.
+- `isInsideNucleus()` — reads radii only while `mitosis.state !== 'idle'`, for
+  the sweep-ring geometry, which is frozen for the whole event anyway (shrink is
+  gated off during mitosis). No change.
+- `updateMitosis()` — trigger-time `cellB` background/cytosol/organelle spawn,
+  bridge/gap geometry, sweep-ring draws, and the post-split rescue check all
+  read `activeCell.radiusX/radiusY`. All of it executes only while
+  `mitosis.state !== 'idle'`, during which the shrink is paused, so every read
+  sees a constant value for the full event. No change.
+- `updateCamera()` — no direct read (only via player positions). No change.
+- Fuzzer top-up block in `gameLoop()` (vesicle placement) — reads live radii,
+  fuzz-only. No change.
+- `activeCell` declaration + `startRound()` — added `baseRadiusX`/`baseRadiusY`
+  (pristine per-round radii) and reset `radiusX`/`radiusY` to them each round.
+- `gameLoop()` — new block: shrinks `radiusX`/`radiusY` toward the floor when
+  `genAtLeast(2) && !isCellFrozen && mitosis.state === 'idle'`, and redraws
+  `calcifyLayer` (new persistent `Graphics`, added once at init next to
+  `backgroundLayer`) every frame from the live radii.

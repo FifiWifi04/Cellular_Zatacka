@@ -268,3 +268,17 @@ them.
   `centralHitboxes` entry depends on them — so left alone per this task's own
   instruction (step 4): a cosmetic flicker on shatter, not a fairness bug.
   — 2026-08-05
+
+## Found while doing T12 (Gen 2 membrane calcification) — 2026-08-05
+
+- **The mitosis "stray player" kill check still gates on `devMode`, not
+  `godMode`.** In `updateMitosis()`'s split-completion block, a player left
+  outside both the bridge and Cell B is teleported to safety `if (devMode)`
+  and killed otherwise — unlike every other death check in the file, which
+  T04 moved to `godMode`. Concretely: calling the verification harness's
+  `immortal=True` (which sets `godMode`, not `devMode`, since T04 landed)
+  does **not** protect a straggler from this specific kill, unlike every
+  other hazard. Found because it explained an otherwise-surprising
+  `alive` drop during an "immortal" T12 mitosis test. Out of scope for T12;
+  a one-line `devMode` → `godMode` fix (or `devMode || godMode`) whenever
+  someone next touches `updateMitosis()`. — 2026-08-05
