@@ -147,5 +147,31 @@ flag, `startRound()` reset, scoreboard strings, `genAtLeast()`, one dev hotkey,
 
 ## Findings
 
-*(Fill this in during the task — what happens to `activeCell` when a mitosis
-event completes, and where exactly you placed the increment.)*
+At the end of a mitosis event ("THE SNAP", `timeInEvent >= 120` inside
+`updateMitosis()`), the round does **not** switch to `mitosis.cellB` as a
+separate object — `activeCell.x`/`activeCell.y` are overwritten in place with
+`mitosis.cellB`'s coordinates (`activeCell.x = mitosis.cellB.x; activeCell.y =
+mitosis.cellB.y;`). `activeCell.radiusX/radiusY/radius` are untouched (both
+cells are always the same size), `generateMap(true)` is then called to redraw
+the nucleus/ER/Golgi at the new location, and surviving vesicles/viruses/
+organelles are re-parented into the same `activeCell`. There is no swap of the
+whole `activeCell` object and no second `activeCell`-shaped variable — one
+`activeCell` object is mutated in place, once per completed event, right
+before `mitosis.state` is reset to `'idle'` and `mitosis.nextTriggerTime` is
+re-armed.
+
+The increment was placed in that exact spot: immediately after
+`mitosisLayer.clear()` and before `mitosis.state = 'idle'`, guarded by
+`mitosis.generationCounted` (set back to `false` when a new event starts, at
+`mitosis.state = 'forming'`). This runs exactly once per snap because the
+`if (timeInEvent >= 120)` block itself only executes while
+`mitosis.state !== 'idle'`, and it flips `mitosis.state` to `'idle'` inside
+the same execution — but the flag is kept anyway as the belt-and-suspenders
+guard the task asked for, in case that timer-gating logic ever changes.
+
+Also confirmed via `generateMap(` call-site search: it is called at line 695
+(definition), inside the snap (`generateMap(true)`, mid-round, must not touch
+generation), in `startRound()` (fresh round, generation already reset
+separately), and once at module scope on page load (before any round exists).
+None of those sites read or write `activeCell.generation`, so a mid-round
+`generateMap()` call cannot roll the counter back.

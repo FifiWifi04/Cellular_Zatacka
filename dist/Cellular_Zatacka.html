@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 7fa0560a0466e6d4 -->
+<!-- standalone-build-inputs: 1175ce0d4c1525fa -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3576,7 +3576,11 @@ void main() {
         applyGlowQuality('low');
 
         // --- 3. Game State & Constants ---
-        let activeCell = { x: 1500, y: 1500, radiusX: 1400, radiusY: 1200, radius: 1400 };
+        let activeCell = { x: 1500, y: 1500, radiusX: 1400, radiusY: 1200, radius: 1400, generation: 1 };
+
+        // T11: single gating point for Phase 3 mechanics -- all of them must call
+        // this rather than reading activeCell.generation directly.
+        function genAtLeast(n) { return activeCell.generation >= n; }
 
         let cytosolParticles = []; // Fluid background particles
         let membraneProtrusionsList = []; // Animated membrane blobs
@@ -3641,7 +3645,8 @@ void main() {
             currentWidth: 600,
             microtubules: [],
             progenitor: { active: false },
-            nucleusDestroyed: false
+            nucleusDestroyed: false,
+            generationCounted: false // T11: guards the Gen++ at the snap to once per event
         };
 
         let devMode = false;      // master switch: enables the hotkeys + the HUD, nothing else
@@ -5312,6 +5317,7 @@ void main() {
             if (survivalTime >= mitosis.nextTriggerTime && mitosis.state === 'idle') {
                 mitosis.state = 'forming';
                 mitosis.eventStartTime = survivalTime;
+                mitosis.generationCounted = false;
 
                 warningElement.innerText = "CELL DIVISION INITIATED! PREPARE TO MIGRATE!";
                 warningElement.style.color = "#00d2d3";
@@ -5595,7 +5601,13 @@ void main() {
 
                     mitosisLayer.clear(); // Hide the bridge
 
-                    // 8. Reset the cycle for another 4 minutes later
+                    // 8. Cell division complete -- advance the generation counter, once.
+                    if (!mitosis.generationCounted) {
+                        activeCell.generation++;
+                        mitosis.generationCounted = true;
+                    }
+
+                    // 9. Reset the cycle for another 4 minutes later
                     mitosis.state = 'idle';
                     mitosis.nextTriggerTime = survivalTime + 240;
                     if (mitosis.progenitor) mitosis.progenitor.active = false;
@@ -5997,7 +6009,8 @@ void main() {
                 `  god mode   : ${godMode ? 'ON ' : 'OFF'}   [,]\n` +
                 `  fuzzer     : ${fuzzActive ? 'ON ' : 'OFF'}   [f]\n` +
                 `  +15 s              []]\n` +
-                `  legend             [.]`;
+                `  legend             [.]\n` +
+                `  gen ${activeCell.generation} +1            [[]`;
             if (fuzzActive) {
                 let m = Math.floor(fuzzStats.elapsed / 60);
                 let s = Math.floor(fuzzStats.elapsed % 60);
@@ -6032,6 +6045,12 @@ void main() {
             }
             if (devMode && e.key === '.') {
                 legendVisible = !legendVisible;
+                updateDevIndicator();
+            }
+            // Jump straight to a generation without running a mitosis event --
+            // Phase 3 content is otherwise untestable (T11).
+            if (devMode && e.key === '[') {
+                activeCell.generation++;
                 updateDevIndicator();
             }
             if (devMode && (e.key === 'f' || e.key === 'F')) {
@@ -6191,10 +6210,10 @@ void main() {
                 if (!players.some(p => p.alive) && !godMode) {
                     uiElement.classList.add('visible');
                     uiElement.classList.remove('hidden-ui');
-                    document.getElementById('scoreboard').innerText = `You Survived: ${survivalTime.toFixed(1)}s!`;
+                    document.getElementById('scoreboard').innerText = `You Survived: ${survivalTime.toFixed(1)}s! · Gen ${activeCell.generation}`;
                     app.ticker.stop();
                 } else {
-                    scoreText.innerText = `Survival Time: ${survivalTime.toFixed(1)}s`;
+                    scoreText.innerText = `Survival Time: ${survivalTime.toFixed(1)}s · Gen ${activeCell.generation}`;
                 }
             }
 
@@ -6210,7 +6229,7 @@ void main() {
                 }
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
-                scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s`;
+                scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s · Gen ${activeCell.generation}`;
                 return;
             } else if (totalPlayers > 1 && activePlayers.length <= 1) {
                 if (fuzzActive) {
@@ -6579,7 +6598,7 @@ void main() {
             let totalPlayers = currentMode + aiCount;
             if (totalPlayers === 1) {
                 document.getElementById('controlsText').innerHTML = "P1 (Blue): L/R Arrows | Toggle: Down Arrow";
-                if (!isPlaying) scoreText.innerText = "Survival Time: 0.0s";
+                if (!isPlaying) scoreText.innerText = `Survival Time: 0.0s · Gen ${activeCell.generation}`;
             } else {
                 let controls = "P1: L/R/Down | P2: A/D/S";
                 if (totalPlayers >= 3) controls += " | P3: G/J/H";
@@ -6617,6 +6636,8 @@ void main() {
             mitosis.eventStartTime = 0;
             mitosis.currentWidth = 600;
             mitosis.nucleusDestroyed = false;
+            mitosis.generationCounted = false;
+            activeCell.generation = 1; // T11
 
             warningElement.innerText = "";
             warningElement.style.display = 'none';
@@ -6676,6 +6697,10 @@ void main() {
             uiElement.classList.add('hidden-ui'); // AUTO-HIDE MENU ON START
             app.ticker.start(); // Unfreeze the engine!
         };
+
+        // Headless-driver hook (T11): jump straight to a generation without
+        // running a mitosis event.
+        window.setGeneration = n => { activeCell.generation = n; };
 
         generateMap();
         world.scale.set(0.3);
