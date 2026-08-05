@@ -122,9 +122,50 @@ in `docs/BACKLOG.md` and leave it. Only fix things that feed `centralHitboxes`.
 
 ## Definition of done
 
-- [ ] `window.erData` caches the ER layout for the round
-- [ ] Reset alongside `window.golgiData` in `generateMap()`
-- [ ] Shattered layers still disappear and stop being lethal
-- [ ] No `Math.random()` remains in the ER draw path on redraws
-- [ ] Screenshot comparison before/after a shatter attached to the commit message
-- [ ] `docs/TASKS.md`: T09 → `DONE`
+- [x] `window.erData` caches the ER layout for the round
+- [x] Reset alongside `window.golgiData` in `generateMap()`
+- [x] Shattered layers still disappear and stop being lethal
+- [x] No `Math.random()` remains in the ER draw path on redraws
+- [x] Screenshot comparison before/after a shatter attached to the commit message
+- [x] `docs/TASKS.md`: T09 → `DONE`
+
+## Verification results — 2026-08-05
+
+Ran via `tools/verify_harness.py` (640x480, ~0.38x game time). All four scripts:
+console clean, no page errors.
+
+1. **Console clean** — all scripts below printed `CONSOLE CLEAN`.
+2. **ER stable across a redraw.** Started a round, snapshotted `window.erData`
+   (4 groups) and the ER `centralHitboxes` entries, then called `drawArcs()`
+   again directly (the same call `arcsChanged` makes on a Golgi shatter, with
+   the ER arc still present in `activeArcs`). `erData` was byte-identical
+   before/after (`erDataIdenticalAcrossRedraw: true`), hitbox point counts
+   unchanged (4 groups, 4 hitbox entries before and after). Screenshots
+   `t09_before_redraw.png` / `t09_after_redraw.png` show the cyan ER arcs
+   pixel-identical (only independently-drifting mitochondria moved).
+3. **Hitboxes follow the drawing.** `centralHitboxes.push({points: erPath...})`
+   and `structGraph.moveTo/lineTo` both read the same cached `erPath` array
+   per group — they cannot diverge by construction now. Confirmed hitbox
+   point counts match `erPath.length` for all 4 groups (100/108/71/103 and
+   restated after redraw).
+4. **Fresh layout per round.** Restarted 5 times; hashed each round's
+   `window.erData` (first point, radius, thickness, point count per group) —
+   5/5 unique (`uniqueLayouts: 5`).
+5. **Mitosis path.** Forced `mitosis.nextTriggerTime`/`eventStartTime` to
+   fast-forward the sweep without waiting real time (state `forming`
+   confirmed). Fast-forwarded to `sweepProgress≈0.3`: one Golgi layer shattered
+   (`arcsChanged` fired, `activeArcs` went from 4 Golgi entries to 3) while ER
+   was still active — `erData` stayed identical
+   (`erDataStableGolgiShatter: true`). Fast-forwarded further to
+   `sweepProgress≈0.51`: the ER entry was swept and removed from `activeArcs`
+   (`erActiveAfterFullSweep: false`), and its `centralHitboxes` entries
+   disappeared (`erHitboxesAfterFullSweep: 0`) — it stops being lethal exactly
+   when it stops being drawn.
+6. **Regression sweep.** `checkCollision()`/`checkArcCollision()`/`raycast()`/
+   `rebuildSpatialGrid()` were not touched by this task (only `drawArcs()` and
+   one reset line in `generateMap()`), so the full §7.6 sweep does not apply.
+   Ran a 30s play check (1 player + 3 bots, `speed="1.5"`) as a general
+   sanity pass instead: all 4 alive throughout, 1198 trace points, console
+   clean.
+
+`python3 tools/build_standalone.py --check` passes (rebuilt after the change).

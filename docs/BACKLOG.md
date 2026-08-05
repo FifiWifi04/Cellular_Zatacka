@@ -249,3 +249,22 @@ them.
   own collision check runs before its own trim within the same iteration), so
   this is specifically an opponent-trace edge case. Not fixed here — out of
   scope for T07 and no observed failure in testing. — 2026-08-05
+
+## Found while doing T09 (ER persistence) — 2026-08-05
+
+- **Golgi layer `thick` re-randomizes on every `drawArcs()` redraw and feeds
+  `centralHitboxes`** (`thick = 12 + Math.random() * 3` inside the per-layer
+  loop, not stored in `window.golgiData`). Unlike the ER's random layout
+  angle/radius jump this fixes, the Golgi's cached `x/y/rot` and `sacPoints`
+  keep the shape stable — only the hit-test half-width jitters by up to 3px
+  around a fixed centerline on every arc shatter, a much smaller and
+  lower-severity version of the same bug class. Out of scope for T09 (ER
+  only); would need `thick` folded into `window.golgiData.layers` the same
+  way `sacPoints` already is. — 2026-08-05
+
+- **ER ribosome dots re-randomize their on/off pattern and jitter their
+  radius on every `drawArcs()` redraw** (`Math.random() > 0.4` gating each
+  dot, `2 + Math.random() * 1.5` for its size). Purely decorative — no
+  `centralHitboxes` entry depends on them — so left alone per this task's own
+  instruction (step 4): a cosmetic flicker on shatter, not a fairness bug.
+  — 2026-08-05

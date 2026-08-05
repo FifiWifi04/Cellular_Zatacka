@@ -451,52 +451,63 @@
 
             let erActive = activeArcs.some(a => a.type === 'ER');
             if (erActive) {
+                if (!window.erData) window.erData = [];
                 for (let erGroup = 0; erGroup < 4; erGroup++) {
-                    let currentAngle = (erGroup * Math.PI * 2 / 4) + (Math.random() * 0.4);
-                    let currentR = 150 + Math.random() * 10;
-                    let thick = 14 + Math.random() * 6;
+                    let erPath, thick;
 
-                    structGraph.lineStyle({ width: thick, color: ER_COLOR, alpha: 0.7, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
-                    structGraph.moveTo(Math.cos(currentAngle) * currentR, Math.sin(currentAngle) * currentR);
+                    if (!window.erData[erGroup]) {
+                        let currentAngle = (erGroup * Math.PI * 2 / 4) + (Math.random() * 0.4);
+                        let currentR = 150 + Math.random() * 10;
+                        thick = 14 + Math.random() * 6;
 
-                    let erPath = [];
-                    let numLayers = 3 + Math.floor(Math.random() * 2);
+                        erPath = [];
+                        let numLayers = 3 + Math.floor(Math.random() * 2);
 
-                    for (let i = 0; i < numLayers; i++) {
-                        let span = 0.8 + Math.random() * 0.6;
-                        let dir = (i % 2 === 0) ? 1 : -1;
-                        let endAngle = currentAngle + dir * span;
+                        for (let i = 0; i < numLayers; i++) {
+                            let span = 0.8 + Math.random() * 0.6;
+                            let dir = (i % 2 === 0) ? 1 : -1;
+                            let endAngle = currentAngle + dir * span;
 
-                        let steps = Math.floor(span / 0.05);
-                        for (let j = 0; j <= steps; j++) {
-                            let a = currentAngle + dir * (j / steps) * span;
-                            erPath.push({ x: Math.cos(a) * currentR, y: Math.sin(a) * currentR, r: currentR, a: a });
-                        }
-
-                        structGraph.arc(0, 0, currentR, currentAngle, endAngle, dir < 0);
-                        currentAngle = endAngle;
-
-                        if (i < numLayers - 1) {
-                            let nextR = currentR + 25 + Math.random() * 10;
-                            let midR = (currentR + nextR) / 2;
-                            let cpAngle = currentAngle + dir * 0.2;
-
-                            let startX = Math.cos(currentAngle) * currentR;
-                            let startY = Math.sin(currentAngle) * currentR;
-                            let cpX = Math.cos(cpAngle) * midR;
-                            let cpY = Math.sin(cpAngle) * midR;
-                            let endX = Math.cos(currentAngle) * nextR;
-                            let endY = Math.sin(currentAngle) * nextR;
-
-                            for (let t = 0.2; t <= 1.0; t += 0.2) {
-                                let bx = Math.pow(1 - t, 2) * startX + 2 * (1 - t) * t * cpX + Math.pow(t, 2) * endX;
-                                let by = Math.pow(1 - t, 2) * startY + 2 * (1 - t) * t * cpY + Math.pow(t, 2) * endY;
-                                erPath.push({ x: bx, y: by, r: midR, a: cpAngle });
+                            let steps = Math.floor(span / 0.05);
+                            for (let j = 0; j <= steps; j++) {
+                                let a = currentAngle + dir * (j / steps) * span;
+                                erPath.push({ x: Math.cos(a) * currentR, y: Math.sin(a) * currentR, r: currentR, a: a });
                             }
 
-                            structGraph.quadraticCurveTo(cpX, cpY, endX, endY);
-                            currentR = nextR;
+                            currentAngle = endAngle;
+
+                            if (i < numLayers - 1) {
+                                let nextR = currentR + 25 + Math.random() * 10;
+                                let midR = (currentR + nextR) / 2;
+                                let cpAngle = currentAngle + dir * 0.2;
+
+                                let startX = Math.cos(currentAngle) * currentR;
+                                let startY = Math.sin(currentAngle) * currentR;
+                                let cpX = Math.cos(cpAngle) * midR;
+                                let cpY = Math.sin(cpAngle) * midR;
+                                let endX = Math.cos(currentAngle) * nextR;
+                                let endY = Math.sin(currentAngle) * nextR;
+
+                                for (let t = 0.2; t <= 1.0; t += 0.2) {
+                                    let bx = Math.pow(1 - t, 2) * startX + 2 * (1 - t) * t * cpX + Math.pow(t, 2) * endX;
+                                    let by = Math.pow(1 - t, 2) * startY + 2 * (1 - t) * t * cpY + Math.pow(t, 2) * endY;
+                                    erPath.push({ x: bx, y: by, r: midR, a: cpAngle });
+                                }
+
+                                currentR = nextR;
+                            }
                         }
+
+                        window.erData[erGroup] = { erPath: erPath, thick: thick };
+                    } else {
+                        erPath = window.erData[erGroup].erPath;
+                        thick = window.erData[erGroup].thick;
+                    }
+
+                    structGraph.lineStyle({ width: thick, color: ER_COLOR, alpha: 0.7, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+                    structGraph.moveTo(erPath[0].x, erPath[0].y);
+                    for (let k = 1; k < erPath.length; k++) {
+                        structGraph.lineTo(erPath[k].x, erPath[k].y);
                     }
 
                     centralHitboxes.push({ type: 'path', points: erPath.map(p => ({ x: p.x, y: p.y })), thick: thick });
@@ -687,6 +698,7 @@
             golgiERContainer.visible = true;
             purgeContainer(rotatingContainer);
             window.golgiData = null; // Reset Golgi layout parameters for a fresh round!
+            window.erData = null; // Reset ER layout parameters for a fresh round!
 
             const cellBg = new PIXI.Graphics();
 

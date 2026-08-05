@@ -59,7 +59,7 @@ later returns FAIL, revisit anything that landed in that window.
 |----|------|-----------|--------|
 | T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `DONE` |
 | T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `DONE` |
-| T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `READY` |
+| T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `DONE` |
 | T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `READY` |
 
 ### Track C — Phase 3 content (generation-gated)
