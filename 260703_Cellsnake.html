@@ -153,8 +153,8 @@
 
     <div id="ui-trigger"></div>
     <div id="devIndicator"
-        style="display: none; position: absolute; top: 10px; right: 20px; color: #00ff00; font-weight: bold; font-family: monospace; font-size: 18px; z-index: 1000; text-shadow: 0 0 5px #00ff00;">
-        ⚙ DEV MODE ACTIVE [½]</div>
+        style="display: none; position: absolute; top: 10px; right: 20px; color: #00ff00; font-weight: bold; font-family: monospace; font-size: 13px; line-height: 1.4; white-space: pre; z-index: 1000; text-shadow: 0 0 5px #00ff00; pointer-events: none;">
+    </div>
 
     <h2 id="globalWarning"
         style="display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); color: #ff4757; text-shadow: 0 0 15px rgba(255, 71, 87, 0.8); font-size: 28px; z-index: 200; pointer-events: none;">
@@ -410,9 +410,10 @@
             nucleusDestroyed: false
         };
 
-        let devMode = false;    // master switch: enables the hotkeys + the HUD, nothing else
-        let godMode = false;    // disables death checks
-        let fuzzActive = false; // runs the soak loop
+        let devMode = false;      // master switch: enables the hotkeys + the HUD, nothing else
+        let godMode = false;      // disables death checks
+        let fuzzActive = false;   // runs the soak loop
+        let legendVisible = true; // shows/hides the dev HUD panel while devMode is on
         let fuzzStartWallTime = null;
         let fuzzTopUpTimer = 0;
         let fuzzToggleTimer = 0;
@@ -2754,32 +2755,49 @@
 
         // --- 7. Main Loop & Input ---
         function updateDevIndicator() {
-            let txt = `⚙ DEV [god:${godMode ? 'on' : 'off'} fuzz:${fuzzActive ? 'on' : 'off'}]`;
+            let el = document.getElementById('devIndicator');
+            el.style.display = (devMode && legendVisible) ? 'block' : 'none';
+            if (!devMode || !legendVisible) return;
+
+            let txt = `DEV MODE            [\\]\n` +
+                `  god mode   : ${godMode ? 'ON ' : 'OFF'}   [,]\n` +
+                `  fuzzer     : ${fuzzActive ? 'ON ' : 'OFF'}   [f]\n` +
+                `  +15 s              []]\n` +
+                `  legend             [.]`;
             if (fuzzActive) {
-                txt += ` | rounds:${fuzzStats.rounds} t:${fuzzStats.elapsed.toFixed(0)}s ` +
-                    `trace:${fuzzStats.tracePoints} cells:${fuzzStats.gridCells} wc:${fuzzStats.worldChildren} ` +
-                    `ves:${fuzzStats.vesicles} org:${fuzzStats.organelles} virus:${fuzzStats.virusParticles} ` +
-                    `heap:${fuzzStats.heapMB !== null ? fuzzStats.heapMB.toFixed(1) + 'MB' : 'n/a'} err:${fuzzStats.errors}`;
+                let m = Math.floor(fuzzStats.elapsed / 60);
+                let s = Math.floor(fuzzStats.elapsed % 60);
+                txt += `\n\nfuzz: rounds ${fuzzStats.rounds} · ${m}m${s}s · ` +
+                    `trace ${fuzzStats.tracePoints} · children ${fuzzStats.worldChildren} · ` +
+                    `heap ${fuzzStats.heapMB !== null ? fuzzStats.heapMB.toFixed(0) + 'MB' : 'n/a'} · err ${fuzzStats.errors}`;
             }
-            document.getElementById('devIndicator').innerText = txt;
+            el.innerText = txt;
         }
 
         const keys = {};
         window.addEventListener('keydown', e => {
             keys[e.key] = true;
-            if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Tab", "½"].includes(e.key)) e.preventDefault();
+            if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "½"].includes(e.key)) e.preventDefault();
+            if (devMode && e.key === 'Tab') e.preventDefault(); // only steal Tab while dev mode is on
 
             // --- DEBUG / DEV MODE HOTKEYS ---
-            if (e.key === '½' || e.key === '`' || e.key === '~') {
+            // Master toggle: `\` is the documented roadmap key; `` ` ``/`~`/`½` kept as aliases.
+            if (e.key === '\\' || e.key === '½' || e.key === '`' || e.key === '~') {
                 devMode = !devMode;
-                document.getElementById('devIndicator').style.display = devMode ? 'block' : 'none';
                 updateDevIndicator();
             }
-            if (devMode && e.key === 'Tab') {
+            // `]` is the documented roadmap key; Tab kept as alias.
+            if (devMode && (e.key === ']' || e.key === 'Tab')) {
                 survivalTime += 15.0; // Instantly jump 15 seconds forward
             }
-            if (devMode && (e.key === 'g' || e.key === 'G')) {
+            // `g`/`h` collide with Player 3's controls (playerConfigs), so god mode
+            // and the legend toggle use free keys instead: `,` and `.`.
+            if (devMode && e.key === ',') {
                 godMode = !godMode;
+                updateDevIndicator();
+            }
+            if (devMode && e.key === '.') {
+                legendVisible = !legendVisible;
                 updateDevIndicator();
             }
             if (devMode && (e.key === 'f' || e.key === 'F')) {
