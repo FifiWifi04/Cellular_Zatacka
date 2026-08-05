@@ -353,7 +353,8 @@
         const TRACE_HITBOX = TRACE_WIDTH * 0.6;
 
         const MAX_TRACE_POINTS = 20000; // per-player memory/perf bound, not a gameplay cap; see T07 commit message
-        const MIN_TAIL_POINTS = 32; // never trim the growing last segment below this; must stay > the 16-frame self-immunity window (T08 will re-derive this from distance instead)
+        const NECK_LENGTH = 35; // px of own trace (measured along the current segment) that cannot kill you; replaces the old 15/16-frame skip so the immune neck is the same physical length at every speed (T08)
+        const MIN_TAIL_POINTS = 48; // never trim the growing last segment below this; must cover NECK_LENGTH px at the slowest speed (1.5px/frame -> ~24 points), doubled for safety margin like the constant it replaces
 
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
@@ -1202,6 +1203,16 @@
             return tMin;
         }
 
+        // Shared by checkCollision() and raycast() so physics and the bot's sensor
+        // can never disagree about the self-immunity neck (T08). `item` is a
+        // spatial-grid trace item (needs .playerId, .s, .d); `owner` is the caster
+        // whose trace it might be (needs .id, .traceSegments, .traceDist).
+        function isOwnNeck(item, owner) {
+            return item.playerId === owner.id
+                && item.s === owner.traceSegments.length - 1
+                && (owner.traceDist - item.d) < NECK_LENGTH;
+        }
+
         function rebuildSpatialGrid() {
             spatialGrid.clear();
 
@@ -1217,6 +1228,7 @@
                             s: s,
                             i: i,
                             segLength: seg.length,
+                            d: seg[i].d,
                             _seen: -1
                         });
                     }
@@ -1413,11 +1425,8 @@
                         item._seen = stamp;
 
                         if (item.type === 'trace') {
-                            if (caster !== null && item.playerId === casterId) {
-                                let isLastSegment = (item.s === caster.traceSegments.length - 1);
-                                if (isLastSegment && item.i >= item.segLength - 16) {
-                                    continue;
-                                }
+                            if (caster !== null && isOwnNeck(item, caster)) {
+                                continue;
                             }
                             let hitT = raySegT(startX, startY, endX, endY, item.x1, item.y1, item.x2, item.y2, TRACE_HITBOX);
                             if (hitT >= 0) {
@@ -1687,14 +1696,7 @@
                     // Hunters pass straight through opponent traces
                     if (player.effects.hunterTimer > 0 && item.playerId !== player.id) continue;
 
-                    let skipFrames = (item.playerId === player.id) ? 15 : 0;
-                    let other = players.find(op => op.id === item.playerId);
-                    if (other) {
-                        let isLastSegment = (item.s === other.traceSegments.length - 1);
-                        if (isLastSegment && item.i >= item.segLength - skipFrames - 1) {
-                            continue;
-                        }
-                    }
+                    if (isOwnNeck(item, player)) continue;
 
                     if (segSegDistSq(hx1, hy1, hx2, hy2, item.x1, item.y1, item.x2, item.y2) < HITBOX_SQ) {
                         return true;
@@ -3241,7 +3243,13 @@
 
                 // 5. Apply Final Movement
                 if (!p.isGap && !isGhost) {
-                    p.traceSegments[p.traceSegments.length - 1].push({ x: nextX, y: nextY });
+                    let seg = p.traceSegments[p.traceSegments.length - 1];
+                    // prevD falls back to p.traceDist (not 0) for a freshly-started
+                    // segment, so the neck-immunity distance stays continuous across
+                    // a gap or ghost-mode break instead of resetting at the seam.
+                    let prevD = seg.length > 0 ? seg[seg.length - 1].d : p.traceDist;
+                    p.traceDist = prevD + Math.hypot(nextX - p.x, nextY - p.y);
+                    seg.push({ x: nextX, y: nextY, d: p.traceDist });
                 }
                 trimTraceToCap(p, MAX_TRACE_POINTS);
 
@@ -3390,7 +3398,7 @@
                     id: config.id, x: config.x, y: config.y, angle: config.angle,
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
                     controls: config.controls, isBot: isBot,
-                    alive: true, traceSegments: [[]], isGap: false, gapCounter: 0,
+                    alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0,
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
