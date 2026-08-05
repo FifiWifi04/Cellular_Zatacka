@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 52d036f17ee142cd -->
+<!-- standalone-build-inputs: b4375496dd03560b -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3586,6 +3586,9 @@ void main() {
         const TRACE_WIDTH = 4;
         const TRACE_HITBOX = TRACE_WIDTH * 0.6;
 
+        const MAX_TRACE_POINTS = 20000; // per-player memory/perf bound, not a gameplay cap; see T07 commit message
+        const MIN_TAIL_POINTS = 32; // never trim the growing last segment below this; must stay > the 16-frame self-immunity window (T08 will re-derive this from distance instead)
+
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
@@ -6474,6 +6477,7 @@ void main() {
                 if (!p.isGap && !isGhost) {
                     p.traceSegments[p.traceSegments.length - 1].push({ x: nextX, y: nextY });
                 }
+                trimTraceToCap(p, MAX_TRACE_POINTS);
 
                 p.x = nextX;
                 p.y = nextY;
@@ -6640,23 +6644,45 @@ void main() {
         world.x = SCREEN_WIDTH / 2 - activeCell.x * 0.3;
         world.y = SCREEN_HEIGHT / 2 - activeCell.y * 0.3;
 
-        function deleteOldestTrace(player, percentage) {
-            let totalPoints = 0;
-            player.traceSegments.forEach(seg => totalPoints += seg.length);
-
-            let pointsToRemove = Math.floor(totalPoints * percentage);
-
-            while (pointsToRemove > 0 && player.traceSegments.length > 0) {
-                let firstSeg = player.traceSegments[0];
+        function removeFrontPoints(traceSegments, pointsToRemove) {
+            while (pointsToRemove > 0 && traceSegments.length > 0) {
+                let firstSeg = traceSegments[0];
                 if (firstSeg.length <= pointsToRemove) {
                     pointsToRemove -= firstSeg.length;
-                    player.traceSegments.shift(); // Remove entire segment
-                    if (player.traceSegments.length === 0) player.traceSegments.push([]);
+                    traceSegments.shift(); // Remove entire segment
+                    if (traceSegments.length === 0) traceSegments.push([]);
                 } else {
                     firstSeg.splice(0, pointsToRemove); // Remove partial segment
                     pointsToRemove = 0;
                 }
             }
+        }
+
+        function deleteOldestTrace(player, percentage) {
+            let totalPoints = 0;
+            player.traceSegments.forEach(seg => totalPoints += seg.length);
+            removeFrontPoints(player.traceSegments, Math.floor(totalPoints * percentage));
+        }
+
+        // Per-frame cap: keeps rebuildSpatialGrid()'s cost bounded independently of
+        // round length. Never eats into the last (actively-growing) segment below
+        // MIN_TAIL_POINTS - that segment's tail is what the self-immunity skip in
+        // checkCollision()/raycast() depends on. If the cap can only be met by
+        // cutting into it further, a temporary overshoot is accepted instead.
+        function trimTraceToCap(player, maxPoints) {
+            let segs = player.traceSegments;
+            let totalPoints = 0;
+            for (let i = 0; i < segs.length; i++) totalPoints += segs[i].length;
+
+            let excess = totalPoints - maxPoints;
+            if (excess <= 0) return;
+
+            let protectedTail = Math.min(segs[segs.length - 1].length, MIN_TAIL_POINTS);
+            let toRemove = Math.min(excess, totalPoints - protectedTail);
+            if (toRemove <= 0) return;
+
+            removeFrontPoints(segs, toRemove);
+            while (segs.length > 1 && segs[0].length < 2) segs.shift();
         }
 
     </script>

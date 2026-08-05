@@ -229,3 +229,23 @@ them.
   `onchange` handlers and `startRound()`. Anything that needs to be applied at
   startup must call it explicitly — `applyGlowQuality('low')` does. Worth
   remembering for any future menu setting. — 2026-08-04
+
+## Found while doing T07 (trace cap) — 2026-08-05
+
+- **Cross-player self-immunity indices can go stale mid-frame.** `rebuildSpatialGrid()`
+  runs once at the top of `gameLoop`, but `checkCollision()`/`raycast()` compare
+  its snapshotted `item.s` against `other.traceSegments.length` read *live*
+  (`checkCollision()` ~line 1690, `raycast()` ~line 1414). If an earlier-processed
+  player in the same frame shifts whole segments off its own front (a trim, or
+  the pre-existing `deleteOldestTrace()` power-up wipe) or pushes a new segment
+  (gap end / ghost end), a later-processed player's collision check against that
+  first player's trace uses a length that no longer matches the indices baked
+  into the grid snapshot — `item.s === other.traceSegments.length - 1` can
+  misfire either way for one frame. Pre-dates T07 (any `deleteOldestTrace()` call
+  already had this exposure); T07's per-frame `trimTraceToCap()` doesn't change
+  the mechanism, but only engages this path once a player is actually at
+  `MAX_TRACE_POINTS`, which is rare with the conservative cap landed here.
+  Verified this frame's *own*-trace immunity check is unaffected (each player's
+  own collision check runs before its own trim within the same iteration), so
+  this is specifically an opponent-trace edge case. Not fixed here — out of
+  scope for T07 and no observed failure in testing. — 2026-08-05

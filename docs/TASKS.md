@@ -57,8 +57,8 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `READY` |
-| T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `BLOCKED` |
+| T07 | [Bound trace growth (per-player cap)](tasks/T07-trace-cap.md) | T06a | `DONE` |
+| T08 | [Distance-based self-neck immunity](tasks/T08-neck-distance.md) | T07 | `READY` |
 | T09 | [Persist ER geometry across `drawArcs()` redraws](tasks/T09-er-persistence.md) | — | `READY` |
 | T10 | [Dev hotkey alignment + on-screen legend](tasks/T10-dev-hotkeys.md) | T04 | `READY` |
 
