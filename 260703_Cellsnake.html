@@ -365,6 +365,12 @@
         const NECK_LENGTH = 35; // px of own trace (measured along the current segment) that cannot kill you; replaces the old 15/16-frame skip so the immune neck is the same physical length at every speed (T08)
         const MIN_TAIL_POINTS = 48; // never trim the growing last segment below this; must cover NECK_LENGTH px at the slowest speed (1.5px/frame -> ~24 points), doubled for safety margin like the constant it replaces
 
+        // T13: Gen 2+ organelle necrosis.
+        const NECROSIS_INTERVAL = 12;        // seconds of un-frozen game time between freeze events
+        const NECROSIS_MAX_FRAC = 0.5;       // never freeze more than this fraction of organelles
+        const NECROSIS_ALPHA = 0.75;         // resting alpha once frozen and grey
+        const NECROSIS_PULSE_DURATION = 0.4; // seconds the freeze flicker plays
+
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
@@ -374,6 +380,7 @@
         let aiCount = 0;
         let currentSpeed = 1.5;
         let survivalTime = 0;
+        let necrosisTimer = 0; // T13: seconds of un-frozen game time accumulated since the last freeze
         let playerWins = [0, 0, 0, 0, 0]; // Index matches player ID (1 to 4, index 0 is unused)
 
         let players = [];
@@ -609,11 +616,21 @@
             }
         }
 
-        function createOrganelleGraphics(orgObj) {
+        function createOrganelleGraphics(orgObj, necrotic = false) {
             let sprite = new PIXI.Graphics();
             let isMito = (orgObj.type === 'mitochondria');
             let radius = orgObj.radius;
             let sizeMult = isMito ? radius / 35 : radius / 25;
+
+            // T13: stone-grey palette for necrotic organelles. A multiplicative
+            // tint on the normal palette washes out to a dim version of the
+            // original hue instead of grey, so the necrotic rebuild uses these
+            // colors directly rather than tinting the live sprite.
+            const mitoOuter = necrotic ? 0x707070 : C_MITO;
+            const mitoCore = necrotic ? 0x9a9a9a : 0x55efc4;
+            const lysoRing = necrotic ? 0x707070 : 0xff4757;
+            const lysoBubble = necrotic ? 0x9a9a9a : 0xff6b81;
+            const lysoHighlight = necrotic ? 0xc0c0c0 : 0xffffff;
 
             if (isMito) {
                 let w = radius * 0.9; 
@@ -628,13 +645,13 @@
                     sprite.quadraticCurveTo(0, bendY, L/2, 0);
                 };
 
-                drawPill(w + 10, C_MITO, 0.2); 
-                drawPill(w, C_MITO, 0.6);      
+                drawPill(w + 10, mitoOuter, 0.2);
+                drawPill(w, mitoOuter, 0.6);
                 drawPill(w - 6, 0x0d0d1a, 1.0); 
-                drawPill(w - 10, 0x55efc4, 0.8); 
+                drawPill(w - 10, mitoCore, 0.8);
                 drawPill(w - 14, 0x0d0d1a, 1.0); 
 
-                sprite.lineStyle({width: 2 + sizeMult, color: 0x55efc4, alpha: 0.9, cap: PIXI.LINE_CAP.ROUND});
+                sprite.lineStyle({width: 2 + sizeMult, color: mitoCore, alpha: 0.9, cap: PIXI.LINE_CAP.ROUND});
                 let numCristae = 4 + Math.floor(L / 15); 
                 for (let j = 1; j <= numCristae; j++) {
                     let t = j / (numCristae + 1);
@@ -675,7 +692,7 @@
             } else {
                 let w = radius;
                 sprite.beginFill(0x0d0d1a, 0.6);
-                sprite.lineStyle(3 * sizeMult, 0xff4757, 0.6);
+                sprite.lineStyle(3 * sizeMult, lysoRing, 0.6);
                 sprite.drawCircle(0, 0, w);
                 sprite.endFill();
                 
@@ -684,12 +701,12 @@
                     let br = Math.random() * (w - 6 * sizeMult);
                     let ba = Math.random() * Math.PI * 2;
                     let bubR = (3 + Math.random() * 5) * sizeMult;
-                    sprite.beginFill(0xff6b81, 0.8);
-                    sprite.lineStyle(1 * sizeMult, 0xff4757, 1);
+                    sprite.beginFill(lysoBubble, 0.8);
+                    sprite.lineStyle(1 * sizeMult, lysoRing, 1);
                     sprite.drawCircle(Math.cos(ba) * br, Math.sin(ba) * br, bubR);
                     sprite.endFill();
                     
-                    sprite.beginFill(0xffffff, 0.9);
+                    sprite.beginFill(lysoHighlight, 0.9);
                     sprite.lineStyle(0);
                     sprite.drawCircle(Math.cos(ba) * br, Math.sin(ba) * br, bubR * 0.4);
                     sprite.endFill();
@@ -1010,7 +1027,8 @@
                         radius: radius,
                         color: isMito ? C_MITO : C_LYSO,
                         rotation: Math.random() * Math.PI * 2,
-                        rotSpeed: (Math.random() - 0.5) * 0.015
+                        rotSpeed: (Math.random() - 0.5) * 0.015,
+                        necrotic: false // T13
                     };
                     let sprite = createOrganelleGraphics(orgObj);
                     orgObj.sprite = sprite;
@@ -1744,65 +1762,96 @@
         function updateDriftingOrganelles(delta) {
             for (let i = 0; i < organelles.length; i++) {
                 let o = organelles[i];
-                o.vx += (Math.random() - 0.5) * 0.05;
-                o.vy += (Math.random() - 0.5) * 0.05;
 
-                let speed = Math.hypot(o.vx, o.vy);
-                if (speed > 0.3) {
-                    o.vx = (o.vx / speed) * 0.3; o.vy = (o.vy / speed) * 0.3;
+                if (!o.necrotic) {
+                    o.vx += (Math.random() - 0.5) * 0.05;
+                    o.vy += (Math.random() - 0.5) * 0.05;
+
+                    let speed = Math.hypot(o.vx, o.vy);
+                    if (speed > 0.3) {
+                        o.vx = (o.vx / speed) * 0.3; o.vy = (o.vy / speed) * 0.3;
+                    }
+
+                    o.x += o.vx * delta; o.y += o.vy * delta;
+
+                    let nearestCell = activeCell;
+                    if (mitosis.state !== 'idle') {
+                        let distToA = Math.hypot(o.x - activeCell.x, o.y - activeCell.y);
+                        let distToB = Math.hypot(o.x - mitosis.cellB.x, o.y - mitosis.cellB.y);
+                        if (distToB < distToA) nearestCell = mitosis.cellB;
+                    }
+
+                    if (isOutsideCell(o.x, o.y, o.radius)) {
+                        let ang = Math.atan2(o.y - nearestCell.y, o.x - nearestCell.x);
+                        o.x = nearestCell.x + Math.cos(ang) * (nearestCell.radiusX - o.radius - 2);
+                        o.y = nearestCell.y + Math.sin(ang) * (nearestCell.radiusY - o.radius - 2);
+                        o.vx *= -1;
+                        o.vy *= -1;
+                    }
+
+                    // Failsafe: If physics broke and it's completely out of the world, snap it to center
+                    if (Math.hypot(o.x - nearestCell.x, o.y - nearestCell.y) > nearestCell.radiusX + 1000) {
+                        o.x = nearestCell.x;
+                        o.y = nearestCell.y;
+                    }
+
+                    let distToCenter = Math.hypot(o.x - nearestCell.x, o.y - nearestCell.y);
+                    if (distToCenter < 380 + o.radius) {
+                        let ang = Math.atan2(o.y - nearestCell.y, o.x - nearestCell.x);
+                        o.vx = Math.cos(ang) * 0.4; o.vy = Math.sin(ang) * 0.4;
+                        o.x = nearestCell.x + Math.cos(ang) * (380 + o.radius);
+                        o.y = nearestCell.y + Math.sin(ang) * (380 + o.radius);
+                    }
                 }
 
-                o.x += o.vx * delta; o.y += o.vy * delta;
-
-                let nearestCell = activeCell;
-                if (mitosis.state !== 'idle') {
-                    let distToA = Math.hypot(o.x - activeCell.x, o.y - activeCell.y);
-                    let distToB = Math.hypot(o.x - mitosis.cellB.x, o.y - mitosis.cellB.y);
-                    if (distToB < distToA) nearestCell = mitosis.cellB;
-                }
-
-                if (isOutsideCell(o.x, o.y, o.radius)) {
-                    let ang = Math.atan2(o.y - nearestCell.y, o.x - nearestCell.x);
-                    o.x = nearestCell.x + Math.cos(ang) * (nearestCell.radiusX - o.radius - 2);
-                    o.y = nearestCell.y + Math.sin(ang) * (nearestCell.radiusY - o.radius - 2);
-                    o.vx *= -1;
-                    o.vy *= -1;
-                }
-
-                // Failsafe: If physics broke and it's completely out of the world, snap it to center
-                if (Math.hypot(o.x - nearestCell.x, o.y - nearestCell.y) > nearestCell.radiusX + 1000) {
-                    o.x = nearestCell.x;
-                    o.y = nearestCell.y;
-                }
-
-                let distToCenter = Math.hypot(o.x - nearestCell.x, o.y - nearestCell.y);
-                if (distToCenter < 380 + o.radius) {
-                    let ang = Math.atan2(o.y - nearestCell.y, o.x - nearestCell.x);
-                    o.vx = Math.cos(ang) * 0.4; o.vy = Math.sin(ang) * 0.4;
-                    o.x = nearestCell.x + Math.cos(ang) * (380 + o.radius);
-                    o.y = nearestCell.y + Math.sin(ang) * (380 + o.radius);
-                }
-
+                // T13: pair resolution still runs for a necrotic o so drifting
+                // organelles keep bouncing off it -- but the necrotic side never
+                // moves (one-sided resolution instead of the symmetric split).
                 for (let j = i + 1; j < organelles.length; j++) {
                     let o2 = organelles[j];
                     let dist = Math.hypot(o.x - o2.x, o.y - o2.y);
                     let minDist = o.radius + o2.radius + 10;
                     if (dist < minDist) {
                         let ang = Math.atan2(o.y - o2.y, o.x - o2.x);
-                        o.vx = Math.cos(ang) * 0.3; o.vy = Math.sin(ang) * 0.3;
-                        o2.vx = -Math.cos(ang) * 0.3; o2.vy = -Math.sin(ang) * 0.3;
-
                         let overlap = minDist - dist;
-                        o.x += Math.cos(ang) * overlap / 2; o.y += Math.sin(ang) * overlap / 2;
-                        o2.x -= Math.cos(ang) * overlap / 2; o2.y -= Math.sin(ang) * overlap / 2;
+
+                        if (!o.necrotic) {
+                            o.vx = Math.cos(ang) * 0.3; o.vy = Math.sin(ang) * 0.3;
+                        }
+                        if (!o2.necrotic) {
+                            o2.vx = -Math.cos(ang) * 0.3; o2.vy = -Math.sin(ang) * 0.3;
+                        }
+
+                        if (o.necrotic && !o2.necrotic) {
+                            o2.x -= Math.cos(ang) * overlap; o2.y -= Math.sin(ang) * overlap;
+                        } else if (!o.necrotic && o2.necrotic) {
+                            o.x += Math.cos(ang) * overlap; o.y += Math.sin(ang) * overlap;
+                        } else if (!o.necrotic && !o2.necrotic) {
+                            o.x += Math.cos(ang) * overlap / 2; o.y += Math.sin(ang) * overlap / 2;
+                            o2.x -= Math.cos(ang) * overlap / 2; o2.y -= Math.sin(ang) * overlap / 2;
+                        }
+                        // both necrotic: neither moves, nothing to resolve
                     }
                 }
 
                 if (o.sprite) {
                     o.sprite.x = o.x;
                     o.sprite.y = o.y;
-                    o.rotation += o.rotSpeed * delta;   // advance the value the hitbox reads
-                    o.sprite.rotation = o.rotation;     // sprite mirrors it exactly
+                    if (!o.necrotic) {
+                        o.rotation += o.rotSpeed * delta;   // advance the value the hitbox reads
+                        o.sprite.rotation = o.rotation;     // sprite mirrors it exactly
+                    }
+
+                    // T13: one-shot flicker on freeze, decaying to the resting grey alpha
+                    if (o.necrotic) {
+                        let sinceFreeze = survivalTime - o.freezeTime;
+                        if (sinceFreeze < NECROSIS_PULSE_DURATION) {
+                            let decay = 1 - (sinceFreeze / NECROSIS_PULSE_DURATION);
+                            o.sprite.alpha = NECROSIS_ALPHA + decay * 0.25 * Math.abs(Math.sin(sinceFreeze * 40));
+                        } else {
+                            o.sprite.alpha = NECROSIS_ALPHA;
+                        }
+                    }
                 }
             }
         }
@@ -2990,6 +3039,51 @@
                 drawTraces();
                 updateDriftingOrganelles(delta);
                 updateVesicles(delta);
+
+                // T13: Gen 2+ organelle necrosis. Every NECROSIS_INTERVAL seconds of
+                // un-frozen game time, freeze one random non-necrotic organelle into a
+                // permanent grey static wall (capped at NECROSIS_MAX_FRAC of the total).
+                // No new collision path: it stays in organelles[], so rebuildSpatialGrid(),
+                // checkCollision() and raycast() already handle it unchanged.
+                if (genAtLeast(2)) {
+                    necrosisTimer += deltaSec;
+                    if (necrosisTimer >= NECROSIS_INTERVAL) {
+                        necrosisTimer -= NECROSIS_INTERVAL;
+
+                        let necroticCount = 0;
+                        for (let o of organelles) if (o.necrotic) necroticCount++;
+
+                        if (necroticCount < Math.floor(NECROSIS_MAX_FRAC * organelles.length)) {
+                            let candidates = organelles.filter(o => !o.necrotic);
+                            if (candidates.length > 0) {
+                                let pick = candidates[Math.floor(Math.random() * candidates.length)];
+                                let tooClose = false;
+                                for (let p of players) {
+                                    if (!p.alive) continue;
+                                    if (Math.hypot(p.x - pick.x, p.y - pick.y) < pick.radius + 120) { tooClose = true; break; }
+                                }
+                                if (!tooClose) {
+                                    pick.necrotic = true;
+                                    pick.vx = 0; pick.vy = 0; pick.rotSpeed = 0;
+                                    pick.freezeTime = survivalTime;
+
+                                    // Rebuild grey: a multiplicative tint on the live sprite
+                                    // washes out to a dim version of the original hue rather
+                                    // than grey, so redraw from the same x/y/rotation/bendY/
+                                    // radius instead (createOrganelleGraphics respects a
+                                    // pre-set bendY rather than re-randomizing it).
+                                    if (pick.sprite) {
+                                        organellesLayer.removeChild(pick.sprite);
+                                        pick.sprite.destroy();
+                                    }
+                                    let greySprite = createOrganelleGraphics(pick, true);
+                                    pick.sprite = greySprite;
+                                    organellesLayer.addChild(greySprite);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             updateMitosis(deltaSec);
             drawMitosisVisuals();
@@ -3444,6 +3538,7 @@
 
             globalRotation = Math.random() * Math.PI * 2;
             survivalTime = 0;
+            necrosisTimer = 0; // T13
             updateUI();
 
             world.scale.set(0.5);

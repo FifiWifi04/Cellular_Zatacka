@@ -68,7 +68,7 @@ later returns FAIL, revisit anything that landed in that window.
 |----|------|-----------|--------|
 | T11 | [Generation counter infrastructure](tasks/T11-generation-counter.md) | T06a | `DONE` |
 | T12 | [Gen 2 — membrane calcification](tasks/T12-gen2-calcification.md) | T11 | `DONE` |
-| T13 | [Gen 2 — organelle necrosis (lethal static walls)](tasks/T13-gen2-necrosis.md) | T11 | `READY` |
+| T13 | [Gen 2 — organelle necrosis (lethal static walls)](tasks/T13-gen2-necrosis.md) | T11 | `DONE` |
 | T14 | [Gen 3 — the malignant mass](tasks/T14-gen3-malignant-mass.md) | T11 | `READY` |
 | T15 | [Gen 4 — angiogenesis gravity well](tasks/T15-gen4-angiogenesis.md) | T11 | `READY` |
 

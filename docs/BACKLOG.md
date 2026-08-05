@@ -282,3 +282,13 @@ them.
   `alive` drop during an "immortal" T12 mitosis test. Out of scope for T12;
   a one-line `devMode` → `godMode` fix (or `devMode || godMode`) whenever
   someone next touches `updateMitosis()`. — 2026-08-05
+
+## Found while doing T13 (Gen 2 organelle necrosis) — 2026-08-05
+
+- **Bot avoidance weight doesn't distinguish necrotic from drifting
+  organelles.** `updateBotAI`/`getRayWeight` treats every `'organelle'` ray
+  hit identically, but a necrotic one is a permanent wall while a drifting
+  one will move out of the way on its own — a necrotic hit deserves a higher
+  avoidance weight. Explicitly out of scope for T13 (see that task file's
+  "Bot awareness" section); revisit once T03's hazard-weighting channels can
+  take hit subtype into account. — 2026-08-05
