@@ -318,12 +318,22 @@ them.
 
 ## Phase 1 gate: soft FAIL on memory — 2026-08-04
 
-- **Retained memory across rounds, not display objects.** Run A's heap sawtooth
-  floor rises 44 → 124 MB over 60 rounds (~1.4 MB/round) while `worldChildren`
-  holds flat at 1292–1388. T05's display-object teardown is working; this is
-  something else. Written up as **T06c**, which is `READY` and takes priority
-  over everything.
-- **The soak data is stale.** All three runs were taken at `5c0e1aa` or earlier;
-  T07's trace cap and T08–T17 landed afterwards. T06c re-measures before
-  investigating, because T07 bounds one of the largest per-round allocators and
-  may already have fixed this. — 2026-08-04
+- ~~**Retained memory across rounds, not display objects.**~~ **RESOLVED by
+  T07 — 2026-08-06.** Run A's heap sawtooth floor rose 44 → 124 MB over 60
+  rounds (~1.4 MB/round) at `30ec41a` while `worldChildren` held flat at
+  1292–1388. Re-measured at `8762fcf` (T07's trace cap + T08–T17 landed since)
+  over a comparable ~1063s/453-round span: floor is now flat, 41.7–48.2 MB
+  across 6 windows, no upward trend. `worldChildren` still flat, same band as
+  before. No code change was needed. Full before/after tables and the ruled-out
+  candidate list are in `docs/tasks/T06c-heap-leak-hunt.md`'s `## Findings`.
+- **Mid-round `drawArcs()` orphan is still real, still unfixed.**
+  `rotatingContainer.removeChildren()` at the ER/Golgi arc-shatter path
+  (`gameLoop` ~L3536) discards the previous `structGraph` `Graphics` without
+  `.destroy()`ing it, same as flagged doing T05/T09. Confirmed via T06c that
+  run A's soak never exercises this path (mitosis needs 240s survival time to
+  trigger, 60+ dilated game-seconds after that to reach `'narrowing'` where
+  arcs shatter; run A's rounds average ~9s dilated game time before a player
+  dies) — so it isn't what run A's flat floor is measuring one way or the
+  other. Worth a task if a future immortal-mode soak (run B) or a
+  longer-survival config shows a floor component tracking arc-shatter counts.
+  — 2026-08-06
