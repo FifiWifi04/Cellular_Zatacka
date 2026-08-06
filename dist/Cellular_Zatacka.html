@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 927762808601f656 -->
+<!-- standalone-build-inputs: 237158fad6a936f2 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3363,6 +3363,23 @@ void main() {
             background: #a29bfe;
         }
 
+        /* T19: prominent one-click entry point, sits above the config controls */
+        .quick-play-btn {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            margin: 0 0 8px;
+            padding: 14px;
+            font-size: 20px;
+            font-weight: bold;
+            background: #00b894;
+            box-shadow: 0 0 15px rgba(0, 184, 148, 0.5);
+        }
+
+        .quick-play-btn:hover {
+            background: #55efc4;
+        }
+
         h3 {
             margin: 5px 0;
             font-weight: normal;
@@ -3395,6 +3412,7 @@ void main() {
     </h2>
 
     <div id="ui">
+        <button id="quickPlayBtn" class="quick-play-btn" onclick="quickPlay()">⚡ Quick Play</button>
         <div class="controls">
             <select id="modeSelect" onchange="updateUI()">
                 <option value="1">1 Player (Solo)</option>
@@ -6330,6 +6348,11 @@ void main() {
             if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "½"].includes(e.key)) e.preventDefault();
             if (devMode && e.key === 'Tab') e.preventDefault(); // only steal Tab while dev mode is on
 
+            // T19: Enter on the landing menu triggers Quick Play; inert mid-round.
+            if (e.key === 'Enter' && !isPlaying) {
+                quickPlay();
+            }
+
             // --- DEBUG / DEV MODE HOTKEYS ---
             // Master toggle: `\` is the documented roadmap key; `` ` ``/`~`/`½` kept as aliases.
             if (e.key === '\\' || e.key === '½' || e.key === '`' || e.key === '~') {
@@ -7152,6 +7175,18 @@ void main() {
                     scoreText.innerText = scoreStr;
                 }
             }
+        };
+
+        // T19: one click into a playable 1-player-vs-1-bot round. Sets the
+        // same selects the manual path reads, then reuses startRound() so the
+        // two paths can never diverge.
+        window.quickPlay = function () {
+            modeSelect.value = '1';
+            aiSelect.value = '1';
+            document.getElementById('cameraSelect').value = 'shared';
+            speedSelect.value = '1.5';
+            updateUI();
+            startRound();
         };
 
         window.startRound = function () {

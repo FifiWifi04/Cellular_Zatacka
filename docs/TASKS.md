@@ -93,7 +93,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T19 | [Quick Play button](tasks/T19-quick-play.md) | T03 | `READY` |
+| T19 | [Quick Play button](tasks/T19-quick-play.md) | T03 | `DONE` |
 | T20 | [Control-mapping splash screen](tasks/T20-control-splash.md) | — | `READY` |
 
 ### Track F — Phase 2.2 (renderer-independent)

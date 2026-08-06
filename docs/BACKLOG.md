@@ -326,6 +326,15 @@ them.
   across 6 windows, no upward trend. `worldChildren` still flat, same band as
   before. No code change was needed. Full before/after tables and the ruled-out
   candidate list are in `docs/tasks/T06c-heap-leak-hunt.md`'s `## Findings`.
+
+## Found during T19 — 2026-08-06
+
+- **`#ui` panel overflows below ~410px viewport width.** `#ui { min-width:
+  400px; }` predates T19 and already clips the rightmost control (the
+  Fullscreen button) off-screen at narrow widths like 360px, independent of
+  the Quick Play button added in T19 (verified against the pre-T19 file).
+  Confirmed fine at 600px+. Worth a look whenever mobile/responsive layout
+  (T23) is tackled.
 - **Mid-round `drawArcs()` orphan is still real, still unfixed.**
   `rotatingContainer.removeChildren()` at the ER/Golgi arc-shatter path
   (`gameLoop` ~L3536) discards the previous `structGraph` `Graphics` without
