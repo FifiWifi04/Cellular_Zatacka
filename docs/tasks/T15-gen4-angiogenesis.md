@@ -132,18 +132,40 @@ and the ring visual.
 
 ## Definition of done
 
-- [ ] `## Findings` filled in (vesicle motion model, lifetime, centre behaviour)
-- [ ] Pull applies to vesicles only
-- [ ] Time-based, not frame-based; verified at 4× dilation
-- [ ] Terminal velocity clamp keeps vesicles collectable
-- [ ] Centre behaviour chosen, documented, and bounded
-- [ ] Nearest-cell logic during mitosis, reusing the organelle pattern
-- [ ] Visual gated on Gen 4, drawn into an existing layer
-- [ ] `docs/TASKS.md`: T15 → `DONE`
+- [x] `## Findings` filled in (vesicle motion model, lifetime, centre behaviour)
+- [x] Pull applies to vesicles only
+- [x] Time-based, not frame-based; verified at 4× dilation
+- [x] Terminal velocity clamp keeps vesicles collectable
+- [x] Centre behaviour chosen, documented, and bounded
+- [x] Nearest-cell logic during mitosis, reusing the organelle pattern
+- [x] Visual gated on Gen 4, drawn into an existing layer
+- [x] `docs/TASKS.md`: T15 → `DONE`
 
 ---
 
 ## Findings
 
-*(Fill in during the task: how vesicles store and update position/velocity, their
-lifetime rule, and what happens at the cell centre.)*
+- **Motion model:** vesicles already carry `vx`/`vy` (px per `delta`-tick) set at
+  spawn (`spawnVesicles()`: random angle, speed 2.0-4.0; the Golgi drip in
+  `updateVesicles()`: speed 0.8) and integrated each frame with
+  `v.x += v.vx * delta; v.y += v.vy * delta;`. `delta` is PIXI's ticker
+  `deltaTime`, normalized so 1.0 == a 60fps frame; `deltaSec` (`app.ticker.deltaMS
+  / 1000`, computed once in `gameLoop`) is real elapsed seconds. Both are scaled
+  by the same 4x factor under the fuzzer, and `delta` always equals `60 *
+  deltaSec` frame-for-frame, so `delta` alone is already frame-rate/time-scale
+  correct — the existing `vx`/`vy` values are effectively "px per 1/60s", i.e.
+  real px/s divided by 60. `GRAVITY_ACCEL`/`GRAVITY_MAX_V` are specified in real
+  px/s(²), so they are pre-divided by 60 once into module-level constants and
+  then combined with `delta` exactly like the existing `v.rotation += 0.02 *
+  delta;` line, instead of adding a second delta-flavor parameter to
+  `updateVesicles()`.
+- **Lifetime:** no age/despawn timer. A vesicle lives until it "fuses" (matching
+  organelle type, or any membrane-type vesicle touching the outer wall) and is
+  `splice()`d out. Concurrent count is capped at 25 by the spawn gates
+  (`vesicles.length < 25`), not by any per-vesicle expiry.
+- **Cell centre:** `isInsideNucleus()` (130px core) is lethal to players but is
+  never consulted by `updateVesicles()` — nothing currently stops a vesicle
+  drifting into/through the nucleus, and since players die on approach, a
+  vesicle parked there would be permanently uncollectable. Chose the
+  **preferred** despawn option from the design section: consume any vesicle
+  within 150px of its nearest cell centre.

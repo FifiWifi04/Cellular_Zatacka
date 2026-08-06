@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 660985a92f162023 -->
+<!-- standalone-build-inputs: ecab98584c14f0a4 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3620,6 +3620,14 @@ void main() {
             nextGrowTime: 0
         };
 
+        // T15: Gen 4+ angiogenesis -- gravity well pulling spawned vesicles toward
+        // the nearest cell centre. vx/vy are px per `delta`-tick (delta == 60 *
+        // deltaSec always in this codebase, see updateVesicles()), so the real
+        // px/s(^2) design constants are pre-divided by 60 to match that unit.
+        const GRAVITY_ACCEL_PER_TICK = 12 / 60; // 12 px/s^2 toward the centre
+        const GRAVITY_MAX_V_PER_TICK = 60 / 60; // 60 px/s terminal speed
+        const GRAVITY_CONSUME_RADIUS = 150;     // px; despawns before reaching the 130px lethal nucleus core
+
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
@@ -5189,8 +5197,52 @@ void main() {
             }
 
             dynamicLayer.clear();
+
+            // T15: Gen 4+ angiogenesis well -- faint pulsing rings at each cell
+            // centre, drawn into the same layer/frame this function already owns.
+            if (genAtLeast(4)) {
+                let wellCenters = [activeCell];
+                if (mitosis.state !== 'idle') wellCenters.push(mitosis.cellB);
+                for (let c of wellCenters) {
+                    for (let ring = 0; ring < 3; ring++) {
+                        let r = 40 + ring * 35 + Math.sin(survivalTime * 1.5 + ring) * 6;
+                        dynamicLayer.lineStyle(1.5, 0xa29bfe, 0.18 - ring * 0.03);
+                        dynamicLayer.drawCircle(c.x, c.y, r);
+                    }
+                }
+            }
+
             for (let i = vesicles.length - 1; i >= 0; i--) {
                 let v = vesicles[i];
+
+                // T15: Gen 4+ angiogenesis -- constant inward pull on vesicles only,
+                // toward whichever cell centre is nearest (mirrors the nearestCell
+                // pattern in updateDriftingOrganelles()). Vesicles consumed near the
+                // centre despawn rather than pile up inside the lethal nucleus core.
+                if (genAtLeast(4)) {
+                    let nearestCell = activeCell;
+                    if (mitosis.state !== 'idle') {
+                        let distToA = Math.hypot(v.x - activeCell.x, v.y - activeCell.y);
+                        let distToB = Math.hypot(v.x - mitosis.cellB.x, v.y - mitosis.cellB.y);
+                        if (distToB < distToA) nearestCell = mitosis.cellB;
+                    }
+                    let dx = nearestCell.x - v.x, dy = nearestCell.y - v.y;
+                    let distToCenter = Math.hypot(dx, dy);
+                    if (distToCenter < GRAVITY_CONSUME_RADIUS) {
+                        vesicles.splice(i, 1);
+                        continue;
+                    }
+                    let ux = dx / distToCenter, uy = dy / distToCenter;
+                    v.vx += ux * GRAVITY_ACCEL_PER_TICK * delta;
+                    v.vy += uy * GRAVITY_ACCEL_PER_TICK * delta;
+                    let speed = Math.hypot(v.vx, v.vy);
+                    if (speed > GRAVITY_MAX_V_PER_TICK) {
+                        let scale = GRAVITY_MAX_V_PER_TICK / speed;
+                        v.vx *= scale;
+                        v.vy *= scale;
+                    }
+                }
+
                 v.x += v.vx * delta;
                 v.y += v.vy * delta;
                 v.rotation += 0.02 * delta;

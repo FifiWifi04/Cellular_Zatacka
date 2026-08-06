@@ -54,6 +54,13 @@ them.
   *after* T07's trace cap has landed. Incremental removal is where bugs hide.
   — 2026-08-02
 
+- **`mitosis.cellB` never gets `radiusX`/`radiusY` fields**, but the outer-membrane
+  wall-bounce in `updateVesicles()` (the `isOutsideCell` branch, pre-existing, not
+  touched by T15) reads `nearestCell.radiusX`/`radiusY` and will get `NaN` there
+  whenever a vesicle bounces off the wall while `mitosis.cellB` is the nearer cell.
+  T15's new gravity-well code only reads `nearestCell.x`/`y`, so it does not hit
+  this; found while reusing the same `nearestCell` pattern. — 2026-08-06
+
 ---
 
 ## Deferred design ideas
