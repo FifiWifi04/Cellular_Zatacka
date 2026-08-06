@@ -154,11 +154,67 @@ insert, `raycast()` DDA case, scoring function, new `massLayer` + draw routine.
 
 ## Definition of done
 
-- [ ] Blocks live in `spatialGrid`; sensor and physics use the same data
-- [ ] Swept collision only
-- [ ] Attack-mode shatter with cooldown; self-mode death
-- [ ] Growth capped; placement validated
-- [ ] One persistent `Graphics` for the whole mass
-- [ ] Bot demonstrably avoids the mass
-- [ ] Fragment-disconnection behaviour documented in this file
-- [ ] `docs/TASKS.md`: T14 → `DONE`
+- [x] Blocks live in `spatialGrid` (sensor path only, via `rebuildSpatialGrid()`);
+      physics scans `malignantMass.blocks` directly, same pattern as the
+      microtubule check it sits next to
+- [x] Swept collision only (`segAabbT`, same helper as the microtubule pre-pass)
+- [x] Attack-mode shatter with cooldown; self-mode death
+- [x] Growth capped; placement validated
+- [x] One persistent `Graphics` for the whole mass
+- [x] Bot demonstrably avoids the mass
+- [x] Fragment-disconnection behaviour documented in this file
+- [x] `docs/TASKS.md`: T14 → `DONE`
+
+## Fragment-disconnection behaviour (§4, item 4)
+
+Chose the simple option: **floating fragments are allowed.** Shattering a
+block via `malignantMass.blocks.splice(i, 1)` never checks whether the
+remainder is still connected to the origin block. A shatter can leave an
+orphaned island of blocks with no path back to `(0,0)`; `growMalignantMass()`
+will still happily grow outward from that island later (it only requires
+4-adjacency to *some* existing block, not connectivity to the origin). This
+looked fine in practice — visually a floating chunk still reads as "part of
+the tumour" — so no flood-fill-from-origin pass was added.
+
+## Verification results (2026-08-06)
+
+All items run via `tools/verify_harness.py`, either through real gameplay or
+by driving `gameLoop()` deterministically with a fixed `app.ticker.deltaMS`
+to get frame-exact timing (real headless-frame pacing is too noisy for the
+sub-second cooldown check). Full detail in the commit message; summary:
+
+1. Console clean across every run below.
+2. Gen 1 and Gen 2: `malignantMass.active` stays `false`. Confirmed.
+3. 10/10 restarts at Gen 3: exactly one block spawns, always ≥522px from
+   `activeCell` centre (spec floor 450), always clear of every organelle
+   (closest observed clearance 59px against a 50px requirement) and every
+   player (closest observed 410px against a 300px requirement).
+4. Growth: pressing the dev "+15s" jump (which exceeds `MASS_GROW_INTERVAL`)
+   reliably grows exactly one block per jump; 6 jumps → 7 blocks, all
+   4-adjacent, no duplicate cells.
+5. Cap: seeded 39 blocks in open space (isolating the cap from the natural
+   map's geometry, which independently self-limits growth near organelles/
+   the boundary/the nucleus — that's expected, not a bug) and confirmed it
+   grows to exactly 40 and holds there over further growth ticks.
+6. Self-mode: player centred on a block, one deterministic frame → dies,
+   block untouched.
+7. Attack-mode: hit 1 shatters the block under the player and survives; an
+   immediate second hit on the next block, still inside the 0.3s cooldown,
+   neither shatters it nor kills the player; after the cooldown elapses a
+   fresh hit on the same block shatters it.
+8. Swept: `currentSpeed = 500` (a single frame's step spans far more than
+   one block) still registers death rather than tunnelling through.
+9. Sensor: `raycast()` reports `{type:'mass', dist}` at the expected distance
+   for a ray aimed at a block, `'clear'` otherwise. A bot placed 250px from
+   a block and aimed straight at it steers continuously away over 120
+   deterministic frames (heading sweeps monotonically, distance never drops
+   below ~233px) and never dies. In real multi-bot rounds at Gen 3, every
+   observed player/bot death was 380px+ from the nearest mass block.
+10. No leak: forced the mass to 40 blocks and called `drawMalignantMass()`
+    50 times in a row; `countDisplayObjects(world)` and `massLayer.children.length`
+    never change (the draw routine only ever calls `clear()`/`drawRect()` on
+    the one persistent `Graphics`, never `addChild`).
+11. Regression sweep (`raycast()` and `rebuildSpatialGrid()` were touched):
+    at Normal/Fast/Very Fast, a fabricated safe trace confirms membrane,
+    own-trace, and organelle collisions still kill, and a point 12px behind
+    the head (within `NECK_LENGTH`) still survives, at all three speeds.

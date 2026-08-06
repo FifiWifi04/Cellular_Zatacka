@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 2ae0215810e4b6a5 -->
+<!-- standalone-build-inputs: 660985a92f162023 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3500,6 +3500,7 @@ void main() {
         const golgiERContainer = new PIXI.Container();
         const rotatingContainer = new PIXI.Container();
         const organellesLayer = new PIXI.Graphics();
+        const massLayer = new PIXI.Graphics(); // T14: malignant mass, cleared+redrawn every frame
         const trailLayer = new PIXI.Container();
         const dynamicLayer = new PIXI.Graphics(); // Vesicles
         const virusLayer = new PIXI.Graphics();   // New layer for the Infection event
@@ -3512,6 +3513,7 @@ void main() {
         world.addChild(golgiERContainer);
         golgiERContainer.addChild(rotatingContainer);
         world.addChild(organellesLayer);
+        world.addChild(massLayer);
         world.addChild(trailLayer);
         world.addChild(dynamicLayer);
         world.addChild(virusLayer);
@@ -3604,6 +3606,19 @@ void main() {
         const NECROSIS_MAX_FRAC = 0.5;       // never freeze more than this fraction of organelles
         const NECROSIS_ALPHA = 0.75;         // resting alpha once frozen and grey
         const NECROSIS_PULSE_DURATION = 0.4; // seconds the freeze flicker plays
+
+        // T14: Gen 3+ malignant mass -- a static tumour of grid-aligned blocks
+        // that clones an attached block every MASS_GROW_INTERVAL seconds.
+        const MASS_GROW_INTERVAL = 10;  // seconds of un-frozen game time between growth ticks
+        const MASS_MAX_BLOCKS = 40;     // growth cap; ~7 minutes at one block/10s
+        const MASS_HIT_COOLDOWN = 0.3;  // seconds of attack-mode shatter immunity after a hit
+        let malignantMass = {
+            active: false,
+            blockSize: 60,
+            origin: { x: 0, y: 0 },      // world position of grid cell (0,0)
+            blocks: [],                  // [{ cx, cy, x, y, spawnTime }]
+            nextGrowTime: 0
+        };
 
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
@@ -4540,6 +4555,20 @@ void main() {
                     });
                 });
             }
+
+            // 5. Insert malignant mass blocks (T14; Gen 3+). insertCircle's bounding
+            // box with r = half block size covers exactly the block's own AABB.
+            if (malignantMass.blocks.length > 0) {
+                let half = malignantMass.blockSize / 2;
+                malignantMass.blocks.forEach(b => {
+                    spatialGrid.insertCircle(b.x, b.y, half, {
+                        type: 'mass',
+                        x: b.x, y: b.y,
+                        size: malignantMass.blockSize,
+                        _seen: -1
+                    });
+                });
+            }
         }
 
         function raycast(startX, startY, angle, maxDist, casterId = null) {
@@ -4756,6 +4785,15 @@ void main() {
                             if (hitT >= 0) {
                                 let hitDist = hitT * maxDist;
                                 if (hitDist < rewardDist) { rewardDist = hitDist; rewardRaw = v; }
+                            }
+                        } else if (item.type === 'mass') {
+                            // T14: block is axis-aligned, so test with segAabbT (same
+                            // helper as the microtubule pre-pass) rather than raySegT.
+                            let half = item.size / 2;
+                            let hitT = segAabbT(startX, startY, endX, endY, item.x - half, item.y - half, item.size, item.size, TRACE_HITBOX);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'mass'; bestRaw = undefined; }
                             }
                         }
                     }
@@ -6149,6 +6187,106 @@ void main() {
             else if (document.exitFullscreen) document.exitFullscreen();
         };
 
+        // T14: Gen 3+ malignant mass -- state only (§4.4a). Tries up to 200
+        // random spots this frame; if none are valid, malignantMass stays
+        // inactive and updateMalignantMass() retries next frame.
+        function tryPlaceMalignantMass() {
+            const half = malignantMass.blockSize / 2;
+            for (let attempt = 0; attempt < 200; attempt++) {
+                let x = activeCell.x + (Math.random() * 2 - 1) * activeCell.radiusX * 0.85;
+                let y = activeCell.y + (Math.random() * 2 - 1) * activeCell.radiusY * 0.85;
+
+                if (isOutsideCell(x, y, half)) continue;
+                // Clear of the nucleus and the 380px organelle ring.
+                if (Math.hypot(x - activeCell.x, y - activeCell.y) < 450) continue;
+
+                let overlapsOrganelle = false;
+                for (let o of organelles) {
+                    if (Math.hypot(x - o.x, y - o.y) < o.radius + half + 20) { overlapsOrganelle = true; break; }
+                }
+                if (overlapsOrganelle) continue;
+
+                let tooCloseToPlayer = false;
+                for (let p of players) {
+                    if (!p.alive) continue;
+                    if (Math.hypot(x - p.x, y - p.y) < 300) { tooCloseToPlayer = true; break; }
+                }
+                if (tooCloseToPlayer) continue;
+
+                malignantMass.origin.x = x;
+                malignantMass.origin.y = y;
+                malignantMass.blocks = [{ cx: 0, cy: 0, x: x, y: y, spawnTime: survivalTime }];
+                malignantMass.nextGrowTime = survivalTime + MASS_GROW_INTERVAL;
+                malignantMass.active = true;
+                return;
+            }
+        }
+
+        // Clone one block 4-adjacent to the existing mass, if a valid spot exists.
+        function growMalignantMass() {
+            const half = malignantMass.blockSize / 2;
+            const NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+            let occupied = new Set();
+            for (let b of malignantMass.blocks) occupied.add(b.cx + ',' + b.cy);
+
+            let candidates = [];
+            for (let b of malignantMass.blocks) {
+                for (let n of NEIGHBORS) {
+                    let ncx = b.cx + n[0], ncy = b.cy + n[1];
+                    let key = ncx + ',' + ncy;
+                    if (occupied.has(key)) continue;
+                    occupied.add(key); // dedupe candidates reachable from multiple existing blocks
+
+                    let x = malignantMass.origin.x + ncx * malignantMass.blockSize;
+                    let y = malignantMass.origin.y + ncy * malignantMass.blockSize;
+
+                    if (isOutsideCell(x, y, half)) continue;
+                    if (Math.hypot(x - activeCell.x, y - activeCell.y) < 130 + half) continue; // nucleus
+
+                    let onPlayerHead = false;
+                    for (let p of players) {
+                        if (!p.alive) continue;
+                        if (Math.hypot(x - p.x, y - p.y) < half + 40) { onPlayerHead = true; break; }
+                    }
+                    if (onPlayerHead) continue;
+
+                    candidates.push({ cx: ncx, cy: ncy, x: x, y: y });
+                }
+            }
+
+            if (candidates.length === 0) return;
+            let pick = candidates[Math.floor(Math.random() * candidates.length)];
+            malignantMass.blocks.push({ cx: pick.cx, cy: pick.cy, x: pick.x, y: pick.y, spawnTime: survivalTime });
+        }
+
+        function updateMalignantMass() {
+            if (!genAtLeast(3)) return;
+            if (!malignantMass.active) {
+                tryPlaceMalignantMass();
+                return;
+            }
+            if (malignantMass.blocks.length >= MASS_MAX_BLOCKS) return;
+            if (survivalTime >= malignantMass.nextGrowTime) {
+                malignantMass.nextGrowTime = survivalTime + MASS_GROW_INTERVAL;
+                growMalignantMass();
+            }
+        }
+
+        // Draw only (§4.4a) -- reads malignantMass.blocks, never mutates it.
+        function drawMalignantMass() {
+            massLayer.clear();
+            if (!malignantMass.active) return;
+            const half = malignantMass.blockSize / 2;
+            for (let b of malignantMass.blocks) {
+                let isNew = (survivalTime - b.spawnTime) < 0.5;
+                massLayer.lineStyle(3, 0x1c1420, 1.0);
+                massLayer.beginFill(isNew ? 0xd9b3ff : 0x4b3b52, 1.0);
+                massLayer.drawRect(b.x - half, b.y - half, malignantMass.blockSize, malignantMass.blockSize);
+                massLayer.endFill();
+            }
+        }
+
         function gameLoop(delta) {
             if (!isPlaying) return;
 
@@ -6318,9 +6456,14 @@ void main() {
                         }
                     }
                 }
+
+                // T14: Gen 3+ malignant mass. Spawn/growth is state only; see
+                // drawMalignantMass() below for the render half of the split (§4.4a).
+                updateMalignantMass();
             }
             updateMitosis(deltaSec);
             drawMitosisVisuals();
+            drawMalignantMass();
 
             updateInfection(delta, deltaSec);
             updateCamera();
@@ -6550,6 +6693,30 @@ void main() {
                     }
                 }
 
+                // 1.6 Malignant Mass Collision (swept; Gen 3+, T14). In 'attack'
+                // targetMode the hit block shatters instead of killing, gated by
+                // MASS_HIT_COOLDOWN so one pass can't clear a corridor in a frame.
+                // Removing a block can disconnect the mass -- floating fragments
+                // are accepted rather than flood-filling orphans (documented in
+                // docs/tasks/T14-gen3-malignant-mass.md).
+                if (malignantMass.blocks.length > 0 && !p.isGap && !isGhost && !godMode) {
+                    let half = malignantMass.blockSize / 2;
+                    for (let i = 0; i < malignantMass.blocks.length; i++) {
+                        let block = malignantMass.blocks[i];
+                        if (segAabbT(p.x, p.y, nextX, nextY, block.x - half, block.y - half, malignantMass.blockSize, malignantMass.blockSize, TRACE_HITBOX) < 0) continue;
+                        if (p.targetMode === 'attack') {
+                            if (survivalTime - p.effects.lastMassHit > MASS_HIT_COOLDOWN) {
+                                malignantMass.blocks.splice(i, 1);
+                                p.effects.lastMassHit = survivalTime;
+                            }
+                        } else {
+                            p.alive = false;
+                            return;
+                        }
+                        break;
+                    }
+                }
+
                 // 2. Viral Swarm Collisions (Added Ghost & Dev Immunity)
                 if (infection.particles.length > 0 && !isGhost && !godMode) { // <-- Added !godMode
                     for (let i = infection.particles.length - 1; i >= 0; i--) {
@@ -6773,6 +6940,7 @@ void main() {
             globalRotation = Math.random() * Math.PI * 2;
             survivalTime = 0;
             necrosisTimer = 0; // T13
+            malignantMass = { active: false, blockSize: 60, origin: { x: 0, y: 0 }, blocks: [], nextGrowTime: 0 }; // T14
             updateUI();
 
             world.scale.set(0.5);
@@ -6816,7 +6984,7 @@ void main() {
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
-                        redCount: 0, redWindow: 0, hunterTimer: 0
+                        redCount: 0, redWindow: 0, hunterTimer: 0, lastMassHit: -10 // T14
                     }
                 });
             }

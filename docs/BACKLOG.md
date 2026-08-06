@@ -292,3 +292,19 @@ them.
   avoidance weight. Explicitly out of scope for T13 (see that task file's
   "Bot awareness" section); revisit once T03's hazard-weighting channels can
   take hit subtype into account. — 2026-08-05
+
+## Found while doing T14 (Gen 3 malignant mass) — 2026-08-06
+
+- **Shattered mass blocks just disappear — no particle burst.** Every other
+  destructible thing in the game (organelles, Golgi arcs) spawns vesicles or
+  a burst on destruction; the malignant mass does not. Explicitly deferred to
+  T17 (particle emitter splash system) per T14's own design doc (§5). —
+  2026-08-06
+
+- **Bots essentially never enter `'attack'` targetMode near the malignant
+  mass**, so they will almost never shatter it — `updateBotAI` only flips to
+  `'attack'` near a trace with an active speed power-up (T03's logic), with
+  no awareness of the mass at all. Out of scope for T14 per its own design
+  doc (§6); the mass's avoidance behaviour (steering around it) works fine
+  without this, but a bot will never proactively clear a path through it. —
+  2026-08-06
