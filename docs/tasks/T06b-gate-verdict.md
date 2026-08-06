@@ -82,6 +82,22 @@ Create `docs/reports/PHASE1-GATE.md`:
 - [ ] `docs/TASKS.md`: T06b → `DONE`
 - [ ] No code changed
 
+## Follow-up already staged
+
+The owner reviewed the data on 2026-08-04 and accepted a **soft FAIL** on the
+memory question: **[T06c](T06c-heap-leak-hunt.md)** is written and `READY`,
+ahead of everything else on the board. You do not need to create it.
+
+What is still yours: write `docs/reports/PHASE1-GATE.md` recording the verdict
+and the numbers behind it, then set T06b `DONE`. T06c reports back into it.
+
+One thing to weigh when you write it: all of Phase 3 and most of Phase 4 (T07,
+T11–T17) landed *after* the measurement and before the verdict — that is the
+window the T06a/T06b split deliberately created. Each of those tasks was
+individually verified and `worldChildren` stayed flat throughout, so the
+exposure looks small, but T06c's re-measurement on the current build is what
+actually settles it.
+
 ## If the verdict is FAIL
 
 1. Create a follow-up task file per issue under `docs/tasks/`.

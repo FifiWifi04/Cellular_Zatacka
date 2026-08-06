@@ -47,6 +47,14 @@ sign of a stale board.
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `DONE` |
 | T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `DONE` |
 | T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `OWNER-RUN` |
+| T06c | [**Find and fix the retained-memory leak**](tasks/T06c-heap-leak-hunt.md) ⚠️ *take before anything else* | T06a | `READY` |
+
+> **T06c is the highest-priority `READY` task on the board — take it first,**
+> ahead of any lower-numbered task in another track. It came out of the gate
+> evidence: run A's heap floor rises ~1.4 MB per round while `worldChildren`
+> stays flat, meaning memory is retained across rounds and it is *not* the
+> display-object leak T05 fixed. Note that all soak data predates T07's trace
+> cap, so **T06c re-measures first** — the leak may already be smaller or gone.
 
 **Phase 1 gate:** T01–T06a all `DONE`, and T06b's verdict committed as PASS.
 T07/T11/T16 intentionally depend on **T06a** (the evidence exists), not on T06b

@@ -315,3 +315,15 @@ them.
   doc (§6); the mass's avoidance behaviour (steering around it) works fine
   without this, but a bot will never proactively clear a path through it. —
   2026-08-06
+
+## Phase 1 gate: soft FAIL on memory — 2026-08-04
+
+- **Retained memory across rounds, not display objects.** Run A's heap sawtooth
+  floor rises 44 → 124 MB over 60 rounds (~1.4 MB/round) while `worldChildren`
+  holds flat at 1292–1388. T05's display-object teardown is working; this is
+  something else. Written up as **T06c**, which is `READY` and takes priority
+  over everything.
+- **The soak data is stale.** All three runs were taken at `5c0e1aa` or earlier;
+  T07's trace cap and T08–T17 landed afterwards. T06c re-measures before
+  investigating, because T07 bounds one of the largest per-round allocators and
+  may already have fixed this. — 2026-08-04
