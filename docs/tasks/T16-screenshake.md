@@ -147,10 +147,55 @@ call sites, an off switch.
 
 ## Definition of done
 
-- [ ] Option A implemented — `world`'s own transform untouched by shake
-- [ ] Trauma-based accumulation with squared falloff
-- [ ] All four triggers wired
-- [ ] Offset returns to exactly zero
-- [ ] Off switch present
-- [ ] No camera drift demonstrated over 5 minutes
-- [ ] `docs/TASKS.md`: T16 → `DONE`; T17, T18 → `READY`
+- [x] Option A implemented — `world`'s own transform untouched by shake
+- [x] Trauma-based accumulation with squared falloff
+- [x] All four triggers wired
+- [x] Offset returns to exactly zero
+- [x] Off switch present
+- [x] No camera drift demonstrated over 5 minutes
+- [x] `docs/TASKS.md`: T16 → `DONE`; T17, T18 → `READY`
+
+## Verification results
+
+Ran via `tools/verify_harness.py` (Chromium, headless, 640x480 unless noted).
+
+1. **Console clean** — every script below: `consoleErrors: []`, `pageErrors: []`.
+2. **No camera drift** — structural: `updateCamera()` body has zero changed
+   lines in the diff; it still only ever writes `world.x/y/scale`. Empirical:
+   `shakeRoot` is a separate container `updateShake()` alone writes to; after
+   any shake decays, `shakeRoot.x === 0 && shakeRoot.y === 0` exactly (checked
+   directly, not by pixel-diffing a moving scene).
+3. **All four triggers fire, distinguishable intensities** — spied on
+   `addShake` and drove `survivalTime` forward (dev fast-forward technique) to
+   force each event without waiting real time:
+   - player elimination (real collision, bot driven onto its own trace): `addShake(0.5, 0.4)`
+   - virus breach: `addShake(0.6, 0.5)`
+   - nucleus destruction (death-ring crossing center): `addShake(0.7, 0.6)`
+   - mitosis snap: `addShake(1.0, 0.8)`
+4. **Overlapping shakes clamp at 1** — `addShake(0.5,0.4)` then `addShake(1.0,0.8)`
+   immediately after: `shakeTrauma` capped at 1, never exceeded.
+5. **Decays to exactly zero** — confirmed `shakeTrauma === 0` and
+   `shakeRoot.x === 0`, `shakeRoot.y === 0` (not epsilon) after the decay window.
+6. **Split-screen unaffected** — proved directly rather than by screenshot: spied
+   on `app.renderer.render`, and `world.worldTransform.tx/ty` at the moment of
+   the split-screen `RenderTexture` render matched `world.x` exactly (an integer,
+   no fractional `shakeRoot.x/y` contribution) even while `shakeRoot.x/y` were
+   large and non-zero. This matches Pixi v7's `Renderer.render(displayObject)`,
+   which calls `enableTempParent()`/`disableTempParent()` around
+   `updateTransform()` — it always renders relative to a temp identity parent,
+   never the real one, so `shakeRoot` cannot leak in. A screenshot with a forced
+   large shake also showed both viewports rendering normally, correctly centred.
+7. **Off switch works** — `window.shakeEnabled = false` forces `shakeRoot.x/y`
+   to 0 every frame even while `shakeTrauma` is still 1 from a just-fired
+   `addShake`.
+8. **Zoom independence** — by construction: `addShake`/`updateShake` never read
+   `world.scale`; the offset formula is `MAX_SHAKE_PX * intensity` only.
+   Empirically, screen-space magnitude stayed in the same ~9-13px band whether
+   `world.scale` was forced toward 0.1 or 1.2.
+9. **No leak** — `world.children.length` stayed flat at 11 across 15s/30s/45s/60s
+   samples of a live 4-player round (1 human + 3 bots, immortal), while
+   `tracePoints` grew normally (0 → 2476) and `shakeRoot` sat at `(0,0)` with no
+   triggers pending.
+
+Scripts were written per-check and run synchronously under the 10-minute
+ceiling; none needed splitting.

@@ -257,7 +257,13 @@
 
         // --- 2. Layers & World Camera ---
         const world = new PIXI.Container();
-        app.stage.addChild(world);
+        // T16: shakeRoot sits between stage and world so screenshake never touches
+        // world.x/y/scale -- those stay owned by updateCamera() (AGENT_CONDUCT 4.5).
+        // Split-screen renders `world` directly into RenderTextures, so shake does
+        // not apply per-viewport there; that is an accepted scope limit (T16).
+        const shakeRoot = new PIXI.Container();
+        shakeRoot.addChild(world);
+        app.stage.addChild(shakeRoot);
 
         const backgroundLayer = new PIXI.Container();
         const calcifyLayer = new PIXI.Graphics(); // T12: redrawn shrinking membrane, Gen 2+
@@ -454,6 +460,32 @@
         let godMode = false;      // disables death checks
         let fuzzActive = false;   // runs the soak loop
         let legendVisible = true; // shows/hides the dev HUD panel while devMode is on
+        window.shakeEnabled = true; // T16: screenshake off switch (accessibility)
+
+        // T16: trauma-based camera screenshake. Offsets shakeRoot only -- never world.
+        const MAX_SHAKE_PX = 24; // fixed pixel offset regardless of world.scale (0.3-1.2)
+        let shakeTrauma = 0;     // 0..1
+        let shakeDecayTime = 0.5; // seconds for the current trauma pool to reach 0
+
+        // magnitude: 0..1 added to shakeTrauma (clamped). duration: seconds the
+        // current trauma pool takes to decay -- overlapping calls take the longer one
+        // so a big shake isn't cut short by a smaller one layered on top.
+        function addShake(magnitude, duration) {
+            shakeTrauma = Math.min(1, shakeTrauma + magnitude);
+            shakeDecayTime = Math.max(shakeDecayTime, duration);
+        }
+
+        function updateShake(deltaSec) {
+            if (shakeTrauma > 0) shakeTrauma = Math.max(0, shakeTrauma - deltaSec / shakeDecayTime);
+            if (!window.shakeEnabled || shakeTrauma <= 0) {
+                shakeRoot.x = 0;
+                shakeRoot.y = 0;
+                return;
+            }
+            let intensity = shakeTrauma * shakeTrauma; // squared falloff feels better than linear
+            shakeRoot.x = (Math.random() * 2 - 1) * MAX_SHAKE_PX * intensity;
+            shakeRoot.y = (Math.random() * 2 - 1) * MAX_SHAKE_PX * intensity;
+        }
         let fuzzStartWallTime = null;
         let fuzzTopUpTimer = 0;
         let fuzzToggleTimer = 0;
@@ -1797,6 +1829,7 @@
                     if (other.id !== player.id && other.alive) {
                         if (Math.hypot(x - other.x, y - other.y) < TRACE_HITBOX * 2.5) {
                             other.alive = false; // Chomp the opponent's head!
+                            addShake(0.5, 0.4); // T16: player elimination
                         }
                     }
                 }
@@ -2146,6 +2179,7 @@
                         });
                     }
 
+                    addShake(0.6, 0.5); // T16: virus explosion/breach
                     infection.nextWarningTime = survivalTime + 120.0;
                     infection.state = 'none';
                 }
@@ -2452,6 +2486,7 @@
                 // 120 seconds (2 minutes) total event time -> THE SNAP
                 if (timeInEvent >= 120) {
                     // --- THE SNAP (WITH BRIDGE SURVIVORS) ---
+                    addShake(1.0, 0.8); // T16: mitosis snap
 
                     // 1. Define the Bridge bounds so we know what to save
                     let isHorizontal = (mitosis.direction === 0 || mitosis.direction === 2);
@@ -2651,6 +2686,7 @@
                 if (nucleusLayer.visible) {
                     nucleusLayer.visible = false;
                     golgiERContainer.visible = false;
+                    addShake(0.7, 0.6); // T16: nucleus destruction
                     // Spawn a massive burst of nuclear/membrane vesicles on destruction!
                     spawnVesicles(activeCell.x, activeCell.y, 15, 'membrane', 0x6c5ce7);
                     // sweepProgress (and thus crossedCenter) is monotonic within one
@@ -2918,6 +2954,7 @@
             let txt = `DEV MODE            [\\]\n` +
                 `  god mode   : ${godMode ? 'ON ' : 'OFF'}   [,]\n` +
                 `  fuzzer     : ${fuzzActive ? 'ON ' : 'OFF'}   [f]\n` +
+                `  shake      : ${window.shakeEnabled ? 'ON ' : 'OFF'}   [k]\n` +
                 `  +15 s              []]\n` +
                 `  legend             [.]\n` +
                 `  gen ${activeCell.generation} +1            [[]`;
@@ -2955,6 +2992,11 @@
             }
             if (devMode && e.key === '.') {
                 legendVisible = !legendVisible;
+                updateDevIndicator();
+            }
+            // T16: screenshake off switch -- `k` is free (no player uses it).
+            if (devMode && (e.key === 'k' || e.key === 'K')) {
+                window.shakeEnabled = !window.shakeEnabled;
                 updateDevIndicator();
             }
             // Jump straight to a generation without running a mitosis event --
@@ -3285,6 +3327,7 @@
 
             updateInfection(delta, deltaSec);
             updateCamera();
+            updateShake(deltaSec); // T16: after updateCamera() so shakeRoot's offset is never lerped into world
 
             // The master clock must run in ALL modes so the virus and combos work!
             survivalTime += deltaSec;
@@ -3498,6 +3541,7 @@
                 // 1. Trace and Organelle Collisions
                 if (!p.isGap && !isGhost && !godMode && checkCollision(nextX, nextY, p)) { // <-- Added !godMode
                     p.alive = false;
+                    addShake(0.5, 0.4); // T16: player elimination
                     return;
                 }
 
@@ -3506,6 +3550,7 @@
                     for (let tube of mitosis.microtubules) {
                         if (segAabbT(p.x, p.y, nextX, nextY, tube.x, tube.y, tube.w, tube.h, TRACE_HITBOX) >= 0) {
                             p.alive = false;
+                            addShake(0.5, 0.4); // T16: player elimination
                             return;
                         }
                     }
@@ -3529,6 +3574,7 @@
                             }
                         } else {
                             p.alive = false;
+                            addShake(0.5, 0.4); // T16: player elimination
                             return;
                         }
                         break;
@@ -3544,6 +3590,7 @@
                                 infection.particles.splice(i, 1);
                             } else {
                                 p.alive = false;
+                                addShake(0.5, 0.4); // T16: player elimination
                                 return;
                             }
                         }
@@ -3667,7 +3714,7 @@
                         if (p.y > ringY) caught = true;
                     }
 
-                    if (caught && !godMode) p.alive = false; // <-- Added !godMode
+                    if (caught && !godMode) { p.alive = false; addShake(0.5, 0.4); } // T16: player elimination; <-- Added !godMode
                 }
             });
 
