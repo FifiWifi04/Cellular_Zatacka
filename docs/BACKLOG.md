@@ -327,6 +327,22 @@ them.
   before. No code change was needed. Full before/after tables and the ruled-out
   candidate list are in `docs/tasks/T06c-heap-leak-hunt.md`'s `## Findings`.
 
+## Found while doing T20 (control-mapping splash) — 2026-08-06
+
+- **`startRound()` never resets `activeCell.x`/`activeCell.y`.** They start at
+  `{1500, 1500}` (module init, line ~427) but a completed mitosis event
+  permanently reassigns them to `mitosis.cellB`'s position (`updateMitosis()`,
+  ~line 2654). `startRound()` resets `generation`/`baseRadiusX`/`baseRadiusY`
+  but not `x`/`y`, so a manual restart (or the fuzzer's `setTimeout(startRound,
+  0)`) after any round that advanced past Gen 1 spawns the next round's players
+  offset from the drifted center instead of the map's true origin. Found while
+  hoisting `playerConfigs` for the splash (T20): the spawn positions had to
+  become `activeCell.x/y + dx/dy` offsets specifically because this value is
+  not stable across rounds. Not fixed here — out of T20's scope and it isn't a
+  collision-safety bug (the map itself is still generated relative to whatever
+  `activeCell.x/y` holds), but it likely explains any "map looks off-center on
+  restart after a long game" reports.
+
 ## Found during T19 — 2026-08-06
 
 - **`#ui` panel overflows below ~410px viewport width.** `#ui { min-width:

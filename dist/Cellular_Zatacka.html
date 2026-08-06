@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 237158fad6a936f2 -->
+<!-- standalone-build-inputs: ccc0851bb9c0b029 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3380,6 +3380,89 @@ void main() {
             background: #55efc4;
         }
 
+        /* T20: control-mapping splash */
+        .splash-toggle-btn {
+            background: #636e72;
+        }
+
+        .splash-toggle-btn:hover {
+            background: #b2bec3;
+        }
+
+        .control-splash {
+            margin-top: 8px;
+        }
+
+        .control-splash.hidden-splash {
+            display: none;
+        }
+
+        .splash-cards {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            max-width: min(600px, 88vw);
+            margin: 0 auto;
+        }
+
+        .splash-card {
+            width: 135px;
+            box-sizing: border-box;
+            text-align: left;
+            font-size: 13px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .splash-card.dimmed {
+            opacity: 0.35;
+        }
+
+        .splash-card-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: bold;
+            margin-bottom: 6px;
+            white-space: nowrap;
+        }
+
+        .splash-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex: none;
+        }
+
+        .splash-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 3px 0;
+        }
+
+        .splash-key {
+            display: inline-block;
+            min-width: 14px;
+            padding: 1px 5px;
+            border: 1px solid #636e72;
+            border-radius: 4px;
+            background: #2d3436;
+            font-family: monospace;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        .splash-hint {
+            max-width: 500px;
+            margin: 8px auto 0;
+            font-size: 12px;
+            color: #a29bfe;
+        }
+
         h3 {
             margin: 5px 0;
             font-weight: normal;
@@ -3446,6 +3529,12 @@ void main() {
             </select>
             <button onclick="startRound()">Start Game</button>
             <button class="fullscreen-btn" onclick="toggleFullScreen()">Fullscreen</button>
+            <button class="splash-toggle-btn" onclick="toggleControlSplash()">Controls</button>
+        </div>
+        <div id="controlSplash" class="control-splash">
+            <div id="splashCards" class="splash-cards"></div>
+            <p class="splash-hint">3rd key toggles boost target: <b>self</b> (green aura, collect
+                vesicles) vs <b>attack</b> (red aura, shatter structures).</p>
         </div>
         <h3 id="controlsText">P1 (Blue): Left/Right Arrows</h3>
         <h2 id="scoreboard">Survival Time: 0.0s</h2>
@@ -3786,6 +3875,34 @@ void main() {
         let necrosisTimer = 0; // T13: seconds of un-frozen game time accumulated since the last freeze
         let playerWins = [0, 0, 0, 0, 0]; // Index matches player ID (1 to 4, index 0 is unused)
 
+        // T20: hoisted out of startRound() so the control-splash screen can read the
+        // same source of truth. dx/dy are spawn offsets rather than absolute x/y --
+        // activeCell.x/y can drift across rounds (mitosis moves it, see line ~2654),
+        // and startRound() must keep resolving spawn position against its current
+        // value, not one frozen at module-load time.
+        const playerConfigs = [
+            {
+                id: 1, dx: -600, dy: 0, angle: 0,
+                color: 0x0984e3, coreColor: 0x74b9ff,
+                controls: { left: 'ArrowLeft', right: 'ArrowRight', toggle: 'ArrowDown' }
+            },
+            {
+                id: 2, dx: 600, dy: 0, angle: Math.PI,
+                color: 0xd63031, coreColor: 0xff7675,
+                controls: { left: 'a', right: 'd', leftAlt: 'A', rightAlt: 'D', toggle: 's', toggleAlt: 'S' }
+            },
+            {
+                id: 3, dx: 0, dy: -500, angle: Math.PI / 2,
+                color: 0x00b894, coreColor: 0x55efc4,
+                controls: { left: 'g', right: 'j', leftAlt: 'G', rightAlt: 'J', toggle: 'h', toggleAlt: 'H' }
+            },
+            {
+                id: 4, dx: 0, dy: 500, angle: -Math.PI / 2,
+                color: 0xfdc100, coreColor: 0xffe2a9,
+                controls: { left: '4', right: '6', toggle: '5' }
+            }
+        ];
+
         let players = [];
         let organelles = [];
         let vesicles = [];
@@ -3835,6 +3952,7 @@ void main() {
         let fuzzActive = false;   // runs the soak loop
         let legendVisible = true; // shows/hides the dev HUD panel while devMode is on
         window.shakeEnabled = true; // T16: screenshake off switch (accessibility)
+        let splashVisible = true; // T20: control-splash shown/hidden within this session, no localStorage
 
         // T16: trauma-based camera screenshake. Offsets shakeRoot only -- never world.
         const MAX_SHAKE_PX = 24; // fixed pixel offset regardless of world.scale (0.3-1.2)
@@ -6353,6 +6471,11 @@ void main() {
                 quickPlay();
             }
 
+            // T20: `c` is free of every playerConfigs binding; inert mid-round like Enter above.
+            if ((e.key === 'c' || e.key === 'C') && !isPlaying) {
+                toggleControlSplash();
+            }
+
             // --- DEBUG / DEV MODE HOTKEYS ---
             // Master toggle: `\` is the documented roadmap key; `` ` ``/`~`/`½` kept as aliases.
             if (e.key === '\\' || e.key === '½' || e.key === '`' || e.key === '~') {
@@ -7175,7 +7298,42 @@ void main() {
                     scoreText.innerText = scoreStr;
                 }
             }
+
+            renderControlSplash(); // T20
         };
+
+        // T20: control-mapping splash screen. Reads playerConfigs -- the single
+        // source of truth also used by startRound() -- so the two can never drift.
+        const KEY_GLYPHS = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+        function keyDisplayName(key) {
+            if (KEY_GLYPHS[key]) return KEY_GLYPHS[key];
+            return key.length === 1 ? key.toUpperCase() : key;
+        }
+
+        function renderControlSplash() {
+            let totalPlayers = currentMode + aiCount;
+            let html = '';
+            playerConfigs.forEach((config, i) => {
+                let active = i < totalPlayers;
+                let dotColor = '#' + config.color.toString(16).padStart(6, '0');
+                html += `<div class="splash-card${active ? '' : ' dimmed'}">` +
+                    `<div class="splash-card-title"><span class="splash-dot" style="background:${dotColor}"></span>P${config.id}</div>` +
+                    `<div class="splash-row"><kbd class="splash-key">${keyDisplayName(config.controls.left)}</kbd> turn left</div>` +
+                    `<div class="splash-row"><kbd class="splash-key">${keyDisplayName(config.controls.right)}</kbd> turn right</div>` +
+                    `<div class="splash-row"><kbd class="splash-key">${keyDisplayName(config.controls.toggle)}</kbd> toggle mode</div>` +
+                    `</div>`;
+            });
+            document.getElementById('splashCards').innerHTML = html;
+        }
+
+        window.toggleControlSplash = function () {
+            splashVisible = !splashVisible;
+            document.getElementById('controlSplash').classList.toggle('hidden-splash', !splashVisible);
+        };
+
+        // updateUI() is not called at startup (see applyGlowQuality above), so seed
+        // the cards here or they stay empty until a dropdown is touched.
+        renderControlSplash();
 
         // T19: one click into a playable 1-player-vs-1-bot round. Sets the
         // same selects the manual path reads, then reuses startRound() so the
@@ -7234,35 +7392,12 @@ void main() {
             // Reset player array to avoid duplicates
             players = [];
 
-            const playerConfigs = [
-                {
-                    id: 1, x: activeCell.x - 600, y: activeCell.y, angle: 0,
-                    color: 0x0984e3, coreColor: 0x74b9ff,
-                    controls: { left: 'ArrowLeft', right: 'ArrowRight', toggle: 'ArrowDown' }
-                },
-                {
-                    id: 2, x: activeCell.x + 600, y: activeCell.y, angle: Math.PI,
-                    color: 0xd63031, coreColor: 0xff7675,
-                    controls: { left: 'a', right: 'd', leftAlt: 'A', rightAlt: 'D', toggle: 's', toggleAlt: 'S' }
-                },
-                {
-                    id: 3, x: activeCell.x, y: activeCell.y - 500, angle: Math.PI / 2,
-                    color: 0x00b894, coreColor: 0x55efc4,
-                    controls: { left: 'g', right: 'j', leftAlt: 'G', rightAlt: 'J', toggle: 'h', toggleAlt: 'H' }
-                },
-                {
-                    id: 4, x: activeCell.x, y: activeCell.y + 500, angle: -Math.PI / 2,
-                    color: 0xfdc100, coreColor: 0xffe2a9,
-                    controls: { left: '4', right: '6', toggle: '5' }
-                }
-            ];
-
             let totalPlayers = currentMode + aiCount;
             for (let i = 0; i < totalPlayers; i++) {
                 let config = playerConfigs[i];
                 let isBot = (i >= currentMode);
                 players.push({
-                    id: config.id, x: config.x, y: config.y, angle: config.angle,
+                    id: config.id, x: activeCell.x + config.dx, y: activeCell.y + config.dy, angle: config.angle,
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
                     controls: config.controls, isBot: isBot,
                     alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
