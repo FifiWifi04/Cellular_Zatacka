@@ -77,7 +77,7 @@ later returns FAIL, revisit anything that landed in that window.
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
 | T16 | [Camera screenshake utility](tasks/T16-screenshake.md) | T06a | `DONE` |
-| T17 | [Particle emitter splash system](tasks/T17-particles.md) | T16 | `READY` |
+| T17 | [Particle emitter splash system](tasks/T17-particles.md) | T16 | `DONE` |
 | T18 | [Warning-window post-processing filter](tasks/T18-warning-filter.md) | T16 | `READY` |
 
 ### Track E — Phase 5 UX

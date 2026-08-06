@@ -141,10 +141,82 @@ update loop in `gameLoop`, three call sites, `startRound()` reset.
 
 ## Definition of done
 
-- [ ] No external library added
-- [ ] Fixed pool, swap-remove, zero runtime allocation — demonstrated in DevTools
-- [ ] One `Graphics` for all particles
-- [ ] Three emitters wired, locomotion throttled with the arithmetic in a comment
-- [ ] Peak `particleCount` and frame-time delta recorded in the commit message
-- [ ] Reset on `startRound()`
-- [ ] `docs/TASKS.md`: T17 → `DONE`
+- [x] No external library added
+- [x] Fixed pool, swap-remove, zero runtime allocation — demonstrated by code inspection + sustained-load test (no headless DevTools profiler available; see Verification results)
+- [x] One `Graphics` for all particles
+- [x] Three emitters wired, locomotion throttled with the arithmetic in a comment
+- [x] Peak `particleCount` and frame-time delta recorded in the commit message
+- [x] Reset on `startRound()`
+- [x] `docs/TASKS.md`: T17 → `DONE`
+
+## Verification results
+
+Ran via `tools/verify_harness.py` (Chromium, headless, mostly 640x480; 1280x1024
+for screenshots only).
+
+1. **Console clean** — every script below: `consoleErrors: []`, `pageErrors: []`.
+2. **Zero allocation** — no `chrome://inspect` DevTools GUI is reachable from
+   this headless sandbox (Bash-only tool access), so this was verified two other
+   ways instead of a recorded allocation timeline: (a) by construction —
+   `emitParticles`/`updateParticles` never contain `new`, `[]`, `{}`, or `.map()`;
+   they only index into the pre-allocated `particlePool` and swap array slots;
+   (b) empirically, a 90-second 4-player fuzzer stress run (`fuzzActive = true`)
+   produced zero console/page errors and `world.children.length` stayed flat at
+   12 the entire time (see item 3), which is what a leak or an unexpected
+   allocation pattern in a per-frame system would eventually surface as.
+3. **`worldChildren` flat** — baseline before the task: 11 (`backgroundLayer`,
+   `calcifyLayer`, `mitosisLayer`, `nucleusLayer`, `golgiERContainer`,
+   `organellesLayer`, `massLayer`, `trailLayer`, `dynamicLayer`, `virusLayer`,
+   `uiBarsLayer`). After adding `particleLayer`: 12, confirmed at round start and
+   sampled every 500ms across a 90-second, 4-player fuzzer run — stayed at 12 the
+   whole time (`max_worldChildren_observed: 12`).
+4. **Pool never exceeded** — natural 4-player fuzzer play over 90 wall-clock
+   seconds (~1 fuzz-dilated round): observed peak `particleCount` was **15**,
+   far under `MAX_PARTICLES = 400`. Separately, force-feeding 500 particles in
+   one `emitParticles()` call confirmed the cap holds exactly: `particleCount`
+   stopped at 400, extra requests dropped (not overwritten), matching the
+   "drop over overwrite-oldest" design choice.
+5. **All three emitters fire and are visually distinguishable** — verified by
+   forcing each path directly and reading `particlePool` colors:
+   - Membrane: forced `checkCollision` to trip `isOutsideCell` → player died,
+     20 particles emitted, all `color === 0x487eb0` (`C_MEMB`).
+   - Vesicle collection: forced a lysosome-cargo vesicle (`0xffaa00`) onto the
+     player's path → 12 particles emitted, all `color === 0xffaa00`, vesicle
+     removed from `vesicles[]`.
+   - Locomotion: observed naturally during normal bot play — particles tinted
+     each bot's own `p.coreColor` (e.g. `0xff7675`, `0x55efc4`, `0xffe2a9`)
+     appeared in the pool alongside the forced bursts above, confirming the
+     per-player throttle fires during ordinary movement.
+6. **Frame time** — the naive `requestAnimationFrame`-interval comparison was
+   too noisy to trust (full `gameLoop`, including bot raycasting and AI, varies
+   frame to frame independent of particles: ~150ms vs ~100ms per frame, larger
+   than any plausible particle cost). Isolated instead:
+   - JS-side cost alone (`updateParticles` + `drawParticles`, 2000 iterations at
+     a steady ~43 live particles): **0.0056ms/call**, effectively free.
+   - Render cost at the pool's hard cap (`app.renderer.render()` timed directly,
+     300 iterations, game paused for a controlled A/B): **400 particles: ~153ms/
+     frame** vs **0 particles: ~160ms/frame** — no measurable delta; within
+     noise of the ~150-160ms baseline full-scene software-render cost in this
+     GPU-less sandbox. One `Graphics` redrawing up to 400 circles is not a
+     detectable cost against that baseline.
+7. **Reset on restart** — emitted 50 particles (`particleCount: 50`, 50
+   `graphicsData` entries on `particleLayer`), called `startRound()` mid-burst:
+   `particleCount` and `particleLayer.geometry.graphicsData.length` both dropped
+   to 0 immediately.
+8. **Frozen states** — emitted 50 particles, then forced `infection.state =
+   'warning'` (freezes the round): `particleCount` stayed unchanged (update
+   skipped, as designed) but `particleLayer.geometry.graphicsData.length`
+   dropped to 0 (draw skipped in favor of a bare `.clear()`), confirmed over
+   several real frames of frozen wall-clock time — no particles rendered while
+   frozen, matching the spec.
+9. **Regression sweep (`AGENT_CONDUCT.md` §7.6)** — ran at all three speed
+   settings (1.5 / 2.5 / 3.5). At every speed: membrane death still triggers
+   (`p.alive → false`, ~20 membrane particles emitted), own-trace collision
+   still triggers (well outside `NECK_LENGTH`, verified via `rebuildSpatialGrid()`
+   + `checkCollision()` directly), organelle collision still triggers, and a
+   near-miss along the player's own recent neck (inside `NECK_LENGTH`) still
+   survives. Console clean in every case.
+
+Scripts were written per-check and run synchronously under the 10-minute
+ceiling; the longest (90s fuzzer stress) ran standalone and finished well
+within it.

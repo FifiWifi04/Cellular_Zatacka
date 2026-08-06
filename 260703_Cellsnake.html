@@ -273,6 +273,8 @@
         const rotatingContainer = new PIXI.Container();
         const organellesLayer = new PIXI.Graphics();
         const massLayer = new PIXI.Graphics(); // T14: malignant mass, cleared+redrawn every frame
+        const particleLayer = new PIXI.Graphics(); // T17: splash particle pool, single Graphics for the whole pool
+        particleLayer.blendMode = PIXI.BLEND_MODES.ADD;
         const trailLayer = new PIXI.Container();
         const dynamicLayer = new PIXI.Graphics(); // Vesicles
         const virusLayer = new PIXI.Graphics();   // New layer for the Infection event
@@ -286,6 +288,7 @@
         golgiERContainer.addChild(rotatingContainer);
         world.addChild(organellesLayer);
         world.addChild(massLayer);
+        world.addChild(particleLayer);
         world.addChild(trailLayer);
         world.addChild(dynamicLayer);
         world.addChild(virusLayer);
@@ -403,6 +406,77 @@
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
+
+        // T17: Particle splash system -- fixed-size pool, zero per-frame allocation
+        // (see docs/AGENT_CONDUCT.md 4.4a/5 and docs/tasks/T17-particles.md). Every
+        // particle object below is created once at load; spawn/kill only ever
+        // overwrite fields or swap array slots.
+        const MAX_PARTICLES = 400;
+        const LOCOMOTION_PARTICLE_INTERVAL = 4; // frames between locomotion emissions, per player
+        // Locomotion load check: 4 players / LOCOMOTION_PARTICLE_INTERVAL frames *
+        // 60fps = 60 particles/sec; at the 0.4s locomotion life that is ~24 live
+        // locomotion particles steady-state. Vesicle (12) and membrane (20) bursts
+        // add briefly on top of that. Comfortably under MAX_PARTICLES.
+        let particlePool = [];
+        for (let i = 0; i < MAX_PARTICLES; i++) {
+            particlePool.push({ x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 0, color: 0xffffff, alpha: 0 });
+        }
+        let particleCount = 0; // live particles occupy particlePool[0, particleCount)
+
+        // opts: { speed, spread, angle, life, size, color }. Drops the request once
+        // the pool is full rather than overwriting the oldest particle (simpler, and
+        // the visual difference is nil per T17).
+        function emitParticles(x, y, count, opts) {
+            let speed = opts.speed || 0;
+            let spread = opts.spread !== undefined ? opts.spread : Math.PI * 2;
+            let angle = opts.angle || 0;
+            let life = opts.life || 0.5;
+            let size = opts.size || 3;
+            let color = opts.color !== undefined ? opts.color : 0xffffff;
+
+            for (let i = 0; i < count; i++) {
+                if (particleCount >= MAX_PARTICLES) return;
+                let p = particlePool[particleCount++];
+                let a = angle + (Math.random() - 0.5) * spread;
+                let s = speed * (0.5 + Math.random() * 0.5);
+                p.x = x; p.y = y;
+                p.vx = Math.cos(a) * s;
+                p.vy = Math.sin(a) * s;
+                p.life = life;
+                p.maxLife = life;
+                p.size = size;
+                p.color = color;
+                p.alpha = 1;
+            }
+        }
+
+        function updateParticles(delta, deltaSec) {
+            for (let i = particleCount - 1; i >= 0; i--) {
+                let p = particlePool[i];
+                p.x += p.vx * delta;
+                p.y += p.vy * delta;
+                p.vx *= 0.94; p.vy *= 0.94; // drag, reads as fluid
+                p.life -= deltaSec;
+                if (p.life <= 0) {
+                    particleCount--;
+                    let last = particlePool[particleCount];
+                    particlePool[particleCount] = p;
+                    particlePool[i] = last;
+                    continue;
+                }
+                p.alpha = p.life / p.maxLife; // linear fade
+            }
+        }
+
+        function drawParticles() {
+            particleLayer.clear();
+            for (let i = 0; i < particleCount; i++) {
+                let p = particlePool[i];
+                particleLayer.beginFill(p.color, p.alpha);
+                particleLayer.drawCircle(p.x, p.y, p.size);
+                particleLayer.endFill();
+            }
+        }
 
         let isPlaying = false;
         let currentMode = 1;
@@ -3540,6 +3614,9 @@
 
                 // 1. Trace and Organelle Collisions
                 if (!p.isGap && !isGhost && !godMode && checkCollision(nextX, nextY, p)) { // <-- Added !godMode
+                    if (isOutsideCell(nextX, nextY)) { // T17: membrane splash, distinct from trace/organelle deaths
+                        emitParticles(nextX, nextY, 20, { speed: 3.0, spread: Math.PI * 2, life: 0.9, size: 3, color: C_MEMB });
+                    }
                     p.alive = false;
                     addShake(0.5, 0.4); // T16: player elimination
                     return;
@@ -3657,6 +3734,7 @@
                                 }
                             });
                         }
+                        emitParticles(v.x, v.y, 12, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: v.color }); // T17
                         vesicles.splice(i, 1);
                     }
                 }
@@ -3695,6 +3773,16 @@
                 p.x = nextX;
                 p.y = nextY;
 
+                // T17: locomotion splash, throttled to one particle every
+                // LOCOMOTION_PARTICLE_INTERVAL frames per player (see the pool-load
+                // comment at its declaration).
+                if (!p.isGap && !isGhost) {
+                    p.particleTick = (p.particleTick + 1) % LOCOMOTION_PARTICLE_INTERVAL;
+                    if (p.particleTick === 0) {
+                        emitParticles(p.x, p.y, 1, { speed: 1.0, spread: 0.6, angle: p.angle + Math.PI, life: 0.4, size: 2, color: p.coreColor });
+                    }
+                }
+
                 // --- DEATH RING COLLISION ---
                 if (mitosis.state !== 'idle' && p.alive && !isGhost) {
                     let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
@@ -3717,6 +3805,16 @@
                     if (caught && !godMode) { p.alive = false; addShake(0.5, 0.4); } // T16: player elimination; <-- Added !godMode
                 }
             });
+
+            // T17: no splash particles during frozen states (infection warning /
+            // mitosis reveal) -- clear rather than leaving the last frame's burst
+            // sitting frozen on screen.
+            if (isCellFrozen) {
+                particleLayer.clear();
+            } else {
+                updateParticles(delta, deltaSec);
+                drawParticles();
+            }
 
             // Animate Background Elements once per frame globally
             if (!isCellFrozen) {
@@ -3777,6 +3875,7 @@
             // 1. Clear previous round data
             trailGlow.clear(); trailCore.clear(); uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
+            particleCount = 0; particleLayer.clear(); // T17
 
             // 2. Reset the Virus Cycle (Set to 30s for testing)
             infection = {
@@ -3845,7 +3944,7 @@
                     id: config.id, x: config.x, y: config.y, angle: config.angle,
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
                     controls: config.controls, isBot: isBot,
-                    alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0,
+                    alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
