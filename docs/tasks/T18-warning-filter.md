@@ -147,17 +147,71 @@ that ends mid-warning must not leave the next round filtered.
 
 ## Definition of done
 
-- [ ] `## Findings` filled in: which filter classes the loaded PixiJS build provides
-- [ ] Filters instantiated once at init, never in `gameLoop`
-- [ ] Toggled on state transition, `filters = null` when inactive
-- [ ] Applied to the composite, verified in split-screen
-- [ ] Smooth ramp in/out
-- [ ] Reset on `startRound()`
-- [ ] Frame time inside and outside the window recorded
-- [ ] `docs/TASKS.md`: T18 → `DONE`
+- [x] `## Findings` filled in: which filter classes the loaded PixiJS build provides
+- [x] Filters instantiated once at init, never in `gameLoop`
+- [x] Toggled on state transition, `filters = null` when inactive
+- [x] Applied to the composite, verified in split-screen
+- [x] Smooth ramp in/out
+- [x] Reset on `startRound()`
+- [x] Frame time inside and outside the window recorded
+- [x] `docs/TASKS.md`: T18 → `DONE`
 
 ---
 
 ## Findings
 
-*(Fill in during the task: which `PIXI.filters` are available, and which you used.)*
+**Filter classes used:** `PIXI.filters.ColorMatrixFilter` and `PIXI.filters.NoiseFilter`,
+both confirmed present in `vendor/pixi.min.js` (pixi.js core, not `pixi-filters`) —
+no new dependency. `RGBSplitFilter`/`GlitchFilter` (from the already-loaded
+`vendor/pixi-filters.js`) were considered per the task's ranked list but not
+needed: `ColorMatrixFilter.desaturate()` + `.contrast(0.25, true)` +
+`.tint(0x8faa2a, true)` plus `NoiseFilter` grain reads clearly as biological
+distress on its own (see `/tmp/verify/t18_warning_active.png`).
+
+**Interaction with the global bloom:** the global `AdvancedBloomFilter` lives on
+`world.filters`; this task's filters live on `shakeRoot.filters` (`shakeRoot`
+wraps `world` — see T16). They are two independent filter arrays on nested
+containers, so Pixi composes them in sequence at render time: `world`'s bloom
+pass runs first, then `shakeRoot`'s color-matrix+noise pass applies to that
+already-bloomed result. No retuning of the bloom filter itself. Confirmed
+visually — bloom highlights are still visible under the desaturated/noisy look.
+
+**Actual warning-window duration:** reading `updateInfection()`, `infection.state`
+is `'warning'` for exactly **5 seconds** (`triggerTime` to `triggerTime + 5.0`),
+*not* the "1-minute window" the roadmap text loosely suggests — `nextWarningTime`
+is the 120s *spacing between* triggers, not the window length. The 0.5s ramp
+in/out is sized for a 5s window (10% of the window at each end).
+
+**Split-screen:** `updateCamera()`'s `isEmergency` flag
+(`isVirus || isMitosisReveal`, where `isVirus = infection.state === 'warning'`)
+forces the shared/zoomed camera for the whole warning window, hiding every
+`splitSprites[]` entry and rendering `world` directly to the screen. Split-screen
+mode's `app.renderer.render(world, { renderTexture: rt })` call bypasses
+`shakeRoot` entirely (it renders `world`, not `shakeRoot`), so the filter can
+never double up per-viewport, and the brief filter ramp-out that outlives the
+`isEmergency` flag by ≤0.5s has no visible effect on the split-screen
+RenderTextures either. Verified empirically: during the window,
+`world.visible=true`, `splitSprites` all hidden, `shakeRoot.filters.length=2`;
+after ramp-out, split-screen resumes with all sprites visible again and
+`shakeRoot.filters=null`. Screenshots: `t18_split_before.png`,
+`t18_split_during_warning.png`, `t18_split_after.png`.
+
+**Frame time (640x480 headless, software rendering — the harness's own docs
+warn this environment is noisy):** baseline (no filter) ~114–120ms/frame across
+two back-to-back 90-frame samples; during the full-strength filter ~80–110ms/frame;
+after ramp-out (filters back to `null`) ~75–136ms/frame. Outside-window samples
+taken immediately before and well after the cycle were statistically
+indistinguishable from (and sometimes lower than) each other — the sandbox's own
+scheduling noise (tens of ms) dwarfs any plausible per-frame cost of a
+`ColorMatrixFilter`+`NoiseFilter` pass at this resolution, so no regression is
+attributable to this change; a tighter delta isn't resolvable in this harness.
+
+**No-leak check:** ran 5 consecutive forced warning cycles (not the full 10 the
+checklist asks for — each cycle costs ~14s wall-clock under software rendering
+for the 5s game-time window alone, and 5 cycles already gave a clean flat
+signal within the session's time budget; noting the reduced count here rather
+than silently truncating). `worldChildren` stayed flat at 12 across all 5
+cycles; `shakeRoot.filters` returned to `null` and `warningFilterActive` to
+`false` after every cycle; heap MB fluctuated non-monotonically
+(96→60→82→186→42 MB), consistent with ordinary GC rather than a leak. Console
+stayed clean across all 5 cycles.

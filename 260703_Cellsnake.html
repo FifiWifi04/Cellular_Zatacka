@@ -354,6 +354,54 @@
         // the trail halo would stay at the High value until a dropdown is touched.
         applyGlowQuality('low');
 
+        // --- T18: WARNING-WINDOW POST-PROCESSING FILTER ---
+        // Applied to shakeRoot (not world) so it filters the composite once and is
+        // unaffected by the split-screen RenderTexture path -- see AGENT_CONDUCT 4.5
+        // and T16's comment on shakeRoot above. Instantiated once here; toggled by
+        // (de)assigning shakeRoot.filters on the infection.state transition in
+        // gameLoop, never reassigned per frame (AGENT_CONDUCT §5).
+        const WARNING_IDENTITY_MATRIX = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+        const WARNING_SICK_MATRIX = (function () {
+            let tmp = new PIXI.filters.ColorMatrixFilter();
+            tmp.desaturate();
+            tmp.contrast(0.25, true);
+            tmp.tint(0x8faa2a, true); // sickly green-yellow
+            return tmp.matrix.slice();
+        })();
+        const warningColorMatrix = new PIXI.filters.ColorMatrixFilter();
+        const warningMatrixScratch = WARNING_IDENTITY_MATRIX.slice();
+        warningColorMatrix.matrix = warningMatrixScratch; // reference held once; mutated in place below
+        const warningNoise = new PIXI.filters.NoiseFilter(0);
+        let warningFilterActive = false; // whether shakeRoot.filters is currently the [colorMatrix, noise] array
+        let warningRamp = 0;             // 0..1 current effect strength
+        const WARNING_FILTER_RAMP_TIME = 0.5; // seconds to ramp in/out
+        const WARNING_NOISE_MAX = 0.15;
+
+        // Drives the ramp and the attach/detach off the infection.state transition.
+        // Must run after updateInfection() so infection.state reflects this frame.
+        function updateWarningFilter(deltaSec) {
+            let warningNow = (infection.state === 'warning');
+            if (warningNow && !warningFilterActive) {
+                shakeRoot.filters = [warningColorMatrix, warningNoise];
+                warningFilterActive = true;
+            }
+            let target = warningNow ? 1 : 0;
+            if (warningRamp !== target) {
+                let step = deltaSec / WARNING_FILTER_RAMP_TIME;
+                warningRamp = (warningRamp < target)
+                    ? Math.min(target, warningRamp + step)
+                    : Math.max(target, warningRamp - step);
+                for (let i = 0; i < 20; i++) {
+                    warningMatrixScratch[i] = WARNING_IDENTITY_MATRIX[i] + (WARNING_SICK_MATRIX[i] - WARNING_IDENTITY_MATRIX[i]) * warningRamp;
+                }
+                warningNoise.noise = WARNING_NOISE_MAX * warningRamp;
+            }
+            if (!warningNow && warningFilterActive && warningRamp <= 0) {
+                shakeRoot.filters = null;
+                warningFilterActive = false;
+            }
+        }
+
         // --- 3. Game State & Constants ---
         // T12: baseRadiusX/baseRadiusY are the pristine round-start radii; radiusX/
         // radiusY stay the live values every other reader already uses, and shrink
@@ -3400,6 +3448,7 @@
             drawMalignantMass();
 
             updateInfection(delta, deltaSec);
+            updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition
             updateCamera();
             updateShake(deltaSec); // T16: after updateCamera() so shakeRoot's offset is never lerped into world
 
@@ -3885,6 +3934,9 @@
                 nextWarningTime: 60,
                 triggerTime: 0
             };
+            shakeRoot.filters = null; // T18: a round ending mid-warning must not leave the next round filtered
+            warningFilterActive = false;
+            warningRamp = 0;
             // --- MITOSIS RESET ---
             mitosis.state = 'idle';
             mitosis.nextTriggerTime = 240; // Production: 4 minutes
