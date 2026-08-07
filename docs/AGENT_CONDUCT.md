@@ -60,7 +60,13 @@ real browser before committing. If you find an unrelated bug, write it in
 - Do not create new `.js` or `.css` files for game code, and do not split
   `260703_Cellsnake.html`. `vendor/` (third-party libraries, never edited),
   `tools/` (harness and build scripts) and `dist/` (generated, never hand-edited)
-  are the only exceptions.
+  are exceptions, alongside the PWA files T27 added: `manifest.webmanifest`,
+  `sw.js` and `icons/` (192/512/maskable PNGs). A PWA cannot be a single file —
+  the manifest and worker must be separate fetchable resources, and both must
+  fail harmlessly when fetched from `file://`.
+  **If you change `260703_Cellsnake.html`, `vendor/`, the manifest, or the
+  icons, bump `CACHE_NAME` in `sw.js`** — without a version bump, players keep
+  getting the stale cached game forever after their first visit.
 
 **If you change `260703_Cellsnake.html` or anything in `vendor/`, rebuild the
 standalone distributable in the same commit:**

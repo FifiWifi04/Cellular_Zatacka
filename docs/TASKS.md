@@ -116,7 +116,7 @@ later returns FAIL, revisit anything that landed in that window.
 | T24 | [Touch-friendly menu and HUD](tasks/T24-touch-ui.md) | T23 | `DONE` |
 | T25 | [Incremental trace rendering](tasks/T25-trace-render-perf.md) | T24 | `DONE` |
 | T26 | [Graphics quality tiers](tasks/T26-quality-tier.md) | T25 | `DONE` |
-| T27 | [Installable PWA (offline, home screen)](tasks/T27-pwa.md) | T26 | `READY` |
+| T27 | [Installable PWA (offline, home screen)](tasks/T27-pwa.md) | T26 | `DONE` |
 
 ### Track I — Phase 7: Multiplayer
 
