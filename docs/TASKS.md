@@ -159,7 +159,7 @@ sim/render split can wait behind them.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T33 | [Trace invisible outside Cell A (bridge/Cell B)](tasks/T33-trace-rt-bounds.md) ⚠️ *first* | — | `READY` |
+| T33 | [Trace invisible outside Cell A (bridge/Cell B)](tasks/T33-trace-rt-bounds.md) ⚠️ *first* | — | `DONE` |
 | T34 | [Split-screen choppy and stuttering](tasks/T34-splitscreen-stutter.md) | — | `READY` |
 | T35 | [Dev hotkeys: drop `[`/`]`, legend must match](tasks/T35-dev-hotkeys-legend.md) | — | `READY` |
 | T36 | [Target mode: legend wrong, attack does almost nothing](tasks/T36-targetmode-legend-and-attack.md) | — | `READY` |
@@ -173,7 +173,7 @@ sim/render split can wait behind them.
 | T38 | [Necrosis: fuse, shed debris, break apart in red mode](tasks/T38-make-necrosis-matter.md) | T36, T37 | `BLOCKED` |
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `READY` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `BLOCKED` |
-| T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `BLOCKED` |
+| T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `READY` |
 
 ### Parked
 
