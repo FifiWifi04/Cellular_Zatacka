@@ -113,17 +113,91 @@ flag in `gameLoop`, the menu/pause button handler.
 
 ## Definition of done
 
-- [ ] `## Findings` records whether pause existed before this task
-- [ ] Menu reachable mid-round without hover
-- [ ] Pause freezes `survivalTime` but not rendering
-- [ ] All tap targets ≥44px, verified by measurement
-- [ ] `dvh` used for viewport-relative heights
-- [ ] Desktop mouse/keyboard experience unchanged
-- [ ] `docs/TASKS.md`: T24 → `DONE`; T25 → `READY`
+- [x] `## Findings` records whether pause existed before this task
+- [x] Menu reachable mid-round without hover
+- [x] Pause freezes `survivalTime` but not rendering
+- [x] All tap targets ≥44px, verified by measurement
+- [x] `dvh` used for viewport-relative heights
+- [x] Desktop mouse/keyboard experience unchanged
+- [x] `docs/TASKS.md`: T24 → `DONE`; T25 → `READY`
+
+---
+
+## Verification results — 2026-08-07
+
+All via `tools/verify_harness.py` (`node --check` on the extracted script also
+passed, and `python3 tools/build_standalone.py --check` is clean):
+
+1. **Console clean** — confirmed across every check below (`assert_console_clean()`),
+   over both `http://` and `file://`.
+2. **Menu reachable mid-round on touch** — 390×844 context with `has_touch=True,
+   is_mobile=True` (so `isTouchDevice` reads `true` exactly as it would on a real
+   phone): `pauseMenuBtn` click reveals `#ui` (`hidden-ui` removed) and sets
+   `paused = true` while `isPlaying`.
+3. **Pause is real** — `survivalTime` measured immediately after the pause-button
+   click (not before — `page.click()` itself costs real wall time during which the
+   still-unpaused game keeps running) stayed byte-identical across a 2s wait
+   (`4.3997` → `4.3997`); `app.ticker.started` stayed `true` throughout, and an
+   instrumented `gameLoop` wrapper confirmed it is being called every tick and
+   returning early on the `if (paused) return;` guard.
+4. **Resume works, no jump** — closing via `#uiCloseBtn` sets `paused = false`;
+   over the next 1.5s wall-clock wait `survivalTime` advanced ≈1.4s (bounded by
+   the wait itself, not by the ~1s the round had been paused) — expected, since
+   the ticker is never stopped so `deltaMS` on resume is only the last
+   inter-frame gap, not the whole paused duration.
+5. **Hover** — real mouse (`page.mouse.move`), non-touch context: hovering the
+   trigger strip reveals the menu without pausing (`paused` stays `false`);
+   crossing the revealed panel and leaving re-hides it. (Confirmed via
+   `git stash`/`git stash pop` that a synthetic hover landing on the exact
+   center column of the trigger strip is a pre-existing quirk — the still-hidden
+   `#ui`'s own translated sliver outranks `#ui-trigger` there on z-index — not
+   something this task introduced or fixed; logged in `docs/BACKLOG.md`.) On a
+   touch-emulated context, a synthetic `mouseenter` dispatched at `#ui-trigger`
+   produced no reveal (`hidden-ui` stayed `true`), confirming the `!isTouchDevice`
+   gate.
+6. **Tap targets** — `getBoundingClientRect()`: `#pauseMenuBtn` 44×44,
+   `#uiCloseBtn` 44×44, `#quickPlayBtn` ≥44 tall (52) and full-width.
+7. **Menu fits / scrolls** — 844×390 (landscape-short): computed `max-height`
+   351px (90dvh of 390), `overflow-y: auto`; `scrollHeight` 642 > `clientHeight`
+   349, so the excess scrolls rather than clipping.
+8. **Desktop unchanged** — 1024×768, `isTouchDevice=false`,
+   `document.body` never gets `touch-ui`; hover peek/hide behaves as above;
+   30s solo+bot round (640×480 default) played clean with the bot moving,
+   surviving, and traces/vesicles updating normally (screenshot inspected).
+
+**Also fixed (redirected into this task's scope by the T19/T23 backlog notes,
+not a drive-by):** `#ui { min-width: 400px; }` clipped part of the menu
+off-screen with no way to scroll to it on any viewport narrower than ~410px.
+Changed to `min-width: min(400px, 94vw); max-width: 94vw;` — unchanged on
+desktop (still resolves to 400px at any normal desktop width), but a 390px or
+360px phone now fits with `.controls`' existing `flex-wrap` reflowing the
+buttons instead of clipping. Re-verified: `#ui`'s `scrollWidth` no longer
+exceeds the viewport at either width (was 460px on a 390px viewport before).
 
 ---
 
 ## Findings
 
-*(Does a pause mechanism exist today? Where did you hook it, and what else reads
-`survivalTime` that pausing affects?)*
+No player-initiated pause existed before this task. `isPlaying` + `app.ticker.stop()`
+were only used for the solo game-over freeze (all bots/players dead); there was no
+way to voluntarily pause a live round.
+
+T22 (sim/render split) has not landed, so `gameLoop` is still one fused ~600-line
+function with no separate `stepSimulation` to gate before. The earliest point that
+is guaranteed to run before any state mutation is right after the existing
+`if (!isPlaying) return;` line, so the new `if (paused) return;` was placed there.
+The ticker itself is never stopped, so PIXI's own registered render pass keeps
+redrawing (unchanged) every frame instead of a `app.ticker.stop()`-style freeze,
+and — because the ticker never stops ticking — `app.ticker.deltaMS` on the first
+frame after resume is just the last inter-frame gap, not the whole paused
+duration, so there is no big-delta jump on resume.
+
+Everything downstream of that early return is skipped while paused, so pausing
+also freezes: the mitosis timers (`nextTriggerTime`, `eventStartTime`-relative
+progress), the infection/virus timers (`nextWarningTime`, `triggerTime`), the
+Gen2+ necrosis timer, the Gen2+ calcification radius shrink, the Gen3+ malignant
+mass growth timer, `globalRotation`, and the HUD scoreboard text update — none of
+those are driven independently of `gameLoop`, so nothing needed a separate guard.
+`startRound()` now also resets `paused = false`, since restarting a round from a
+paused menu (via the Start Game button) would otherwise leave the new round
+permanently frozen.

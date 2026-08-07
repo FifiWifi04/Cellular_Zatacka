@@ -84,6 +84,52 @@
             background: #e74c3c;
         }
 
+        /* T24: persistent menu/pause button -- explicit control since touch has
+           no hover. Opposite corner from the T23 boost-target toggle. */
+        .pause-menu-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            top: max(12px, env(safe-area-inset-top));
+            right: max(12px, env(safe-area-inset-right));
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            border-radius: 8px;
+            z-index: 110;
+            font-size: 20px;
+            background: #2d3436;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .pause-menu-btn:hover {
+            background: #636e72;
+        }
+
+        /* T24: explicit close/resume affordance inside the menu itself. Sits at
+           top-left -- top-right is the fixed, higher-stacked pauseMenuBtn, which
+           would otherwise intercept clicks meant for this button. */
+        .ui-close-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            top: max(6px, env(safe-area-inset-top));
+            left: 6px;
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            font-size: 18px;
+            z-index: 5;
+        }
+
+        .ui-close-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
         #ui {
             position: absolute;
             top: 0;
@@ -100,7 +146,20 @@
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
             transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             width: fit-content;
-            min-width: 400px;
+            /* T24: the flat 400px min-width overflowed off-screen with no way
+               to scroll to the clipped part on any viewport narrower than
+               ~410px (flagged during T23, confirmed as this task's scope) --
+               min()/max() against the viewport keep it unchanged on desktop
+               (still 400px there) while letting it shrink and let .controls'
+               existing flex-wrap reflow the buttons on a narrow phone. */
+            min-width: min(400px, 94vw);
+            max-width: 94vw;
+            /* keep the menu on-screen and scrollable in landscape on a short
+               viewport -- dvh, not vh, so mobile browser chrome resizing
+               doesn't clip it. */
+            max-height: 90dvh;
+            overflow-y: auto;
+            box-sizing: border-box;
         }
 
         /* Slide the UI up to hide it */
@@ -119,10 +178,12 @@
             z-index: 90;
         }
 
-        /* Scoreboard remains visible even when menu is hidden */
+        /* Scoreboard remains visible even when menu is hidden. T24: clamp()
+           keeps it readable on a 390px-wide screen without growing past the
+           original 20px on desktop. */
         #scoreboard {
             margin: 5px 0;
-            font-size: 20px;
+            font-size: clamp(16px, 4.5vw, 20px);
             color: #00d2d3;
             text-shadow: 0 0 10px rgba(0, 210, 211, 0.5);
         }
@@ -160,6 +221,29 @@
 
         button:hover {
             background: #74b9ff;
+        }
+
+        /* T24: bigger tap targets on touch (>=44x44 CSS px), and de-emphasise
+           the player-count selector -- Quick Play (1 human + 1 bot) is the
+           only mode playable without a keyboard until Phase 7 networking. */
+        body.touch-ui select,
+        body.touch-ui button {
+            padding: 14px 18px;
+            font-size: 18px;
+            min-height: 44px;
+            box-sizing: border-box;
+        }
+
+        body.touch-ui #modeSelect {
+            opacity: 0.6;
+        }
+
+        /* Keep Quick Play the visually dominant action on touch -- otherwise the
+           generic body.touch-ui button rule above (higher specificity than
+           .quick-play-btn alone) shrinks its font-size instead of growing it. */
+        body.touch-ui .quick-play-btn {
+            font-size: 22px;
+            padding: 18px;
         }
 
         .fullscreen-btn {
@@ -293,15 +377,18 @@
 <body>
 
     <div id="ui-trigger"></div>
+    <!-- T24: explicit menu/pause control -- hover-to-peek has no touch equivalent. -->
+    <button id="pauseMenuBtn" class="pause-menu-btn" onclick="togglePauseMenu()" aria-label="Menu / Pause">&#9776;</button>
     <div id="devIndicator"
         style="display: none; position: absolute; top: 10px; right: 20px; color: #00ff00; font-weight: bold; font-family: monospace; font-size: 13px; line-height: 1.4; white-space: pre; z-index: 1000; text-shadow: 0 0 5px #00ff00; pointer-events: none;">
     </div>
 
     <h2 id="globalWarning"
-        style="display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); color: #ff4757; text-shadow: 0 0 15px rgba(255, 71, 87, 0.8); font-size: 28px; z-index: 200; pointer-events: none;">
+        style="display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); color: #ff4757; text-shadow: 0 0 15px rgba(255, 71, 87, 0.8); font-size: clamp(20px, 6vw, 28px); z-index: 200; pointer-events: none;">
     </h2>
 
     <div id="ui">
+        <button id="uiCloseBtn" class="ui-close-btn" onclick="togglePauseMenu()" aria-label="Close menu">&#10005;</button>
         <button id="quickPlayBtn" class="quick-play-btn" onclick="quickPlay()">⚡ Quick Play</button>
         <div class="controls">
             <select id="modeSelect" onchange="updateUI()">
@@ -692,6 +779,11 @@
         }
 
         let isPlaying = false;
+        // T24: local-only pause, gated behind isPlaying in gameLoop. In multiplayer
+        // (Phase 7) this must not pause other players -- a local pause here freezes
+        // only this client's own simulation, so it cannot be reused as-is once state
+        // is shared across a network.
+        let paused = false;
         let currentMode = 1;
         let aiCount = 0;
         let currentSpeed = 1.5;
@@ -813,6 +905,7 @@
         const speedSelect = document.getElementById('speedSelect');
         const uiElement = document.getElementById('ui');
         const uiTrigger = document.getElementById('ui-trigger');
+        const pauseMenuBtn = document.getElementById('pauseMenuBtn'); // T24
 
         const ARCS = [
             { type: 'ER', r: 160, thick: 20, span: 1.05, color: 0x0097e6 },
@@ -3436,6 +3529,8 @@
         // for the 3rd control). Always targets Player 1, same reasoning as above.
         const touchToggleBtn = document.getElementById('touchToggleBtn');
         if (isTouchDevice) touchToggleBtn.style.display = 'flex';
+        // T24: bigger tap targets + de-emphasised player-count selector (see CSS).
+        if (isTouchDevice) document.body.classList.add('touch-ui');
         window.toggleTouchTargetMode = function () {
             let p = players[0];
             if (!p || !p.alive || p.isBot) return;
@@ -3444,10 +3539,41 @@
             p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
         };
 
-        // PEEK LOGIC: Show UI on hover, hide when leaving
-        uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
-        uiElement.addEventListener('mouseleave', () => {
-            if (isPlaying) uiElement.classList.add('hidden-ui');
+        // PEEK LOGIC: Show UI on hover, hide when leaving. T24: touch has no
+        // hover concept, so this path is gated off entirely for touch devices --
+        // they use pauseMenuBtn/uiCloseBtn below instead.
+        if (!isTouchDevice) {
+            uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
+            uiElement.addEventListener('mouseleave', () => {
+                if (isPlaying) {
+                    // Also clears any pause opened via pauseMenuBtn -- otherwise the
+                    // mouse leaving would hide the menu but leave the round paused
+                    // with no visible way to tell.
+                    uiElement.classList.add('hidden-ui');
+                    paused = false;
+                }
+            });
+        }
+
+        // T24: explicit menu/pause control. Opening pauses the round (survivalTime
+        // and physics both stop, see gameLoop); tapping pauseMenuBtn again, the
+        // in-menu close button, or anywhere outside the menu resumes it.
+        window.togglePauseMenu = function () {
+            let isHidden = uiElement.classList.contains('hidden-ui');
+            if (isHidden) {
+                uiElement.classList.remove('hidden-ui');
+                if (isPlaying) paused = true;
+            } else {
+                uiElement.classList.add('hidden-ui');
+                paused = false;
+            }
+        };
+
+        document.addEventListener('pointerdown', e => {
+            if (!paused) return;
+            if (uiElement.contains(e.target) || e.target === pauseMenuBtn) return;
+            uiElement.classList.add('hidden-ui');
+            paused = false;
         });
 
         window.toggleFullScreen = function () {
@@ -3557,6 +3683,11 @@
 
         function gameLoop(delta) {
             if (!isPlaying) return;
+            // T24: freeze simulation (incl. survivalTime) without stopping the
+            // ticker -- PIXI's own render pass stays registered on it, so the
+            // canvas keeps being redrawn (just unchanged) instead of the
+            // frozen/blank look app.ticker.stop() would give behind the menu.
+            if (paused) return;
 
             // Rebuild spatial grid once per frame at the start
             rebuildSpatialGrid();
@@ -4325,6 +4456,7 @@
 
             generateMap();
             isPlaying = true;
+            paused = false; // T24: a restart from a paused menu must not stay frozen
             uiElement.classList.add('hidden-ui'); // AUTO-HIDE MENU ON START
             app.ticker.start(); // Unfreeze the engine!
         };

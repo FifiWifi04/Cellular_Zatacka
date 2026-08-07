@@ -345,12 +345,12 @@ them.
 
 ## Found during T19 — 2026-08-06
 
-- **`#ui` panel overflows below ~410px viewport width.** `#ui { min-width:
-  400px; }` predates T19 and already clips the rightmost control (the
-  Fullscreen button) off-screen at narrow widths like 360px, independent of
-  the Quick Play button added in T19 (verified against the pre-T19 file).
-  Confirmed fine at 600px+. Worth a look whenever mobile/responsive layout
-  (T23) is tackled.
+- ~~**`#ui` panel overflows below ~410px viewport width.**~~ **RESOLVED by
+  T24 — 2026-08-07.** `#ui { min-width: 400px; }` predates T19 and already
+  clips the rightmost control (the Fullscreen button) off-screen at narrow
+  widths like 360px, independent of the Quick Play button added in T19
+  (verified against the pre-T19 file). Confirmed fine at 600px+. Worth a
+  look whenever mobile/responsive layout (T23) is tackled.
 - **Mid-round `drawArcs()` orphan is still real, still unfixed.**
   `rotatingContainer.removeChildren()` at the ER/Golgi arc-shatter path
   (`gameLoop` ~L3536) discards the previous `structGraph` `Graphics` without
@@ -363,18 +363,39 @@ them.
   longer-survival config shows a floor component tracking arc-shatter counts.
   — 2026-08-06
 
+## Found during T24 (touch-friendly menu and HUD) — 2026-08-07
+
+- **Hover-to-peek can get stuck open if the mouse never crosses the revealed
+  panel.** `mouseenter` is bound to `#ui-trigger` (full-width, 30px-tall top
+  strip) but `mouseleave` is bound to `#ui` itself (the centered panel,
+  narrower than the trigger strip). If the mouse enters the trigger strip
+  outside the panel's horizontal footprint (e.g. near the left/right screen
+  edge) and then moves straight down into the game without ever passing over
+  the now-revealed `#ui` box, no `mouseleave` ever fires (the browser only
+  fires it once the pointer has actually entered the element), so the menu
+  stays visible until the mouse happens to cross it later. Confirmed present
+  on the pre-T24 code too (bisected with `git stash`), so it isn't something
+  this task introduced — left alone per scope discipline. A fix would need
+  either widening `#ui-trigger` to always match `#ui`'s current footprint, or
+  moving the reveal/hide pairing onto the same element.
+
 ## Found during T23 — 2026-08-07
 
-- **`#ui` panel overflow is now real, not just theoretical.** The T19 note
-  above flagged `#ui { min-width: 400px; }` as overflowing below ~410px and
-  said it was "worth a look whenever mobile/responsive layout (T23) is
-  tackled." T23 adds the `<meta name="viewport" content="width=device-width...">`
-  tag the game previously lacked; before that tag existed, mobile browsers
-  laid out at a virtual ~980px width, so the 400px-min panel had headroom and
-  never visibly clipped. With real device-width layout now active, a 390px
-  phone (`document.getElementById('ui').scrollWidth` measured at 460px against
-  a 390px viewport, `body { overflow: hidden }`) genuinely clips part of the
+- ~~**`#ui` panel overflow is now real, not just theoretical.**~~ **RESOLVED
+  by T24 — 2026-08-07.** The T19 note above flagged `#ui { min-width: 400px; }`
+  as overflowing below ~410px and said it was "worth a look whenever
+  mobile/responsive layout (T23) is tackled." T23 adds the
+  `<meta name="viewport" content="width=device-width...">` tag the game
+  previously lacked; before that tag existed, mobile browsers laid out at a
+  virtual ~980px width, so the 400px-min panel had headroom and never
+  visibly clipped. With real device-width layout now active, a 390px phone
+  (`document.getElementById('ui').scrollWidth` measured at 460px against a
+  390px viewport, `body { overflow: hidden }`) genuinely clipped part of the
   landing menu off-screen with no way to scroll to it. Confirmed via
   `tools/verify_harness.py`, screenshot at `/tmp/verify/t23_menu_390.png`.
-  Out of T23's scope (viewport/touch/orientation only) — this is squarely
-  T24's "Touch-friendly menu and HUD."
+  T24 fixed it: `min-width: min(400px, 94vw); max-width: 94vw;` instead of a
+  flat `400px`, so desktop is unchanged (`min(400, 94vw)` still evaluates to
+  400 at any normal desktop width) while narrow phones shrink the panel and
+  let `.controls`' existing `flex-wrap` reflow the buttons instead of
+  clipping them. Re-verified at 390px and 360px: `scrollWidth` no longer
+  exceeds the viewport at either.
