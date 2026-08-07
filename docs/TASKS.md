@@ -100,7 +100,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T21 | [Extend additive blending on the vector renderer](tasks/T21-additive-blending.md) | — | `READY` |
+| T21 | [Extend additive blending on the vector renderer](tasks/T21-additive-blending.md) | — | `DONE` |
 
 ### Track G — Architecture (enables Phase 7, speeds up testing)
 

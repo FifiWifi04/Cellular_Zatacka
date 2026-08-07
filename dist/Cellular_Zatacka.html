@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: ccc0851bb9c0b029 -->
+<!-- standalone-build-inputs: a773a63fac7e502b -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3617,8 +3617,14 @@ void main() {
         const particleLayer = new PIXI.Graphics(); // T17: splash particle pool, single Graphics for the whole pool
         particleLayer.blendMode = PIXI.BLEND_MODES.ADD;
         const trailLayer = new PIXI.Container();
+        // T21: one switch for the bioluminescent additive-glow look; set to
+        // PIXI.BLEND_MODES.NORMAL to revert organelles/vesicles/virus to the
+        // pre-T21 vector rendering wholesale.
+        const GLOW_BLEND = PIXI.BLEND_MODES.ADD;
         const dynamicLayer = new PIXI.Graphics(); // Vesicles
+        dynamicLayer.blendMode = GLOW_BLEND;
         const virusLayer = new PIXI.Graphics();   // New layer for the Infection event
+        virusLayer.blendMode = GLOW_BLEND;
         const uiBarsLayer = new PIXI.Graphics();
 
         world.addChild(backgroundLayer);
@@ -4178,6 +4184,10 @@ void main() {
             const lysoRing = necrotic ? 0x707070 : 0xff4757;
             const lysoBubble = necrotic ? 0x9a9a9a : 0xff6b81;
             const lysoHighlight = necrotic ? 0xc0c0c0 : 0xffffff;
+            // T21: near-black (0x0d0d1a) vanishes under GLOW_BLEND=ADD, so the
+            // lysosome body fill uses a dim version of lysoRing instead -- keeps
+            // a visible body rather than becoming a hollow ring.
+            const lysoDarkBody = necrotic ? 0x161616 : 0x330e11;
 
             if (isMito) {
                 let w = radius * 0.9; 
@@ -4192,11 +4202,16 @@ void main() {
                     sprite.quadraticCurveTo(0, bendY, L/2, 0);
                 };
 
-                drawPill(w + 10, mitoOuter, 0.2);
-                drawPill(w, mitoOuter, 0.6);
-                drawPill(w - 6, 0x0d0d1a, 1.0); 
-                drawPill(w - 10, mitoCore, 0.8);
-                drawPill(w - 14, 0x0d0d1a, 1.0); 
+                // T21: the two 0x0d0d1a separator strokes that used to carve a dark
+                // groove between the outer ring and the core are dropped -- under
+                // GLOW_BLEND=ADD, src*alpha adds to dst, so near-black at any alpha
+                // contributes nothing and the groove silently vanished, leaving the
+                // three colour strokes below to stack additively into a whiteout.
+                // The remaining alphas are lowered so the pill still reads as a
+                // graded green-to-mint glow instead of blowing out to solid white.
+                drawPill(w + 10, mitoOuter, 0.15);
+                drawPill(w, mitoOuter, 0.32);
+                drawPill(w - 10, mitoCore, 0.55);
 
                 sprite.lineStyle({width: 2 + sizeMult, color: mitoCore, alpha: 0.9, cap: PIXI.LINE_CAP.ROUND});
                 let numCristae = 4 + Math.floor(L / 15); 
@@ -4238,7 +4253,7 @@ void main() {
                 }
             } else {
                 let w = radius;
-                sprite.beginFill(0x0d0d1a, 0.6);
+                sprite.beginFill(lysoDarkBody, 0.6);
                 sprite.lineStyle(3 * sizeMult, lysoRing, 0.6);
                 sprite.drawCircle(0, 0, w);
                 sprite.endFill();
@@ -4263,6 +4278,7 @@ void main() {
             sprite.x = orgObj.x;
             sprite.y = orgObj.y;
             sprite.rotation = orgObj.rotation;
+            sprite.blendMode = GLOW_BLEND; // T21: per-sprite -- blendMode does not inherit from organellesLayer
             return sprite;
         }
 
@@ -5585,7 +5601,9 @@ void main() {
                         dynamicLayer.moveTo(px1, py1);
                         dynamicLayer.lineTo(px2, py2);
                     } else if (v.type === 'lysosome') {
-                        dynamicLayer.beginFill(0x0d0d1a, 0.6);
+                        // T21: near-black vanishes under GLOW_BLEND=ADD on dynamicLayer;
+                        // dim red keeps the vesicle a visible body, not a hollow ring.
+                        dynamicLayer.beginFill(0x330e11, 0.6);
                         dynamicLayer.lineStyle(2, 0xff4757, 0.6);
                         dynamicLayer.drawCircle(v.x, v.y, v.radius);
                         dynamicLayer.endFill();

@@ -243,16 +243,16 @@ This task's acceptance is visual, so evidence means screenshots.
 
 ## Definition of done
 
-- [ ] `## Dark fills` filled in below before any blend mode was changed
-- [ ] Organelle blend set per-sprite in `createOrganelleGraphics()`, not on the layer
-- [ ] `dynamicLayer` and `virusLayer` converted; dark vesicle body handled
-- [ ] ER decision made and justified
-- [ ] Brightest-frame check passed with no whiteout
-- [ ] Before/after screenshots for four scenes
-- [ ] Frame-time before/after recorded
-- [ ] All conversions behind the `GLOW_BLEND` constant
-- [ ] Zero changes to physics, hitboxes, or gameplay
-- [ ] `docs/TASKS.md`: T21 → `DONE`
+- [x] `## Dark fills` filled in below before any blend mode was changed
+- [x] Organelle blend set per-sprite in `createOrganelleGraphics()`, not on the layer
+- [x] `dynamicLayer` and `virusLayer` converted; dark vesicle body handled
+- [x] ER decision made and justified (left NORMAL)
+- [x] Brightest-frame check passed with no whiteout
+- [x] Before/after screenshots for four scenes
+- [x] Frame-time before/after recorded (463.7ms → 447.0ms mean, no regression)
+- [x] All conversions behind the `GLOW_BLEND` constant
+- [x] Zero changes to physics, hitboxes, or gameplay
+- [x] `docs/TASKS.md`: T21 → `DONE`
 
 ## Rollback
 
@@ -266,5 +266,19 @@ is ever worth restarting.
 
 ## Dark fills
 
-*(Fill in before changing any blend mode: every dark fill in the draw routines
-you are converting, and what you decided to do about each.)*
+Found by reading `createOrganelleGraphics()` and the `updateVesicles()` lysosome
+branch before changing any blend mode, at commit `f4d276f`:
+
+| Location | Call | Decision |
+|---|---|---|
+| `createOrganelleGraphics()`, lysosome branch, body fill | `sprite.beginFill(0x0d0d1a, 0.6)` | Replaced with a dim red (`lysoDarkBody`: `0x330e11` normal / `0x161616` necrotic) at the same alpha, so ADD still gives the body colour instead of erasing it. Same pattern as the vesicle instance the task quotes. |
+| `updateVesicles()`, lysosome-cargo vesicle body fill | `dynamicLayer.beginFill(0x0d0d1a, 0.6)` | Same fix: `0x330e11` (dim red) at alpha 0.6. Confirmed with a close-up screenshot (`lyso_vesicle_closeup.png`) — the vesicles keep a visible body, not a hollow ring. |
+| `createOrganelleGraphics()`, mitochondria branch, two separator strokes | `drawPill(w - 6, 0x0d0d1a, 1.0)` and `drawPill(w - 14, 0x0d0d1a, 1.0)` | Not quoted in the task but found by reading the whole function per §3 of AGENT_CONDUCT.md. These carved a dark groove between the outer ring and the core under NORMAL blending. Under ADD, `src(≈0)*alpha` contributes nothing regardless of alpha, so the groove silently vanished and the three remaining colour strokes stacked additively into a whiteout (confirmed by screenshot — a solid white blob, cristae detail gone). **Dropped** both separator strokes (dead draws under ADD) and **lowered** the three surviving alphas (0.2→0.15, 0.6→0.32, 0.8→0.55) so the pill reads as a graded green-to-mint glow instead of blowing out. The double-outline "groove" detail is permanently lost — this is the accepted, unavoidable cost of ADD (it can only brighten, never darken a groove) — but the pill stays clearly legible and distinct from the round lysosome shape at every zoom level checked. |
+| `structGraph` (ER), `drawArcs()` | `RIBO_COLOR` circles, no near-black fills found | Not converted (Step 4 left optional). The ER is a lethal wall and fairness-critical; converting it was not needed to satisfy 2.2's letter or this task's extension scope, so it was left at NORMAL rather than risk legibility for a hazard nobody asked to change. |
+| `mitosisLayer` bridge floor, `backgroundLayer` (`cellBg`) | `beginFill(0x0d0d1a)` | Out of scope per the task file itself — left untouched, not made additive. |
+
+T13 interaction: necrotic organelles are rebuilt via `createOrganelleGraphics(pick, true)`
+(a full sprite rebuild with grey colours, not a `.tint` multiply — T13 already
+avoided the tint trap), so there was no additional tint-under-ADD issue. Verified
+with `window.setGeneration(2)` and a screenshot (`necrosis.png`): the necrotic
+organelle reads as a distinct grey/white shape against the healthy green ones.
