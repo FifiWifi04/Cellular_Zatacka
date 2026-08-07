@@ -9,7 +9,17 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 
 ## How to use this board
 
-1. Open this file. Find the lowest-numbered task with status **`READY`**.
+> ## ⚠️ PRIORITY OVERRIDE (2026-08-07)
+> **Take Track J (T33–T37, T40) before anything else, starting with T33.**
+> These are defects the owner hit in real play. They outrank the normal
+> lowest-numbered rule, which would otherwise send you to T22 — a large
+> refactor — while shipped bugs sit unfixed.
+>
+> Order: **T33 → T34 → T35 → T36 → T37 → T40 → T39**, then Track K as it
+> unblocks, then T22 and Phase 7.
+
+1. Open this file. Find the lowest-numbered task with status **`READY`**,
+   **subject to the priority override above**.
 2. Open `docs/tasks/<ID>-*.md` and follow it exactly.
 3. When done and verified, change that task's status here to **`DONE`**, and
    change the next task's status from `BLOCKED` to `READY` **only if** its listed
@@ -27,11 +37,7 @@ dependency long since satisfied.
 
 **`OWNER-RUN` tasks:** a scheduled session must **skip** these and take the next
 `READY` task instead. If the only remaining work is `OWNER-RUN`, report that and
-stop. Currently only **T06b** (the Phase 1 PASS/FAIL verdict), because it is a
-judgement about the project rather than a measurement. Its data collection was
-split out into T06a, which a scheduled session *can* run — that is deliberately
-what T07, T11 and T16 depend on, so the routine is never blocked waiting on a
-human decision.
+stop. **There are none outstanding** — T06b was signed off PASS on 2026-08-07.
 
 **Resumable tasks** are marked ⏳. They span several sessions and carry their own
 `## Progress` checklist, committed after each stage. They stay `READY` until every
@@ -52,7 +58,7 @@ sign of a stale board.
 | T04 | [Separate god mode from fuzzer; harden fuzzer](tasks/T04-fuzzer-hardening.md) | — | `DONE` |
 | T05 | [PixiJS display-object lifecycle fixes](tasks/T05-pixi-lifecycle.md) | — | `DONE` |
 | T06a | [Soak measurement — collect gate evidence](tasks/T06a-soak-measurement.md) ⏳ *resumable* | T04, T05 | `DONE` |
-| T06b | [Phase 1 gate verdict — PASS/FAIL](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `OWNER-RUN` |
+| T06b | [Phase 1 gate verdict — **PASS**](tasks/T06b-gate-verdict.md) 👤 *owner-run* | T06a | `DONE` |
 | T06c | [**Find and fix the retained-memory leak**](tasks/T06c-heap-leak-hunt.md) | T06a | `DONE` |
 
 > **T06c re-measured before investigating**, per its own Step 0. Re-running
@@ -114,6 +120,10 @@ later returns FAIL, revisit anything that landed in that window.
 |----|------|-----------|--------|
 | T22 | [Separate simulation from rendering](tasks/T22-sim-render-split.md) ⏳ *resumable* | T06a | `READY` |
 
+> **Phase 1 gate: PASS** — `docs/reports/PHASE1-GATE.md`, signed off 2026-08-07.
+> The retention T06c chased was resolved by T07's trace cap: run A re-measured
+> flat (41.7–48.2 MB across six windows) over 453 rounds with zero errors.
+
 > **T22 was wrongly left `BLOCKED` until 2026-08-07.** Its only dependency,
 > T06a, completed long before — but T06a's definition-of-done checklist named
 > only "T07, T11, T16 → READY", because it was written before T22 existed. The
@@ -141,6 +151,29 @@ later returns FAIL, revisit anything that landed in that window.
 | T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `BLOCKED` |
 | T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `BLOCKED` |
 | T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `BLOCKED` |
+
+### Track J — Playtest fixes (owner session 2026-08-07)
+
+**Take these before Track G/I.** They are defects in shipped behaviour; the
+sim/render split can wait behind them.
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T33 | [Trace invisible outside Cell A (bridge/Cell B)](tasks/T33-trace-rt-bounds.md) ⚠️ *first* | — | `READY` |
+| T34 | [Split-screen choppy and stuttering](tasks/T34-splitscreen-stutter.md) | — | `READY` |
+| T35 | [Dev hotkeys: drop `[`/`]`, legend must match](tasks/T35-dev-hotkeys-legend.md) | — | `READY` |
+| T36 | [Target mode: legend wrong, attack does almost nothing](tasks/T36-targetmode-legend-and-attack.md) | — | `READY` |
+| T37 | [Calcification: double membrane, organelle bounce](tasks/T37-calcification-visuals.md) | — | `READY` |
+| T40 | [Make pause discoverable](tasks/T40-pause-discoverability.md) | — | `READY` |
+
+### Track K — Playtest design & features
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T38 | [Make organelle necrosis actually matter](tasks/T38-make-necrosis-matter.md) | T37 | `BLOCKED` |
+| T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `READY` |
+| T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `BLOCKED` |
+| T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `BLOCKED` |
 
 ### Parked
 

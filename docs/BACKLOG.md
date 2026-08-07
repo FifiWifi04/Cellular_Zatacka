@@ -442,3 +442,30 @@ them.
   trace cap had already fixed it. The "re-measure before investigating" step
   paid for itself: it prevented a full session hunting a leak that no longer
   existed. T06b's verdict can be a clean PASS on this evidence. — 2026-08-07
+
+## Owner playtest — 2026-08-07
+
+Eleven findings, written up as T33–T42. Diagnoses established before writing:
+
+- **Trace invisible past the bridge (T33)** — `rebuildTraceRT()` sizes the trace
+  RenderTexture to `activeCell.baseRadiusX/Y + 150`, but `mitosis.cellB` is
+  ~3400px away, so the bridge and Cell B fall entirely outside the buffer.
+  Collision is unaffected, so players die to traces they cannot see. T25
+  regression.
+- **Pause already exists (T40)** — T24 added `#pauseMenuBtn`, `togglePauseMenu()`
+  and a `paused` flag, with no touch-only CSS gate. The owner still never found
+  it, so this is discoverability, not a missing feature.
+- **Target mode is nearly inert (T36)** — `targetMode === 'attack'` is consulted
+  in exactly one gameplay place, T14's mass shatter. Nothing in the vesicle
+  path branches on it, yet `controlsText` advertises "Toggle Boost Target". The
+  behaviour the owner remembers (red sends the pickup to an opponent) is absent.
+- **Necrosis changes almost nothing (T38)** — organelles were already lethal
+  before T13; `necrotic` only alters palette and motion. T13 implemented its task
+  file faithfully — the task file was what lacked a mechanic. My omission.
+- **Double membrane (T37)** — T12 offered "leave the baked membrane, it reads as
+  the old wall" as an option and it was taken; the owner judged it wrong. The
+  organelle bounce flips both velocity components unconditionally against a
+  moving wall, causing per-frame snap/reverse jitter.
+- **"Tumour" is biologically impossible inside a single cell (T39)** — a tumour
+  is many cells. Recommended reframing as a protein aggregate / aggresome, which
+  is a real intracellular pathology and fits the generation ladder.

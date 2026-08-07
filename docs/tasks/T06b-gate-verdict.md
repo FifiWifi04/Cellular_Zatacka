@@ -76,11 +76,22 @@ Create `docs/reports/PHASE1-GATE.md`:
 
 ## Definition of done
 
-- [ ] All three runs had `COMPLETE` markers before you analysed them
-- [ ] `docs/reports/PHASE1-GATE.md` written, verdict in the first line
-- [ ] Every claim in it backed by a number from a CSV
-- [ ] `docs/TASKS.md`: T06b → `DONE`
-- [ ] No code changed
+- [x] All three runs had `COMPLETE` markers before you analysed them
+- [x] `docs/reports/PHASE1-GATE.md` written, verdict in the first line — **PASS**
+- [x] Every claim in it backed by a number from a CSV
+- [x] `docs/TASKS.md`: T06b → `DONE`
+- [x] No code changed
+
+## Verdict: PASS (2026-08-07)
+
+See `docs/reports/PHASE1-GATE.md`. Run A re-measured at `8762fcf` over 453
+rounds: heap floor flat at 41.7–48.2 MB, `worldChildren` flat, zero errors across
+all three runs. The retention seen originally was unbounded trace memory, fixed
+by T07's per-player cap — no further code change needed.
+
+Runs B and C predate T07 and are stale; B's rising floor is exactly the unbounded
+trace growth T07 fixed, in the immortal config, and is not counter-evidence.
+Re-running them at the current build is noted as non-gating follow-up.
 
 ## Follow-up already staged
 
