@@ -362,3 +362,19 @@ them.
   other. Worth a task if a future immortal-mode soak (run B) or a
   longer-survival config shows a floor component tracking arc-shatter counts.
   — 2026-08-06
+
+## Found during T23 — 2026-08-07
+
+- **`#ui` panel overflow is now real, not just theoretical.** The T19 note
+  above flagged `#ui { min-width: 400px; }` as overflowing below ~410px and
+  said it was "worth a look whenever mobile/responsive layout (T23) is
+  tackled." T23 adds the `<meta name="viewport" content="width=device-width...">`
+  tag the game previously lacked; before that tag existed, mobile browsers
+  laid out at a virtual ~980px width, so the 400px-min panel had headroom and
+  never visibly clipped. With real device-width layout now active, a 390px
+  phone (`document.getElementById('ui').scrollWidth` measured at 460px against
+  a 390px viewport, `body { overflow: hidden }`) genuinely clips part of the
+  landing menu off-screen with no way to scroll to it. Confirmed via
+  `tools/verify_harness.py`, screenshot at `/tmp/verify/t23_menu_390.png`.
+  Out of T23's scope (viewport/touch/orientation only) — this is squarely
+  T24's "Touch-friendly menu and HUD."

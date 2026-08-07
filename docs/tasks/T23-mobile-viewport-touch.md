@@ -152,10 +152,62 @@ harness (`page.emulate_media`, touch-enabled context, and a mobile viewport).
 
 ## Definition of done
 
-- [ ] Viewport meta + gesture suppression CSS in place
-- [ ] Touch steering feeds the existing `keys` object — no parallel input path
-- [ ] Pointer IDs tracked; cancel and backgrounding both release cleanly
-- [ ] `targetMode` button, ≥44px, colour-coded
-- [ ] Keyboard input demonstrably unchanged
-- [ ] Both orientations verified
-- [ ] `docs/TASKS.md`: T23 → `DONE`; T24 → `READY`
+- [x] Viewport meta + gesture suppression CSS in place
+- [x] Touch steering feeds the existing `keys` object — no parallel input path
+- [x] Pointer IDs tracked; cancel and backgrounding both release cleanly
+- [x] `targetMode` button, ≥44px, colour-coded
+- [x] Keyboard input demonstrably unchanged
+- [x] Both orientations verified
+- [x] `docs/TASKS.md`: T23 → `DONE`; T24 → `READY`
+
+## Verification results — 2026-08-07
+
+Ran via `tools/verify_harness.py` with a custom mobile context
+(390×844, `has_touch: true, is_mobile: true`) plus the standard desktop
+context for the regression check.
+
+1. Console clean — only the expected `favicon.ico` 404, in both mobile and
+   desktop contexts, before and after a round.
+2. Device-scale rendering confirmed: `window.innerWidth` / `SCREEN_WIDTH` /
+   `document.documentElement.clientWidth` all read `390` at a 390×844
+   viewport (no virtual-980px scaling).
+3. Steering confirmed: synthetic `pointerdown` (pointerType `touch`) on the
+   left half sets `keys['ArrowLeft']`; right half sets `keys['ArrowRight']`.
+4. Pointer-ID handling confirmed: a `pointermove` from the left half to the
+   right half flips `ArrowLeft`→`ArrowRight`; with two pointers down (one per
+   half) both keys are true, and lifting one leaves the other's key correctly
+   set. This caught and fixed a real bug — see below.
+5. `pointercancel` confirmed to clear both keys.
+6. Backgrounding confirmed: a synthetic `visibilitychange` with
+   `document.hidden = true` while a pointer is down clears its key.
+7. Gesture suppression confirmed via computed style: `touch-action: none` on
+   `<html>` and `<canvas>`, `overscroll-behavior: none` on `<body>`; viewport
+   meta carries `user-scalable=no, maximum-scale=1`.
+8. Keyboard regression confirmed on a plain desktop context (`isTouchDevice`
+   false, toggle button `display: ''`): all four `playerConfigs` left-turn
+   keys still set/clear `keys[...]` correctly, and a `mousedown` on the canvas
+   (pointerType `mouse`) does **not** set any steering key.
+9. Both orientations (390×844 portrait, 844×390 landscape) render the arena
+   fully framed with no clipping — screenshots inspected visually, console
+   clean in both.
+10. Toggle button: `display` switches to `flex` only when `isTouchDevice`;
+    clicking it flips `players[0].targetMode` between `self`/`attack` and the
+    button gains/loses `.attack-mode` (mirrored from `drawTraces()`, once per
+    frame, matching AGENT_CONDUCT §4.4 — physics state stays authoritative).
+
+**Bug found and fixed during verification:** the original `pointerdown`
+handler called `app.view.setPointerCapture(e.pointerId)` *before* updating
+`touchPointers`/`keys`. `setPointerCapture` can throw (`NotFoundError`) when
+the pointer isn't recognized as active by the browser's session; when it
+does, the throw aborted the rest of the handler and the finger's key state
+was never recorded — breaking the two-finger and backgrounding cases
+specifically. Fixed by updating `touchPointers`/`keys` first and wrapping the
+now purely-best-effort `setPointerCapture` call in `try/catch`.
+
+**Found, not fixed (logged to `docs/BACKLOG.md`):** the pre-existing
+`#ui { min-width: 400px; }` overflow (flagged during T19) is now genuinely
+reachable at real mobile widths, since T23 is what turns on device-width
+layout in the first place. `document.getElementById('ui').scrollWidth` reads
+460px against a 390px viewport with `body { overflow: hidden }` — part of the
+landing menu is unreachably clipped. Out of T23's scope; belongs to T24
+(touch-friendly menu and HUD).

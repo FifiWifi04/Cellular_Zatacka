@@ -6,6 +6,10 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
+    <!-- T23: mobile viewport -- without this, phones lay out at a virtual
+         ~980px width and scale the result down, and touch coordinates land wrong. -->
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <title>Cellular Zatacka - The Viral Infection</title>
     <!-- Vendored locally so the game runs offline, from file://, and inside
          sandboxes with no CDN egress. Same builds the CDNs served:
@@ -22,6 +26,12 @@
             height: 100%;
             overflow: hidden;
             background-color: #0d0d1a;
+            /* T23: no pan/zoom/pull-to-refresh gestures stolen from touch steering */
+            touch-action: none;
+            overscroll-behavior: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -42,6 +52,36 @@
             top: 0;
             left: 0;
             z-index: 1;
+            touch-action: none;
+        }
+
+        #game-container {
+            touch-action: none;
+            overscroll-behavior: none;
+        }
+
+        /* T23: on-screen boost-target toggle for touch devices, shown by JS
+           when isTouchDevice is true. Mirrors the aura colours used in-game
+           (green = self, red = attack). */
+        .touch-toggle-btn {
+            display: none;
+            position: fixed;
+            right: max(16px, env(safe-area-inset-right));
+            bottom: max(16px, env(safe-area-inset-bottom));
+            width: 56px;
+            height: 56px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 50;
+            font-size: 22px;
+            padding: 0;
+            background: #2ecc71;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .touch-toggle-btn.attack-mode {
+            background: #e74c3c;
         }
 
         #ui {
@@ -53,6 +93,7 @@
             z-index: 100;
             background: rgba(13, 13, 26, 0.9);
             padding: 15px 30px;
+            padding-top: max(15px, env(safe-area-inset-top));
             border-bottom-left-radius: 20px;
             border-bottom-right-radius: 20px;
             border: 1px solid rgba(0, 210, 211, 0.3);
@@ -308,6 +349,9 @@
 
     <div id="game-container"></div>
 
+    <!-- T23: touch-only boost-target toggle; shown by JS when isTouchDevice -->
+    <button id="touchToggleBtn" class="touch-toggle-btn" onclick="toggleTouchTargetMode()">&#8644;</button>
+
     <script>
         // --- 0. Fuzzer instrumentation (T04) ---
         // Declared before anything else can throw, so the error trap catches
@@ -337,6 +381,10 @@
         let SCREEN_WIDTH = window.innerWidth;
         let SCREEN_HEIGHT = window.innerHeight;
 
+        // T23: a touchscreen laptop also reports a coarse pointer, so this only
+        // ever *enables* touch controls -- keyboard input must keep working too.
+        const isTouchDevice = window.matchMedia('(pointer: coarse)').matches;
+
         const app = new PIXI.Application({
             resizeTo: window, // keep Pixi synced with the browser window
             backgroundColor: 0x0a0a14,
@@ -353,14 +401,18 @@
         document.body.appendChild(app.view);
 
         // Listen for window size changes so the UI and camera math stay in sync.
-        window.addEventListener('resize', () => {
+        // T23: also bound to orientationchange -- some mobile browsers fire it
+        // ahead of (or instead of) a timely resize event.
+        function handleViewportResize() {
             SCREEN_WIDTH = window.innerWidth;
             SCREEN_HEIGHT = window.innerHeight;
             app.renderer.resize(SCREEN_WIDTH, SCREEN_HEIGHT);
             // Split-screen viewports were sized for the old window; drop them so
             // updateCamera() rebuilds fresh RenderTextures at the new size (T05).
             purgeSplitScreen();
-        });
+        }
+        window.addEventListener('resize', handleViewportResize);
+        window.addEventListener('orientationchange', handleViewportResize);
 
         // --- 2. Layers & World Camera ---
         const world = new PIXI.Container();
@@ -3085,6 +3137,12 @@
                     trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 2.5);
                     trailGlow.endFill();
 
+                    // T23: mirror Player 1's mode onto the touch toggle button --
+                    // physics state (targetMode) stays authoritative, this only reads it.
+                    if (isTouchDevice && p === players[0]) {
+                        touchToggleBtn.classList.toggle('attack-mode', p.targetMode === 'attack');
+                    }
+
                     if (p.effects.hunterTimer > 0) {
                         trailCore.beginFill(0xf1c40f); // Pacman yellow
                         let mouthAngle = Math.abs(Math.sin(survivalTime * 15)) * 0.6;
@@ -3321,6 +3379,70 @@
             });
         });
         window.addEventListener('keyup', e => keys[e.key] = false);
+
+        // T23: touch steering. Feeds the existing `keys` object -- gameLoop's
+        // `keys[p.controls.left]` checks work unchanged, and there is exactly
+        // one input model to reason about. Mobile is solo-vs-bots only (see
+        // task scope note), so touch always drives Player 1's controls.
+        // pointerId -> 'left' | 'right'; module-level so no per-event allocation.
+        const touchPointers = new Map();
+
+        function touchHalf(clientX) {
+            return clientX < window.innerWidth / 2 ? 'left' : 'right';
+        }
+
+        function recomputeTouchKeys() {
+            let left = false, right = false;
+            touchPointers.forEach(half => { if (half === 'left') left = true; else right = true; });
+            let controls = playerConfigs[0].controls;
+            keys[controls.left] = left;
+            keys[controls.right] = right;
+        }
+
+        function releaseTouchPointer(e) {
+            if (!touchPointers.has(e.pointerId)) return;
+            touchPointers.delete(e.pointerId);
+            recomputeTouchKeys();
+        }
+
+        app.view.addEventListener('pointerdown', e => {
+            if (e.pointerType === 'mouse') return; // keyboard/mouse desktop users steer with keys, not clicks
+            touchPointers.set(e.pointerId, touchHalf(e.clientX));
+            recomputeTouchKeys();
+            // Best effort: keep receiving moves once the finger leaves the canvas
+            // bounds. Must run after the state update above -- capture can throw
+            // (e.g. the pointer already released) and must not skip it.
+            try { app.view.setPointerCapture(e.pointerId); } catch (err) { }
+        });
+        app.view.addEventListener('pointermove', e => {
+            if (!touchPointers.has(e.pointerId)) return;
+            touchPointers.set(e.pointerId, touchHalf(e.clientX));
+            recomputeTouchKeys();
+        });
+        app.view.addEventListener('pointerup', releaseTouchPointer);
+        // Fires when the browser takes over the gesture -- must release or the
+        // player spins forever.
+        app.view.addEventListener('pointercancel', releaseTouchPointer);
+
+        // Backgrounding the page must not leave a touch-driven key stuck down.
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && touchPointers.size > 0) {
+                touchPointers.clear();
+                recomputeTouchKeys();
+            }
+        });
+
+        // T23: on-screen boost-target toggle for touch (no natural touch gesture
+        // for the 3rd control). Always targets Player 1, same reasoning as above.
+        const touchToggleBtn = document.getElementById('touchToggleBtn');
+        if (isTouchDevice) touchToggleBtn.style.display = 'flex';
+        window.toggleTouchTargetMode = function () {
+            let p = players[0];
+            if (!p || !p.alive || p.isBot) return;
+            let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+            if (infection.state === 'warning' || isMitosisReveal) return;
+            p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
+        };
 
         // PEEK LOGIC: Show UI on hover, hide when leaving
         uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
@@ -4081,6 +4203,14 @@
                     if (totalPlayers >= 4) scoreStr += ` | P4: ${playerWins[4]}`;
                     scoreText.innerText = scoreStr;
                 }
+            }
+
+            // T23: touch steering only drives Player 1 -- warn instead of silently
+            // leaving P2-P4 unplayable on a phone.
+            if (isTouchDevice && currentMode > 1) {
+                document.getElementById('controlsText').innerHTML =
+                    "<span style='color:#ff7675;'>Touch controls only drive Player 1 -- use Solo vs Bots on this device.</span><br>" +
+                    document.getElementById('controlsText').innerHTML;
             }
 
             renderControlSplash(); // T20
