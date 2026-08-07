@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 63a8f37995be4e1b -->
+<!-- standalone-build-inputs: 95672115e17dd786 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -6136,6 +6136,10 @@ void main() {
                 else if (dir === 2) mitosis.cellB.x -= offset;
                 else mitosis.cellB.y -= offset;
 
+                // T33: cellB is fixed for this event -- widen the trace RT to
+                // cover the bridge/Cell B before anything is drawn there.
+                traceRTNeedsFullRedraw = true;
+
                 // Draw Cell B base background in backgroundLayer (under cytosol)
                 let cellBBg = new PIXI.Graphics();
                 cellBBg.beginFill(0x0d0d1a);
@@ -6413,6 +6417,10 @@ void main() {
                     mitosis.state = 'idle';
                     mitosis.nextTriggerTime = survivalTime + 240;
                     if (mitosis.progenitor) mitosis.progenitor.active = false;
+
+                    // T33: activeCell just moved to Cell B -- shrink the trace
+                    // RT back to single-cell bounds now that mitosis is idle.
+                    traceRTNeedsFullRedraw = true;
                 }
             }
         }
@@ -6649,12 +6657,25 @@ void main() {
         // a round reset both funnel through. Not in the hot path -- only runs
         // on startRound() and on the rare frame a trace is trimmed.
         function rebuildTraceRT() {
-            let halfW = activeCell.baseRadiusX + TRACE_RT_PADDING;
-            let halfH = activeCell.baseRadiusY + TRACE_RT_PADDING;
-            traceRTOriginX = activeCell.x - halfW;
-            traceRTOriginY = activeCell.y - halfH;
-            let texW = Math.ceil(halfW * 2 * TRACE_RT_SCALE);
-            let texH = Math.ceil(halfH * 2 * TRACE_RT_SCALE);
+            let minX, maxX, minY, maxY;
+            if (mitosis.state !== 'idle') {
+                // T33: mid-mitosis the bridge and Cell B must stay inside the
+                // buffer too. Union bounding box of both cells, not a symmetric
+                // expansion -- only the axis the split moved along grows.
+                minX = Math.min(activeCell.x, mitosis.cellB.x) - activeCell.baseRadiusX - TRACE_RT_PADDING;
+                maxX = Math.max(activeCell.x, mitosis.cellB.x) + activeCell.baseRadiusX + TRACE_RT_PADDING;
+                minY = Math.min(activeCell.y, mitosis.cellB.y) - activeCell.baseRadiusY - TRACE_RT_PADDING;
+                maxY = Math.max(activeCell.y, mitosis.cellB.y) + activeCell.baseRadiusY + TRACE_RT_PADDING;
+            } else {
+                let halfW = activeCell.baseRadiusX + TRACE_RT_PADDING;
+                let halfH = activeCell.baseRadiusY + TRACE_RT_PADDING;
+                minX = activeCell.x - halfW; maxX = activeCell.x + halfW;
+                minY = activeCell.y - halfH; maxY = activeCell.y + halfH;
+            }
+            traceRTOriginX = minX;
+            traceRTOriginY = minY;
+            let texW = Math.ceil((maxX - minX) * TRACE_RT_SCALE);
+            let texH = Math.ceil((maxY - minY) * TRACE_RT_SCALE);
 
             if (!trailGlowRT) {
                 trailGlowRT = PIXI.RenderTexture.create({ width: texW, height: texH });
