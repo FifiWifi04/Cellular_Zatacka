@@ -417,9 +417,10 @@
             </select>
 
             <select id="qualitySelect" onchange="updateUI()">
-                <option value="low" selected>Glow: Low</option>
-                <option value="medium">Glow: Medium</option>
-                <option value="high">Glow: High</option>
+                <option value="auto" selected>Quality: Auto</option>
+                <option value="low">Quality: Low</option>
+                <option value="medium">Quality: Medium</option>
+                <option value="high">Quality: High</option>
             </select>
             <button onclick="startRound()">Start Game</button>
             <button class="fullscreen-btn" onclick="toggleFullScreen()">Fullscreen</button>
@@ -578,14 +579,16 @@
         trailCore.blendMode = PIXI.BLEND_MODES.ADD;
 
         const traceScratchGlow = new PIXI.Graphics();
-        traceScratchGlow.filters = [blurFilter]; // same filter instance as trailGlow -- see applyGlowQuality
+        traceScratchGlow.filters = [blurFilter]; // same filter instance as trailGlow -- see applyQuality (T26)
         const traceScratchCore = new PIXI.Graphics();
 
         // Render at half world resolution: trace strokes are thin glowing
         // lines, so the softness is invisible next to the memory saved (see
         // T25 task file "The size problem"). Bumped to `1 / TRACE_RT_SCALE` on
         // the sprites below so world-space size is unaffected.
-        const TRACE_RT_SCALE = 0.5;
+        // T26: mutable so applyQuality() can retune it per tier (0.4/0.5/0.75);
+        // rebuildTraceRT() re-reads it whenever called, so no other change needed.
+        let TRACE_RT_SCALE = 0.5;
         // World px of padding beyond activeCell's ellipse the buffer must
         // cover -- glow blur bleed, the aura/pulse circles drawn past the
         // trace line itself.
@@ -613,36 +616,23 @@
         // halo are cheaper (lower `quality` and `blur` are the two settings that
         // actually cost frame time). Medium sits midway on every value.
         const QUALITY_TIERS = {
-            low:    { threshold: 0.6,  bloomScale: 0.6, brightness: 1.0, blur: 4, quality: 2, trailBlur: 2 },
-            medium: { threshold: 0.45, bloomScale: 1.0, brightness: 1.1, blur: 6, quality: 3, trailBlur: 3 },
-            high:   { threshold: 0.3,  bloomScale: 1.5, brightness: 1.2, blur: 8, quality: 4, trailBlur: 4 }
+            low:    { threshold: 0.6,  bloomScale: 0.6, brightness: 1.0, blur: 4, quality: 2, trailBlur: 2,
+                      bloomEnabled: false, trailBlurEnabled: false, traceScale: 0.4,  particleBudget: 0,   warningLevel: 0, cytosolCount: 300 },
+            medium: { threshold: 0.45, bloomScale: 1.0, brightness: 1.1, blur: 6, quality: 3, trailBlur: 3,
+                      bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.5,  particleBudget: 150, warningLevel: 1, cytosolCount: 800 },
+            high:   { threshold: 0.3,  bloomScale: 1.5, brightness: 1.2, blur: 8, quality: 4, trailBlur: 4,
+                      bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.75, particleBudget: 400, warningLevel: 2, cytosolCount: 800 }
         };
-        let glowQuality = 'low';
-        let bloomFilter = null;   // module-scope so applyGlowQuality can retune it
+        let quality = 'low';      // current tier name; set for real by applyQuality() near the end of the T18 section
+        let bloomFilter = null;   // module-scope so applyQuality can retune it
 
         if (typeof PIXI.filters.AdvancedBloomFilter !== 'undefined') {
             bloomFilter = new PIXI.filters.AdvancedBloomFilter(QUALITY_TIERS.low);
-            world.filters = [bloomFilter];
         }
 
-        // Visual only — never touches gameplay, collision or timing.
-        window.applyGlowQuality = function (tier) {
-            let t = QUALITY_TIERS[tier];
-            if (!t) return;
-            glowQuality = tier;
-            if (bloomFilter) {
-                bloomFilter.threshold = t.threshold;
-                bloomFilter.bloomScale = t.bloomScale;
-                bloomFilter.brightness = t.brightness;
-                bloomFilter.blur = t.blur;
-                bloomFilter.quality = t.quality;
-            }
-            blurFilter.blur = t.trailBlur;
-        };
-
-        // updateUI() is not called at startup, so apply the default tier here or
-        // the trail halo would stay at the High value until a dropdown is touched.
-        applyGlowQuality('low');
+        // Visual only — never touches gameplay, collision or timing. Defined after
+        // the T18 filter section below as window.applyQuality (T26) since it also
+        // needs warningRGBSplit/WARNING_FILTER_STACKS, which are declared there.
 
         // --- T18: WARNING-WINDOW POST-PROCESSING FILTER ---
         // Applied to shakeRoot (not world) so it filters the composite once and is
@@ -662,7 +652,25 @@
         const warningMatrixScratch = WARNING_IDENTITY_MATRIX.slice();
         warningColorMatrix.matrix = warningMatrixScratch; // reference held once; mutated in place below
         const warningNoise = new PIXI.filters.NoiseFilter(0);
-        let warningFilterActive = false; // whether shakeRoot.filters is currently the [colorMatrix, noise] array
+        // T26: HIGH tier adds an RGB channel split on top of noise. Offsets are
+        // held in fixed-length scratch arrays and mutated in place (never
+        // reassigned) so ramping costs no per-frame allocation, matching
+        // warningMatrixScratch's pattern below.
+        const warningRGBSplitRedScratch = [0, 0];
+        const warningRGBSplitGreenScratch = [0, 0];
+        const warningRGBSplit = new PIXI.filters.RGBSplitFilter([0, 0], [0, 0], [0, 0]);
+        warningRGBSplit.red = warningRGBSplitRedScratch;
+        warningRGBSplit.green = warningRGBSplitGreenScratch;
+        const WARNING_RGBSPLIT_MAX = 6; // px offset at full ramp
+        // Indexed by QUALITY_TIERS[tier].warningLevel: 0 = colour matrix only,
+        // 1 = + noise, 2 = + RGB split (T26 design table).
+        const WARNING_FILTER_STACKS = [
+            [warningColorMatrix],
+            [warningColorMatrix, warningNoise],
+            [warningColorMatrix, warningNoise, warningRGBSplit]
+        ];
+        let warningFilterLevel = 0; // set by applyQuality() below
+        let warningFilterActive = false; // whether shakeRoot.filters currently holds a WARNING_FILTER_STACKS entry
         let warningRamp = 0;             // 0..1 current effect strength
         const WARNING_FILTER_RAMP_TIME = 0.5; // seconds to ramp in/out
         const WARNING_NOISE_MAX = 0.15;
@@ -672,7 +680,7 @@
         function updateWarningFilter(deltaSec) {
             let warningNow = (infection.state === 'warning');
             if (warningNow && !warningFilterActive) {
-                shakeRoot.filters = [warningColorMatrix, warningNoise];
+                shakeRoot.filters = WARNING_FILTER_STACKS[warningFilterLevel];
                 warningFilterActive = true;
             }
             let target = warningNow ? 1 : 0;
@@ -685,12 +693,94 @@
                     warningMatrixScratch[i] = WARNING_IDENTITY_MATRIX[i] + (WARNING_SICK_MATRIX[i] - WARNING_IDENTITY_MATRIX[i]) * warningRamp;
                 }
                 warningNoise.noise = WARNING_NOISE_MAX * warningRamp;
+                let split = WARNING_RGBSPLIT_MAX * warningRamp;
+                warningRGBSplitRedScratch[0] = -split;
+                warningRGBSplitGreenScratch[0] = split;
             }
             if (!warningNow && warningFilterActive && warningRamp <= 0) {
                 shakeRoot.filters = null;
                 warningFilterActive = false;
             }
         }
+
+        // --- T26: QUALITY TIER — single application point, auto-detection, adaptive sampling ---
+        // Extends the old glow-only applyGlowQuality into applyQuality, which now
+        // governs every tiered effect in QUALITY_TIERS above. One function, called
+        // at init, from the menu (updateUI), and by the sampler below — never
+        // scatter `if (quality === ...)` checks elsewhere (AGENT_CONDUCT 4.4a-style
+        // single source of truth).
+        const QUALITY_TIER_ORDER = ['low', 'medium', 'high'];
+        let qualityIsAuto = true; // true until the player picks an explicit tier in the menu
+
+        window.applyQuality = function (tier) {
+            let t = QUALITY_TIERS[tier];
+            if (!t) return;
+            quality = tier;
+
+            if (bloomFilter) {
+                bloomFilter.threshold = t.threshold;
+                bloomFilter.bloomScale = t.bloomScale;
+                bloomFilter.brightness = t.brightness;
+                bloomFilter.blur = t.blur;
+                bloomFilter.quality = t.quality;
+                world.filters = t.bloomEnabled ? [bloomFilter] : null;
+            }
+
+            if (t.trailBlurEnabled) {
+                blurFilter.blur = t.trailBlur;
+                trailGlow.filters = [blurFilter];
+                traceScratchGlow.filters = [blurFilter];
+            } else {
+                trailGlow.filters = null;
+                traceScratchGlow.filters = null;
+            }
+
+            TRACE_RT_SCALE = t.traceScale;
+            if (trailGlowRT) rebuildTraceRT(); // reallocate at the new scale if a round is already live
+
+            particleBudget = t.particleBudget;
+
+            warningFilterLevel = t.warningLevel;
+            if (warningFilterActive) shakeRoot.filters = WARNING_FILTER_STACKS[warningFilterLevel];
+
+            // cytosolCount is read directly off QUALITY_TIERS[quality] by generateMap()
+            // at the next round start -- background blobs are not a per-frame cost.
+        };
+
+        // Detection, not interrogation (T26 design doc): coarse pointer + small
+        // viewport, or a low core count, => weak device => start LOW; otherwise
+        // MEDIUM. Never asks a first-time player -- the sampler below promotes or
+        // demotes once real gameplay is running.
+        function detectInitialQuality() {
+            let weakCPU = (navigator.hardwareConcurrency || 8) <= 4;
+            let smallViewport = Math.min(window.innerWidth, window.innerHeight) < 900;
+            return (weakCPU || (isTouchDevice && smallViewport)) ? 'low' : 'medium';
+        }
+
+        function promoteQualityTier() {
+            let idx = QUALITY_TIER_ORDER.indexOf(quality);
+            if (idx < QUALITY_TIER_ORDER.length - 1) applyQuality(QUALITY_TIER_ORDER[idx + 1]);
+        }
+        function demoteQualityTier() {
+            let idx = QUALITY_TIER_ORDER.indexOf(quality);
+            if (idx > 0) applyQuality(QUALITY_TIER_ORDER[idx - 1]);
+        }
+
+        // Sampler state, reset per round in startRound(). Judges only the first
+        // QUALITY_SAMPLE_WINDOW seconds of REAL wall-clock frame time (read in
+        // gameLoop before the fuzzer's 4x dilation) and adjusts at most once per
+        // round -- wide hysteresis so auto-quality never oscillates.
+        const QUALITY_SAMPLE_WINDOW = 3.0; // seconds
+        const QUALITY_PROMOTE_MS = 13;     // mean frame time below this -> promote
+        const QUALITY_DEMOTE_MS = 25;      // mean frame time above this -> demote
+        let qualitySampleElapsed = 0;
+        let qualitySampleTotalMs = 0;
+        let qualitySampleFrames = 0;
+        let qualitySampleDone = false;
+
+        // Initial applyQuality() call is deferred to just after particleBudget is
+        // declared below (T17 section) -- applyQuality() writes particleBudget, and
+        // a `let` read/written before its own declaration line throws (TDZ).
 
         // --- 3. Game State & Constants ---
         // T12: baseRadiusX/baseRadiusY are the pristine round-start radii; radiusX/
@@ -760,9 +850,16 @@
             particlePool.push({ x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 0, color: 0xffffff, alpha: 0 });
         }
         let particleCount = 0; // live particles occupy particlePool[0, particleCount)
+        // T26: active-particle cap for the current quality tier (0/150/400). The
+        // pool itself never resizes -- applyQuality() only lowers this ceiling.
+        let particleBudget = MAX_PARTICLES;
+
+        // First real application of a tier -- deferred to here (see the T26 section
+        // above) because applyQuality() writes particleBudget, just declared above.
+        applyQuality(detectInitialQuality());
 
         // opts: { speed, spread, angle, life, size, color }. Drops the request once
-        // the pool is full rather than overwriting the oldest particle (simpler, and
+        // the budget is full rather than overwriting the oldest particle (simpler, and
         // the visual difference is nil per T17).
         function emitParticles(x, y, count, opts) {
             let speed = opts.speed || 0;
@@ -772,8 +869,9 @@
             let size = opts.size || 3;
             let color = opts.color !== undefined ? opts.color : 0xffffff;
 
+            let cap = Math.min(MAX_PARTICLES, particleBudget);
             for (let i = 0; i < count; i++) {
-                if (particleCount >= MAX_PARTICLES) return;
+                if (particleCount >= cap) return;
                 let p = particlePool[particleCount++];
                 let a = angle + (Math.random() - 0.5) * spread;
                 let s = speed * (0.5 + Math.random() * 0.5);
@@ -1387,7 +1485,8 @@
             backgroundLayer.addChild(cytosolContainer);
 
             cytosolParticles = [];
-            for (let i = 0; i < 800; i++) {
+            // T26: attempt count scales with quality tier (LOW: reduced, MEDIUM/HIGH: full).
+            for (let i = 0; i < QUALITY_TIERS[quality].cytosolCount; i++) {
                 let px = activeCell.x + (Math.random() * 2 - 1) * activeCell.radiusX;
                 let py = activeCell.y + (Math.random() * 2 - 1) * activeCell.radiusY;
 
@@ -2757,7 +2856,8 @@
                 backgroundLayer.addChildAt(cellBBg, 0); // Put it under cytosol!
 
                 // Spawn cytosol particles in Cell B
-                for (let i = 0; i < 800; i++) {
+                // T26: attempt count scales with quality tier, same as the primary spawn above.
+                for (let i = 0; i < QUALITY_TIERS[quality].cytosolCount; i++) {
                     let px = mitosis.cellB.x + (Math.random() * 2 - 1) * activeCell.radiusX;
                     let py = mitosis.cellB.y + (Math.random() * 2 - 1) * activeCell.radiusY;
 
@@ -3821,6 +3921,23 @@
 
             let deltaSec = app.ticker.deltaMS / 1000;
 
+            // T26: adaptive quality sampler -- measures real (pre-fuzz-dilation)
+            // frame time over the first QUALITY_SAMPLE_WINDOW seconds of a round and
+            // promotes/demotes at most once per round. State only, no drawing here
+            // (AGENT_CONDUCT 4.4a). Inert once qualitySampleDone or a manual tier
+            // has been picked (qualityIsAuto false).
+            if (qualityIsAuto && !qualitySampleDone) {
+                qualitySampleElapsed += deltaSec;
+                qualitySampleTotalMs += app.ticker.deltaMS;
+                qualitySampleFrames++;
+                if (qualitySampleElapsed >= QUALITY_SAMPLE_WINDOW) {
+                    qualitySampleDone = true;
+                    let meanMs = qualitySampleTotalMs / qualitySampleFrames;
+                    if (meanMs < QUALITY_PROMOTE_MS) promoteQualityTier();
+                    else if (meanMs > QUALITY_DEMOTE_MS) demoteQualityTier();
+                }
+            }
+
             // --- FUZZER SOAK-TEST UTILITY ---
             if (fuzzActive) {
                 let realDeltaSec = deltaSec; // wall-clock, captured before dilation below
@@ -4440,7 +4557,16 @@
 
             currentSpeed = parseFloat(speedSelect.value);
             cameraMode = document.getElementById('cameraSelect').value;
-            applyGlowQuality(document.getElementById('qualitySelect').value);
+            // T26: 'auto' leaves the current (detected/sampled) tier in place and
+            // re-enables the sampler; any explicit tier is a deliberate choice, so
+            // it applies immediately and switches auto-adjustment off for the session.
+            let qualityChoice = document.getElementById('qualitySelect').value;
+            if (qualityChoice === 'auto') {
+                qualityIsAuto = true;
+            } else {
+                qualityIsAuto = false;
+                applyQuality(qualityChoice);
+            }
 
             let totalPlayers = currentMode + aiCount;
             if (totalPlayers === 1) {
@@ -4503,7 +4629,7 @@
             document.getElementById('controlSplash').classList.toggle('hidden-splash', !splashVisible);
         };
 
-        // updateUI() is not called at startup (see applyGlowQuality above), so seed
+        // updateUI() is not called at startup (see applyQuality above), so seed
         // the cards here or they stay empty until a dropdown is touched.
         renderControlSplash();
 
@@ -4556,6 +4682,11 @@
             survivalTime = 0;
             necrosisTimer = 0; // T13
             malignantMass = { active: false, blockSize: 60, origin: { x: 0, y: 0 }, blocks: [], nextGrowTime: 0 }; // T14
+            // T26: fresh adaptive-quality sampling window each round.
+            qualitySampleElapsed = 0;
+            qualitySampleTotalMs = 0;
+            qualitySampleFrames = 0;
+            qualitySampleDone = false;
             updateUI();
 
             world.scale.set(0.5);
