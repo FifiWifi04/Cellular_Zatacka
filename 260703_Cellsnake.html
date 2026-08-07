@@ -576,6 +576,13 @@
         shakeRoot.addChild(world);
         app.stage.addChild(shakeRoot);
 
+        // T34: holds the split-screen viewport sprites. Bloom is applied here
+        // once, on the composite, instead of once per viewport -- see the
+        // world.filters save/restore in updateCamera()'s split branch and the
+        // mirrored assignment in applyQuality() below.
+        const splitScreenLayer = new PIXI.Container();
+        app.stage.addChild(splitScreenLayer);
+
         const backgroundLayer = new PIXI.Container();
         const calcifyLayer = new PIXI.Graphics(); // T12: redrawn shrinking membrane, Gen 2+
         const mitosisLayer = new PIXI.Graphics();
@@ -788,6 +795,7 @@
                 bloomFilter.blur = t.blur;
                 bloomFilter.quality = t.quality;
                 world.filters = t.bloomEnabled ? [bloomFilter] : null;
+                splitScreenLayer.filters = world.filters; // T34: composite, not per-viewport
             }
 
             if (t.trailBlurEnabled) {
@@ -3642,10 +3650,18 @@
                 while (splitSprites.length < alivePlayers.length) {
                     let rt = PIXI.RenderTexture.create({ width: viewW, height: viewH });
                     let sprite = new PIXI.Sprite(rt);
-                    app.stage.addChild(sprite); // Add to screen
+                    splitScreenLayer.addChild(sprite); // Add to screen
                     splitTextures.push(rt);
                     splitSprites.push(sprite);
                 }
+
+                // T34: bloom was being paid for on every one of these per-viewport
+                // captures (world.filters applies inside app.renderer.render below),
+                // i.e. once per alive player per frame. Suspend it for the captures
+                // and let splitScreenLayer.filters (set in applyQuality) apply it
+                // once to the composited result instead.
+                let savedWorldFilters = world.filters;
+                world.filters = null;
 
                 for (let i = 0; i < alivePlayers.length; i++) {
                     let p = alivePlayers[i];
@@ -3673,6 +3689,8 @@
                     ctx.drawRect(0, 0, viewW, viewH);
                     app.renderer.render(ctx, { renderTexture: rt, clear: false });
                 }
+
+                world.filters = savedWorldFilters; // T34: restore for the shared-mode path
 
                 // FIX 2: Now that snapshots are taken, hide the main world so it doesn't draw over our split UI
                 world.visible = false;

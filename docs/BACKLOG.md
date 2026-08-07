@@ -487,3 +487,17 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   angular; T39's aggregate is soft amber protein. They share the "red mode breaks
   dead matter" rule on purpose, but must be distinguishable at a glance. Noted in
   both task files. — 2026-08-07
+
+## Open — found during T34
+
+- **Per-frame `new PIXI.Graphics()` allocation in the split-screen branch of
+  `updateCamera()`.** The viewport border is built fresh (`new PIXI.Graphics()`,
+  `lineStyle`, `drawRect`) once per alive player, every frame, then discarded
+  for GC — up to 4 allocations/frame in split mode, contrary to AGENT_CONDUCT
+  §5's no-allocation-in-the-hot-path rule. Content and size are identical across
+  viewports and frames; a single reusable `Graphics` object drawn once (or a
+  cached texture) would cover it. Left out of T34's diff to keep it to the
+  bloom-per-viewport fix the task asked for; the bloom fix's effect could not be
+  confirmed in wall-clock terms in the sandboxed (GPU-less) test environment, so
+  this may be worth a follow-up task if the owner still sees stutter after T34
+  lands. — 2026-08-07
