@@ -170,7 +170,7 @@ sim/render split can wait behind them.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T38 | [Make organelle necrosis actually matter](tasks/T38-make-necrosis-matter.md) | T37 | `BLOCKED` |
+| T38 | [Necrosis: fuse, shed debris, break apart in red mode](tasks/T38-make-necrosis-matter.md) | T36, T37 | `BLOCKED` |
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `READY` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `BLOCKED` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `BLOCKED` |

@@ -469,3 +469,21 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
 - **"Tumour" is biologically impossible inside a single cell (T39)** — a tumour
   is many cells. Recommended reframing as a protein aggregate / aggresome, which
   is a real intracellular pathology and fits the generation ladder.
+
+## Necrosis design settled — 2026-08-07
+
+- **T38 rewritten to the owner's combined design**: necrotic organelles fuse into
+  clusters, clusters shed lethal debris at a rate that scales with size, and red
+  mode breaks off one member per hit. Each of my four original single-mechanic
+  options had a real flaw — accretion had no counter-play, shedding produced
+  arbitrary deaths — and combining them cancels both, because debris volume
+  becomes player-controlled. Neglect compounds, management pays.
+- **Key implementation constraint recorded in the task:** fusion is *clustering*,
+  not merged geometry. Members keep their existing hitboxes and gain a
+  `clusterId`, so `checkCollision()` and `raycast()` need no change for the
+  cluster itself, and "break it bit by bit" falls out for free. Merging hitboxes
+  would have invented a new collision primitive needing both paths re-verified.
+- **Cross-task visual constraint:** T38's clusters are mineralised grey and
+  angular; T39's aggregate is soft amber protein. They share the "red mode breaks
+  dead matter" rule on purpose, but must be distinguishable at a glance. Noted in
+  both task files. — 2026-08-07

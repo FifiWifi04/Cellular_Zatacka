@@ -62,6 +62,17 @@ floored at 2). Re-derive `MASS_MAX_BLOCKS` so the arena is not swallowed — wit
 T12's shrinking membrane the effective play area is smaller than when 40 was
 chosen. State the new numbers and why.
 
+## Must not be confusable with T38's necrotic clusters
+
+T38 gives fused necrotic organelles a **mineralised, grey, angular/crystalline**
+look. This aggregate must be unmistakably different at a glance: **soft amber
+protein lobes**, rounded, warm. Both are "dead matter you can break in red mode",
+so the *rule* is shared deliberately — but the player must never have to squint
+to tell which is which, especially at Gen 3 when both are on screen.
+
+If T38 has already landed, screenshot a scene containing both and check. If not,
+note the constraint so T38 can check it from the other side.
+
 ## Verification
 
 1. Console clean.
