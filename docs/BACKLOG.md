@@ -424,3 +424,21 @@ them.
   let `.controls`' existing `flex-wrap` reflow the buttons instead of
   clipping them. Re-verified at 390px and 360px: `scrollWidth` no longer
   exceeds the viewport at either.
+
+## Board-mechanics bug — 2026-08-07
+
+- **T22 sat `BLOCKED` with its dependency satisfied.** T22 depends on T06a,
+  which completed on 2026-08-05, but T06a's `Definition of done` listed only
+  "T07, T11, T16 → READY" — written before T22 existed. The session that
+  finished T06a correctly flipped exactly what it was told to, and nothing
+  flipped T22. Because T06b gates nothing downstream, this left the routine with
+  **no `READY` work at all**, so it would have idled indefinitely.
+  Fixed 2026-08-07; `docs/TASKS.md` now carries a standing rule to update the
+  upstream task's checklist whenever a new dependent task is added. — 2026-08-07
+
+- **T06c resolved the Phase 1 memory question without a code change.** Its
+  Step 0 re-measurement showed the heap floor flat at 41.7–48.2 MB across six
+  windows, versus the original monotonic 44 → 124 MB climb — T07's per-player
+  trace cap had already fixed it. The "re-measure before investigating" step
+  paid for itself: it prevented a full session hunting a leak that no longer
+  existed. T06b's verdict can be a clean PASS on this evidence. — 2026-08-07

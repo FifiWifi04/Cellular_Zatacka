@@ -19,6 +19,12 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 Statuses: `READY` · `BLOCKED` (dependency not met) · `DONE` · `PARKED` (deferred
 by owner decision) · `OWNER-RUN` (must be run by a human, not a scheduled agent).
 
+**When you add a new task that depends on an existing one, go update that
+task's `Definition of done` checklist** so it flips your new task to `READY`.
+A dependency recorded only in this table is invisible to the session that
+completes the upstream task — that is how T22 sat `BLOCKED` for days with its
+dependency long since satisfied.
+
 **`OWNER-RUN` tasks:** a scheduled session must **skip** these and take the next
 `READY` task instead. If the only remaining work is `OWNER-RUN`, report that and
 stop. Currently only **T06b** (the Phase 1 PASS/FAIL verdict), because it is a
@@ -106,7 +112,15 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T22 | [Separate simulation from rendering](tasks/T22-sim-render-split.md) ⏳ *resumable* | T06a | `BLOCKED` |
+| T22 | [Separate simulation from rendering](tasks/T22-sim-render-split.md) ⏳ *resumable* | T06a | `READY` |
+
+> **T22 was wrongly left `BLOCKED` until 2026-08-07.** Its only dependency,
+> T06a, completed long before — but T06a's definition-of-done checklist named
+> only "T07, T11, T16 → READY", because it was written before T22 existed. The
+> session that finished T06a flipped exactly the three tasks it was told to.
+> **Lesson: when you add a task that depends on an existing one, update that
+> task's definition-of-done checklist too**, or the dependency is invisible to
+> whoever completes it.
 
 ### Track H — Phase 6: Mobile
 
