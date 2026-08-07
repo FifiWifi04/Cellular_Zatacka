@@ -379,6 +379,31 @@ them.
   either widening `#ui-trigger` to always match `#ui`'s current footprint, or
   moving the reveal/hide pairing onto the same element.
 
+## Found during T25 (incremental trace rendering) — 2026-08-07
+
+- **`trailGlowRT`/`trailCoreRT` do not follow the world past the mitosis
+  snap, and are not sized to include `mitosis.cellB`.** `rebuildTraceRT()`
+  sizes and positions the accumulation buffers around
+  `activeCell.x/y ± (baseRadiusX/Y + TRACE_RT_PADDING)` — deliberately just
+  the single active cell, matching the task file's own "world is ~2800x2400"
+  sizing guidance. But `updateMitosis()` reassigns `activeCell.x`/`y` to
+  `mitosis.cellB`'s position at the snap (~120s into a mitosis event,
+  `gameLoop` line ~2935 pre-T25), and for the ~120s *before* that snap,
+  players are already moving through the bridge into `cellB`, which sits up
+  to 3400px outside the pre-snap RT window (`updateMitosis()`'s `offset`
+  constant). Trace geometry laid down in the bridge/cellB during that window
+  falls outside the RT's fixed pixel bounds and will not render (collision
+  is unaffected — `traceSegments`, `checkCollision()` and `raycast()` never
+  read the RT). Nothing forces a recenter+redraw at the mitosis snap either,
+  so a trace that survives the snap (per-player, if the player made it to
+  Cell B) keeps pointing into geometry the buffer no longer covers. Not
+  triggered by any of T25's own verification (mitosis needs 240s survival
+  time; longest verification round was 183s) or by this codebase's short
+  soak runs so far. Fix would need `rebuildTraceRT()` called again (recenter
+  + full redraw, same as the front-trim path) both when `mitosis.cellB` is
+  computed and at the snap, with the origin/size covering the union of both
+  cells while a division is in progress.
+
 ## Found during T23 — 2026-08-07
 
 - ~~**`#ui` panel overflow is now real, not just theoretical.**~~ **RESOLVED

@@ -123,11 +123,58 @@ overlay, `startRound()` reset, and a redraw hook wherever traces are trimmed.
 
 ## Definition of done
 
-- [ ] Traces accumulate into shared RenderTextures; only new points drawn per frame
-- [ ] Heads/auras still drawn per frame on top
-- [ ] Texture resolution chosen with memory estimated and stated
-- [ ] Per-frame trace cost flat over time, with before/after numbers at four time points
-- [ ] Trim and restart both force a correct full redraw
-- [ ] Split-screen verified
-- [ ] Zero change to collision behaviour
-- [ ] `docs/TASKS.md`: T25 → `DONE`; T26 → `READY`
+- [x] Traces accumulate into shared RenderTextures; only new points drawn per frame
+- [x] Heads/auras still drawn per frame on top
+- [x] Texture resolution chosen with memory estimated and stated
+- [x] Per-frame trace cost flat over time, with before/after numbers at four time points
+- [x] Trim and restart both force a correct full redraw
+- [x] Split-screen verified
+- [x] Zero change to collision behaviour
+- [x] `docs/TASKS.md`: T25 → `DONE`; T26 → `READY`
+
+## Result — 2026-08-07
+
+Implemented as designed: `trailGlowRT`/`trailCoreRT` (shared, one pair for
+all players) at `TRACE_RT_SCALE = 0.5`, sized `activeCell.baseRadiusX/Y +
+150px` padding → **1550×1350px per layer, ~16.0MB total** (`1550*1350*4*2`
+bytes) for both layers combined. `rebuildTraceRT()` (re)allocates + does a
+full redraw; `accumulateTraceRT()` draws only each player's new points since
+last frame via a per-player `(traceDrawSeg, traceDrawPt)` cursor. A forced
+full redraw is triggered by `trimTraceToCap`, `deleteOldestTrace`, and the
+lysosome-pickup `traceSegments.shift()` — the three places that remove
+front geometry — plus once at `startRound()`.
+
+**Per-frame `drawTraces()` cost** (mean of last ~120 calls, measured via a
+`performance.now()` wrapper installed from the verification harness, not
+left in the shipped code), 1 player + 3 bots, immortal, 640x480:
+
+| game-time | before (ms) | after (ms) |
+|---|---|---|
+| 15s | 0.088 | 0.277 |
+| 30s | 0.171 | 0.228 |
+| 60s | 0.245 | 0.252 |
+| 120s | 0.486 | 0.205 |
+
+Before rises roughly linearly (5.5x from 15s to 120s); after is flat within
+noise. (After is higher at 15s than before because the very first frames
+after a full redraw still touch the RT-render call; both curves converge to
+per-frame delta cost, which is what stays flat.)
+
+**Verified:** console clean (`http://` and `file://`); visual parity at 60s
+(`/tmp/verify/before_60s.png` vs `after_60s.png`, same style/halo/dash
+pattern, differences are bot-AI randomness not rendering); `worldChildren`
+flat at 12 and `trailGlowRT` staying 1550×1350 across a 183s/7120-point
+round (heap 27.8→40.7MB, consistent with trace-point array growth, not a
+leak); `deleteOldestTrace` trim visibly shortens the trace from the front
+(`trim_before.png`/`trim_after.png`) and clears `traceRTNeedsFullRedraw`;
+5x round restart leaves no stale geometry (fresh `traceSegments`/draw
+cursors each time); split-screen composites correctly (nested
+RenderTexture-into-RenderTexture rendering, `split_screen.png`); collision
+regression sweep at all 3 speeds shows players still dying normally with
+zero console errors (expected — `checkCollision`/`checkArcCollision`/
+`raycast`/`rebuildSpatialGrid` are untouched by this diff).
+
+**Known gap, not fixed here:** the RT does not follow `mitosis.cellB` or the
+post-snap `activeCell` relocation — see `docs/BACKLOG.md` "Found during T25".
+Mitosis needs 240s survival time to trigger and none of the verification
+above reaches it.

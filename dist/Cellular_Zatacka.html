@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: ab5e48fc778d556b -->
+<!-- standalone-build-inputs: b5ff1031517fd8d4 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3793,6 +3793,16 @@ void main() {
             }
         }
 
+        // T25: traces are append-only, so the bulk of each trace (everything
+        // drawn on a previous frame) is accumulated once into a persistent
+        // RenderTexture instead of being re-emitted as `lineTo` calls every
+        // frame. `trailGlow`/`trailCore` remain live per-frame Graphics, but
+        // now hold only the moving bits that are NOT append-only: the head
+        // circle/mouth, the target-mode aura and the ghost-mode pulse.
+        // `traceScratchGlow`/`traceScratchCore` are the write side: cleared
+        // and refilled each frame with just the new segment geometry (or,
+        // on a forced full redraw, everything), then rendered into the RTs
+        // and never themselves added to the display tree.
         const trailGlow = new PIXI.Graphics();
         const blurFilter = new PIXI.BlurFilter();
         blurFilter.blur = 4;
@@ -3800,6 +3810,34 @@ void main() {
         trailGlow.blendMode = PIXI.BLEND_MODES.ADD;
         const trailCore = new PIXI.Graphics();
         trailCore.blendMode = PIXI.BLEND_MODES.ADD;
+
+        const traceScratchGlow = new PIXI.Graphics();
+        traceScratchGlow.filters = [blurFilter]; // same filter instance as trailGlow -- see applyGlowQuality
+        const traceScratchCore = new PIXI.Graphics();
+
+        // Render at half world resolution: trace strokes are thin glowing
+        // lines, so the softness is invisible next to the memory saved (see
+        // T25 task file "The size problem"). Bumped to `1 / TRACE_RT_SCALE` on
+        // the sprites below so world-space size is unaffected.
+        const TRACE_RT_SCALE = 0.5;
+        // World px of padding beyond activeCell's ellipse the buffer must
+        // cover -- glow blur bleed, the aura/pulse circles drawn past the
+        // trace line itself.
+        const TRACE_RT_PADDING = 150;
+        let trailGlowRT = null, trailCoreRT = null;
+        const trailGlowSprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
+        trailGlowSprite.blendMode = PIXI.BLEND_MODES.ADD;
+        const trailCoreSprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
+        trailCoreSprite.blendMode = PIXI.BLEND_MODES.ADD;
+        // World-space top-left the RTs currently cover, and the matrix that
+        // maps a world point into RT-pixel space (reused every frame -- no
+        // per-frame allocation).
+        let traceRTOriginX = 0, traceRTOriginY = 0;
+        let traceRTNeedsFullRedraw = true; // forces (re)allocation on the first drawTraces()
+        const traceRTTransform = new PIXI.Matrix();
+
+        trailLayer.addChild(trailGlowSprite);
+        trailLayer.addChild(trailCoreSprite);
         trailLayer.addChild(trailGlow);
         trailLayer.addChild(trailCore);
 
@@ -6440,56 +6478,145 @@ void main() {
             }
         }
 
-        function drawTraces() {
-            trailGlow.clear();
-            trailCore.clear();
+        // T25: (re)allocate trailGlowRT/trailCoreRT for activeCell's current
+        // home/size and redraw every player's CURRENT traceSegments into them
+        // from scratch. This is the only path that may resize or reposition
+        // the RTs, so it is also what a forced full redraw (a front-trim) and
+        // a round reset both funnel through. Not in the hot path -- only runs
+        // on startRound() and on the rare frame a trace is trimmed.
+        function rebuildTraceRT() {
+            let halfW = activeCell.baseRadiusX + TRACE_RT_PADDING;
+            let halfH = activeCell.baseRadiusY + TRACE_RT_PADDING;
+            traceRTOriginX = activeCell.x - halfW;
+            traceRTOriginY = activeCell.y - halfH;
+            let texW = Math.ceil(halfW * 2 * TRACE_RT_SCALE);
+            let texH = Math.ceil(halfH * 2 * TRACE_RT_SCALE);
+
+            if (!trailGlowRT) {
+                trailGlowRT = PIXI.RenderTexture.create({ width: texW, height: texH });
+                trailCoreRT = PIXI.RenderTexture.create({ width: texW, height: texH });
+                trailGlowSprite.texture = trailGlowRT;
+                trailCoreSprite.texture = trailCoreRT;
+            } else if (trailGlowRT.width !== texW || trailGlowRT.height !== texH) {
+                trailGlowRT.resize(texW, texH);
+                trailCoreRT.resize(texW, texH);
+            }
+            trailGlowSprite.position.set(traceRTOriginX, traceRTOriginY);
+            trailGlowSprite.scale.set(1 / TRACE_RT_SCALE);
+            trailCoreSprite.position.set(traceRTOriginX, traceRTOriginY);
+            trailCoreSprite.scale.set(1 / TRACE_RT_SCALE);
+
+            traceScratchGlow.clear();
+            traceScratchCore.clear();
             players.forEach(p => {
                 p.traceSegments.forEach(seg => {
                     if (seg.length < 2) return;
-                    trailGlow.lineStyle(TRACE_WIDTH + 4, p.color, 0.6);
-                    trailGlow.moveTo(seg[0].x, seg[0].y);
-                    for (let i = 1; i < seg.length; i++) trailGlow.lineTo(seg[i].x, seg[i].y);
-
-                    trailCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
-                    trailCore.moveTo(seg[0].x, seg[0].y);
-                    for (let i = 1; i < seg.length; i++) trailCore.lineTo(seg[i].x, seg[i].y);
+                    traceScratchGlow.lineStyle(TRACE_WIDTH + 4, p.color, 0.6);
+                    traceScratchGlow.moveTo(seg[0].x, seg[0].y);
+                    traceScratchCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
+                    traceScratchCore.moveTo(seg[0].x, seg[0].y);
+                    for (let i = 1; i < seg.length; i++) {
+                        traceScratchGlow.lineTo(seg[i].x, seg[i].y);
+                        traceScratchCore.lineTo(seg[i].x, seg[i].y);
+                    }
                 });
+                // Mark every point currently on record as drawn, whether or not
+                // this player actually had 2+ points (an empty/1-point segment
+                // just means there is nothing to catch up on next frame).
+                let last = p.traceSegments[p.traceSegments.length - 1];
+                p.traceDrawSeg = p.traceSegments.length - 1;
+                p.traceDrawPt = last.length - 1;
+            });
 
-                // Explicitly draw the Player's Head
-                if (p.alive) {
+            traceRTTransform.set(TRACE_RT_SCALE, 0, 0, TRACE_RT_SCALE,
+                -traceRTOriginX * TRACE_RT_SCALE, -traceRTOriginY * TRACE_RT_SCALE);
+            app.renderer.render(traceScratchGlow, { renderTexture: trailGlowRT, clear: true, transform: traceRTTransform });
+            app.renderer.render(traceScratchCore, { renderTexture: trailCoreRT, clear: true, transform: traceRTTransform });
+            traceRTNeedsFullRedraw = false;
+        }
 
-                    // --- TARGET MODE AURA ---
-                    let auraColor = p.targetMode === 'self' ? 0x2ecc71 : 0xe74c3c;
-                    trailGlow.beginFill(auraColor, 0.6);
-                    trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 2.5);
+        // T25: draw only the trace points added since the last frame (per
+        // player, tracked by traceDrawSeg/traceDrawPt) and composite that
+        // delta into the accumulation RTs with clear:false. Segments are only
+        // ever appended to at the end and points are only ever removed from
+        // the front (which forces rebuildTraceRT() instead, see
+        // trimTraceToCap/deleteOldestTrace/the lysosome pickup), so a stored
+        // (segIdx, ptIdx) cursor stays valid between calls.
+        function accumulateTraceRT() {
+            let any = false;
+            traceScratchGlow.clear();
+            traceScratchCore.clear();
+            players.forEach(p => {
+                for (let si = p.traceDrawSeg; si < p.traceSegments.length; si++) {
+                    let seg = p.traceSegments[si];
+                    let fromI = (si === p.traceDrawSeg) ? p.traceDrawPt : -1;
+                    if (fromI + 1 >= seg.length) continue; // nothing new in this segment yet
+                    if (fromI === -1) {
+                        if (seg.length < 2) { p.traceDrawSeg = si; p.traceDrawPt = 0; continue; }
+                        fromI = 0;
+                    }
+                    traceScratchGlow.lineStyle(TRACE_WIDTH + 4, p.color, 0.6);
+                    traceScratchGlow.moveTo(seg[fromI].x, seg[fromI].y);
+                    traceScratchCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
+                    traceScratchCore.moveTo(seg[fromI].x, seg[fromI].y);
+                    for (let i = fromI + 1; i < seg.length; i++) {
+                        traceScratchGlow.lineTo(seg[i].x, seg[i].y);
+                        traceScratchCore.lineTo(seg[i].x, seg[i].y);
+                    }
+                    any = true;
+                    p.traceDrawSeg = si;
+                    p.traceDrawPt = seg.length - 1;
+                }
+            });
+            if (!any) return;
+            traceRTTransform.set(TRACE_RT_SCALE, 0, 0, TRACE_RT_SCALE,
+                -traceRTOriginX * TRACE_RT_SCALE, -traceRTOriginY * TRACE_RT_SCALE);
+            app.renderer.render(traceScratchGlow, { renderTexture: trailGlowRT, clear: false, transform: traceRTTransform });
+            app.renderer.render(traceScratchCore, { renderTexture: trailCoreRT, clear: false, transform: traceRTTransform });
+        }
+
+        function drawTraces() {
+            if (traceRTNeedsFullRedraw) rebuildTraceRT();
+            else accumulateTraceRT();
+
+            // Heads, auras and the ghost pulse move every frame -- these stay
+            // plain per-frame Graphics drawn on top of the accumulated sprites.
+            trailGlow.clear();
+            trailCore.clear();
+            players.forEach(p => {
+                if (!p.alive) return;
+
+                // --- TARGET MODE AURA ---
+                let auraColor = p.targetMode === 'self' ? 0x2ecc71 : 0xe74c3c;
+                trailGlow.beginFill(auraColor, 0.6);
+                trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 2.5);
+                trailGlow.endFill();
+
+                // T23: mirror Player 1's mode onto the touch toggle button --
+                // physics state (targetMode) stays authoritative, this only reads it.
+                if (isTouchDevice && p === players[0]) {
+                    touchToggleBtn.classList.toggle('attack-mode', p.targetMode === 'attack');
+                }
+
+                if (p.effects.hunterTimer > 0) {
+                    trailCore.beginFill(0xf1c40f); // Pacman yellow
+                    let mouthAngle = Math.abs(Math.sin(survivalTime * 15)) * 0.6;
+                    trailCore.moveTo(p.x, p.y);
+                    trailCore.arc(p.x, p.y, TRACE_WIDTH * 2, p.angle + mouthAngle, p.angle + Math.PI * 2 - mouthAngle);
+                    trailCore.lineTo(p.x, p.y);
+                    trailCore.endFill();
+                } else {
+                    trailCore.beginFill(0xffffff);
+                    trailCore.drawCircle(p.x, p.y, TRACE_WIDTH);
+                    trailCore.endFill();
+                }
+
+                // Ghost Mode Visual Indicator (Pulsing Forcefield)
+                if (p.effects.ghostTimer > 0) {
+                    let pulse = Math.abs(Math.sin(survivalTime * 5)) * 5;
+                    trailGlow.beginFill(p.color, 0.4);
+                    trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 4 + pulse);
                     trailGlow.endFill();
-
-                    // T23: mirror Player 1's mode onto the touch toggle button --
-                    // physics state (targetMode) stays authoritative, this only reads it.
-                    if (isTouchDevice && p === players[0]) {
-                        touchToggleBtn.classList.toggle('attack-mode', p.targetMode === 'attack');
-                    }
-
-                    if (p.effects.hunterTimer > 0) {
-                        trailCore.beginFill(0xf1c40f); // Pacman yellow
-                        let mouthAngle = Math.abs(Math.sin(survivalTime * 15)) * 0.6;
-                        trailCore.moveTo(p.x, p.y);
-                        trailCore.arc(p.x, p.y, TRACE_WIDTH * 2, p.angle + mouthAngle, p.angle + Math.PI * 2 - mouthAngle);
-                        trailCore.lineTo(p.x, p.y);
-                        trailCore.endFill();
-                    } else {
-                        trailCore.beginFill(0xffffff);
-                        trailCore.drawCircle(p.x, p.y, TRACE_WIDTH);
-                        trailCore.endFill();
-                    }
-
-                    // Ghost Mode Visual Indicator (Pulsing Forcefield)
-                    if (p.effects.ghostTimer > 0) {
-                        let pulse = Math.abs(Math.sin(survivalTime * 5)) * 5;
-                        trailGlow.beginFill(p.color, 0.4);
-                        trailGlow.drawCircle(p.x, p.y, TRACE_WIDTH * 4 + pulse);
-                        trailGlow.endFill();
-                    }
                 }
             });
         }
@@ -7405,7 +7532,7 @@ void main() {
                             } else if (p.effects.redCount === 3) {
                                 deleteOldestTrace(p, 0.5); // 50% wipe
                             }
-                            if (p.traceSegments.length > 1) p.traceSegments.shift();
+                            if (p.traceSegments.length > 1) { p.traceSegments.shift(); traceRTNeedsFullRedraw = true; } // T25: front geometry removed, RT must be redrawn
                         }
                         else if (v.type === 'mitochondria') {
                             let targets = [];
@@ -7628,7 +7755,7 @@ void main() {
 
         window.startRound = function () {
             // 1. Clear previous round data
-            trailGlow.clear(); trailCore.clear(); uiBarsLayer.clear(); virusLayer.clear();
+            uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
             particleCount = 0; particleLayer.clear(); // T17
 
@@ -7688,6 +7815,12 @@ void main() {
                 });
             }
 
+            // T25: (re)allocate the trace accumulation buffers around the
+            // just-reset activeCell and blank them -- players[] above is
+            // freshly rebuilt with empty traceSegments, so this draws nothing
+            // and just sets each player's draw cursor to the empty state.
+            rebuildTraceRT();
+
             generateMap();
             isPlaying = true;
             paused = false; // T24: a restart from a paused menu must not stay frozen
@@ -7722,6 +7855,7 @@ void main() {
             let totalPoints = 0;
             player.traceSegments.forEach(seg => totalPoints += seg.length);
             removeFrontPoints(player.traceSegments, Math.floor(totalPoints * percentage));
+            traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
         }
 
         // Per-frame cap: keeps rebuildSpatialGrid()'s cost bounded independently of
@@ -7743,6 +7877,7 @@ void main() {
 
             removeFrontPoints(segs, toRemove);
             while (segs.length > 1 && segs[0].length < 2) segs.shift();
+            traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
         }
 
     </script>
