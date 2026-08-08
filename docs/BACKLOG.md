@@ -488,6 +488,30 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   dead matter" rule on purpose, but must be distinguishable at a glance. Noted in
   both task files. — 2026-08-07
 
+## Found during T40 (pause discoverability) — 2026-08-08
+
+- **`pointer-events: none` made a fixed-position, high-z-index overlay div
+  invisible in this sandbox's headless/software-rendered Chromium**, even
+  though it stacked above the canvas by every CSS rule (`z-index`, DOM order,
+  no clipping ancestor). `elementFromPoint` at its own center returned the
+  `<canvas>` beneath it; raw pixel-sampling a screenshot found no trace of the
+  div's background or text, even with a loud red test background; Playwright's
+  own actionability check independently agreed ("element is not visible").
+  Isolated A/B testing (toggling only `pointer-events`, nothing else) showed
+  removing it was sufficient — same element, same z-index, then painted and
+  hit-tested correctly. `#pauseMenuBtn` (a `<button>`, never had
+  `pointer-events` set) was unaffected throughout, which is why the existing
+  pause button always rendered fine and this was easy to miss. Root cause not
+  fully diagnosed — plausibly a compositing-layer ordering quirk specific to
+  this environment's software WebGL path (SwiftShader) — but reproduced
+  cleanly and is worth knowing about: any future task stacking a
+  `pointer-events: none` overlay above the canvas should verify with a real
+  screenshot pixel-check (not just `getComputedStyle`) in this harness, since
+  the CSSOM will report the element as displayed and opaque while it silently
+  fails to paint. Whether this also affects real (non-headless, GPU) browsers
+  is unverified — no way to test that from this environment. Full repro steps
+  in `docs/tasks/T40-pause-discoverability.md`'s `## Findings`. — 2026-08-08
+
 ## Open — found during T34
 
 - **Per-frame `new PIXI.Graphics()` allocation in the split-screen branch of

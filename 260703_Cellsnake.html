@@ -129,6 +129,29 @@
             background: #636e72;
         }
 
+        /* T40: one-time "look here" cue pointing at pauseMenuBtn, shown for the
+           first round of a session only. Sits just under the button, same corner. */
+        .pause-hint {
+            display: none;
+            position: fixed;
+            top: max(60px, calc(env(safe-area-inset-top) + 60px));
+            right: max(12px, env(safe-area-inset-right));
+            z-index: 109;
+            max-width: 180px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(13, 13, 26, 0.9);
+            color: #ffffff;
+            font-size: 12px;
+            text-align: right;
+            opacity: 1;
+            transition: opacity 0.6s ease;
+        }
+
+        .pause-hint.pause-hint-fade {
+            opacity: 0;
+        }
+
         /* T24: explicit close/resume affordance inside the menu itself. Sits at
            top-left -- top-right is the fixed, higher-stacked pauseMenuBtn, which
            would otherwise intercept clicks meant for this button. */
@@ -401,6 +424,8 @@
     <div id="ui-trigger"></div>
     <!-- T24: explicit menu/pause control -- hover-to-peek has no touch equivalent. -->
     <button id="pauseMenuBtn" class="pause-menu-btn" onclick="togglePauseMenu()" aria-label="Menu / Pause">&#9776;</button>
+    <!-- T40: one-time hint pointing at the pause button/shortcuts, shown on the first round of a session. -->
+    <div id="pauseHint" class="pause-hint">Esc or P or &#9776; to pause</div>
     <div id="devIndicator"
         style="display: none; position: absolute; top: 10px; right: 20px; color: #00ff00; font-weight: bold; font-family: monospace; font-size: 13px; line-height: 1.4; white-space: pre; z-index: 1000; text-shadow: 0 0 5px #00ff00; pointer-events: none;">
     </div>
@@ -996,6 +1021,7 @@
         // only this client's own simulation, so it cannot be reused as-is once state
         // is shared across a network.
         let paused = false;
+        let pauseHintShown = false; // T40: the first-round "look here" hint fires once per session
         let currentMode = 1;
         let aiCount = 0;
         let currentSpeed = 1.5;
@@ -3801,6 +3827,12 @@
                 toggleControlSplash();
             }
 
+            // T40: Escape/P are free of every playerConfigs binding (checked against
+            // all four) -- primary pause/resume shortcut, mirrors pauseMenuBtn.
+            if (isPlaying && (e.key === 'Escape' || e.key === 'p' || e.key === 'P')) {
+                togglePauseMenu();
+            }
+
             // --- DEBUG / DEV MODE HOTKEYS ---
             // Master toggle: `` ` ``/`~`/`½` are the documented keys; `\` kept as an alias.
             if (e.key === '\\' || e.key === '½' || e.key === '`' || e.key === '~') {
@@ -3924,6 +3956,18 @@
                 paused = false;
             }
         };
+
+        // T40: shown once, on the first round of a session, to point at
+        // pauseMenuBtn/the Escape+P shortcuts. Fades on its own, no dismiss needed.
+        const pauseHintElement = document.getElementById('pauseHint');
+        function showPauseHint() {
+            if (pauseHintShown) return;
+            pauseHintShown = true;
+            pauseHintElement.classList.remove('pause-hint-fade');
+            pauseHintElement.style.display = 'block';
+            setTimeout(() => pauseHintElement.classList.add('pause-hint-fade'), 3000);
+            setTimeout(() => { pauseHintElement.style.display = 'none'; }, 3600);
+        }
 
         document.addEventListener('pointerdown', e => {
             if (!paused) return;
@@ -4842,6 +4886,7 @@
             paused = false; // T24: a restart from a paused menu must not stay frozen
             uiElement.classList.add('hidden-ui'); // AUTO-HIDE MENU ON START
             app.ticker.start(); // Unfreeze the engine!
+            showPauseHint(); // T40: one-time nudge toward Esc/P/pauseMenuBtn
         };
 
         // Headless-driver hook (T11): jump straight to a generation without

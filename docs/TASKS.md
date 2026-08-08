@@ -164,7 +164,7 @@ sim/render split can wait behind them.
 | T35 | [Dev hotkeys: drop `[`/`]`, legend must match](tasks/T35-dev-hotkeys-legend.md) | — | `DONE` |
 | T36 | [Target mode: legend wrong, attack does almost nothing](tasks/T36-targetmode-legend-and-attack.md) | — | `DONE` |
 | T37 | [Calcification: double membrane, organelle bounce](tasks/T37-calcification-visuals.md) | — | `DONE` |
-| T40 | [Make pause discoverable](tasks/T40-pause-discoverability.md) | — | `READY` |
+| T40 | [Make pause discoverable](tasks/T40-pause-discoverability.md) | — | `DONE` |
 
 ### Track K — Playtest design & features
 
@@ -172,7 +172,7 @@ sim/render split can wait behind them.
 |----|------|-----------|--------|
 | T38 | [Necrosis: fuse, shed debris, break apart in red mode](tasks/T38-make-necrosis-matter.md) | T36, T37 | `READY` |
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `READY` |
-| T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `BLOCKED` |
+| T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `READY` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `READY` |
 
 ### Parked
