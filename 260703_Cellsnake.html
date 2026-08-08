@@ -3703,18 +3703,69 @@
 
 
         // --- 7. Main Loop & Input ---
+        // T35: single source of truth for the dev-mode hotkeys -- the keydown
+        // handler below and the legend text both read this list, so they cannot
+        // drift apart the way the old hand-written legend did. `g`/`h`/`j` are
+        // Player 3's steer/toggle keys (playerConfigs), so god mode and the
+        // legend stay on the free keys `,`/`.` rather than the "G" a naive
+        // mnemonic would suggest -- see T35's `## Findings`.
+        const DEV_KEYS = [
+            {
+                label: 'god mode', display: ',', match: k => k === ',', status: () => godMode,
+                action: () => { godMode = !godMode; }
+            },
+            {
+                label: 'fuzzer', display: 'f', match: k => k === 'f' || k === 'F', status: () => fuzzActive,
+                action: () => {
+                    fuzzActive = !fuzzActive;
+                    if (fuzzActive) {
+                        fuzzStartWallTime = performance.now();
+                        fuzzStats.rounds = 0;
+                        fuzzTopUpTimer = 0;
+                        fuzzToggleTimer = 0;
+                        fuzzStatsTimer = 0;
+                        // Maximise trace count -- the main driver of grid rebuild cost.
+                        if (players.length < 4) {
+                            document.getElementById('modeSelect').value = '1';
+                            document.getElementById('aiSelect').value = '3';
+                            updateUI();
+                            startRound();
+                        }
+                    }
+                }
+            },
+            {
+                label: 'shake', display: 'k', match: k => k === 'k' || k === 'K', status: () => window.shakeEnabled,
+                action: () => { window.shakeEnabled = !window.shakeEnabled; }
+            },
+            {
+                // Jump straight to a generation without running a mitosis event --
+                // Phase 3 content is otherwise untestable (T11).
+                label: 'gen +1', display: 'n', match: k => k === 'n' || k === 'N', status: null,
+                action: () => { activeCell.generation++; }
+            },
+            {
+                label: '+15 s', display: 'Tab', match: k => k === 'Tab', status: null,
+                action: () => { survivalTime += 15.0; }
+            },
+            {
+                label: 'legend', display: '.', match: k => k === '.', status: null,
+                action: () => { legendVisible = !legendVisible; }
+            }
+        ];
+
         function updateDevIndicator() {
             let el = document.getElementById('devIndicator');
             el.style.display = (devMode && legendVisible) ? 'block' : 'none';
             if (!devMode || !legendVisible) return;
 
-            let txt = `DEV MODE            [\\]\n` +
-                `  god mode   : ${godMode ? 'ON ' : 'OFF'}   [,]\n` +
-                `  fuzzer     : ${fuzzActive ? 'ON ' : 'OFF'}   [f]\n` +
-                `  shake      : ${window.shakeEnabled ? 'ON ' : 'OFF'}   [k]\n` +
-                `  +15 s              []]\n` +
-                `  legend             [.]\n` +
-                `  gen ${activeCell.generation} +1            [[]`;
+            let lines = [`DEV MODE            [\`]`];
+            for (const dk of DEV_KEYS) {
+                let label = dk.label === 'gen +1' ? `gen ${activeCell.generation} +1` : dk.label;
+                let state = dk.status ? `: ${dk.status() ? 'ON ' : 'OFF'}` : '';
+                lines.push(`  ${label.padEnd(12)}${state}   [${dk.display}]`);
+            }
+            let txt = lines.join('\n');
             if (fuzzActive) {
                 let m = Math.floor(fuzzStats.elapsed / 60);
                 let s = Math.floor(fuzzStats.elapsed % 60);
@@ -3742,53 +3793,19 @@
             }
 
             // --- DEBUG / DEV MODE HOTKEYS ---
-            // Master toggle: `\` is the documented roadmap key; `` ` ``/`~`/`½` kept as aliases.
+            // Master toggle: `` ` ``/`~`/`½` are the documented keys; `\` kept as an alias.
             if (e.key === '\\' || e.key === '½' || e.key === '`' || e.key === '~') {
                 devMode = !devMode;
                 updateDevIndicator();
             }
-            // `]` is the documented roadmap key; Tab kept as alias.
-            if (devMode && (e.key === ']' || e.key === 'Tab')) {
-                survivalTime += 15.0; // Instantly jump 15 seconds forward
-            }
-            // `g`/`h` collide with Player 3's controls (playerConfigs), so god mode
-            // and the legend toggle use free keys instead: `,` and `.`.
-            if (devMode && e.key === ',') {
-                godMode = !godMode;
-                updateDevIndicator();
-            }
-            if (devMode && e.key === '.') {
-                legendVisible = !legendVisible;
-                updateDevIndicator();
-            }
-            // T16: screenshake off switch -- `k` is free (no player uses it).
-            if (devMode && (e.key === 'k' || e.key === 'K')) {
-                window.shakeEnabled = !window.shakeEnabled;
-                updateDevIndicator();
-            }
-            // Jump straight to a generation without running a mitosis event --
-            // Phase 3 content is otherwise untestable (T11).
-            if (devMode && e.key === '[') {
-                activeCell.generation++;
-                updateDevIndicator();
-            }
-            if (devMode && (e.key === 'f' || e.key === 'F')) {
-                fuzzActive = !fuzzActive;
-                if (fuzzActive) {
-                    fuzzStartWallTime = performance.now();
-                    fuzzStats.rounds = 0;
-                    fuzzTopUpTimer = 0;
-                    fuzzToggleTimer = 0;
-                    fuzzStatsTimer = 0;
-                    // Maximise trace count -- the main driver of grid rebuild cost.
-                    if (players.length < 4) {
-                        document.getElementById('modeSelect').value = '1';
-                        document.getElementById('aiSelect').value = '3';
-                        updateUI();
-                        startRound();
+            if (devMode) {
+                for (const dk of DEV_KEYS) {
+                    if (dk.match(e.key)) {
+                        dk.action();
+                        updateDevIndicator();
+                        break;
                     }
                 }
-                updateDevIndicator();
             }
 
             // --- DYNAMIC TOGGLE LOGIC ---

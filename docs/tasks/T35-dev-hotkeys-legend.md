@@ -45,3 +45,23 @@ being on. Read the configs; do not trust this table.
 4. 4-player round with dev mode on: P3's `G`/`J`/`H` steer P3 and do not fire dev
    actions.
 5. `Tab` does not break page tab-navigation when dev mode is off.
+
+## Findings
+
+Checked the required map against `playerConfigs` (§ "Verify `N` and every key...")
+before implementing, per this task's own instruction not to trust the table:
+
+- P3's config is `{ left: 'g', right: 'j', leftAlt: 'G', rightAlt: 'J', toggle: 'h',
+  toggleAlt: 'H' }`. `keys['G']` is live continuously in `gameLoop` (P3's steer-left
+  alt), not just on the one-shot `keydown`. Binding god mode to `G` as the table
+  suggests would toggle god mode every time P3 turns left with Shift/Caps held --
+  exactly the failure verification item 4 tests for.
+- Kept god mode on `,` (its existing free-key binding, already collision-free)
+  instead of moving it to `G`. This is a deliberate deviation from the "G | god
+  mode" row; every other row in the required map (`Tab`, `F`, `N`, `K`) was free
+  of collisions and implemented as specified. `,` and `.` are documented in the
+  regenerated legend per the task's own fallback ("either document them ... or
+  remove them").
+- `N`/`n` (+1 generation) and `Tab`-only (+15s, `]` dropped) have no collisions
+  with any of the four `playerConfigs` entries (`ArrowLeft/Right/Down`,
+  `a/d/A/D/s/S`, `g/j/G/J/h/H`, `4/6/5`).

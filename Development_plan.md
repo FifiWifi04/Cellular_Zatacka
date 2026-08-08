@@ -6,9 +6,10 @@ Objective: Execute the following 5-Phase production roadmap sequentially. Do not
 - Engine: HTML5 Canvas via PixiJS (v7+). Local shared-keyboard multiplayer (1-4 players).
 - Coding Style: Strict "Greyboxing" isolation. Keep gameplay physics separate from rendering layers.
 - Key Objects: `activeCell` (ellipse), `mitosis` (bridge state engine), `players` (array of traces).
-- Dev Mode Active: `\` toggles dev mode (master switch; `` ` ``/`~` also work), `,`
-  toggles god mode, `f` toggles the fuzzer, `.` toggles the on-screen dev legend,
-  `]` fast-forwards survivalTime by 15s (`Tab` also works while dev mode is on).
+- Dev Mode Active: `` ` ``/`~`/`½` toggles dev mode (master switch; `\` also
+  works), `,` toggles god mode, `f` toggles the fuzzer, `k` toggles screenshake,
+  `n` jumps activeCell.generation +1, `.` toggles the on-screen dev legend,
+  `Tab` fast-forwards survivalTime by 15s.
 
 ---
 
