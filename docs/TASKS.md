@@ -162,7 +162,7 @@ sim/render split can wait behind them.
 | T33 | [Trace invisible outside Cell A (bridge/Cell B)](tasks/T33-trace-rt-bounds.md) ⚠️ *first* | — | `DONE` |
 | T34 | [Split-screen choppy and stuttering](tasks/T34-splitscreen-stutter.md) | — | `DONE` |
 | T35 | [Dev hotkeys: drop `[`/`]`, legend must match](tasks/T35-dev-hotkeys-legend.md) | — | `DONE` |
-| T36 | [Target mode: legend wrong, attack does almost nothing](tasks/T36-targetmode-legend-and-attack.md) | — | `READY` |
+| T36 | [Target mode: legend wrong, attack does almost nothing](tasks/T36-targetmode-legend-and-attack.md) | — | `DONE` |
 | T37 | [Calcification: double membrane, organelle bounce](tasks/T37-calcification-visuals.md) | — | `READY` |
 | T40 | [Make pause discoverable](tasks/T40-pause-discoverability.md) | — | `READY` |
 

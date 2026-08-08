@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: be07225aad4c3143 -->
+<!-- standalone-build-inputs: 3f8692ddff52118a -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3684,8 +3684,7 @@ void main() {
         </div>
         <div id="controlSplash" class="control-splash">
             <div id="splashCards" class="splash-cards"></div>
-            <p class="splash-hint">3rd key toggles boost target: <b>self</b> (green aura, collect
-                vesicles) vs <b>attack</b> (red aura, shatter structures).</p>
+            <p class="splash-hint" id="splashHint">3rd key toggles boost target.</p>
         </div>
         <h3 id="controlsText">P1 (Blue): Left/Right Arrows</h3>
         <h2 id="scoreboard">Survival Time: 0.0s</h2>
@@ -4140,6 +4139,11 @@ void main() {
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
+
+        // T36: single source of truth for the boost-target legend, read by both
+        // controlsText and the T20 control splash so their wording can't drift
+        // apart, or from what the vesicle pickup path (below) actually does.
+        const TARGET_MODE_LEGEND = "Green = Self (boosts apply to you); Red = Attack (boosts go to your nearest living opponent instead)";
 
         // T17: Particle splash system -- fixed-size pool, zero per-frame allocation
         // (see docs/AGENT_CONDUCT.md 4.4a/5 and docs/tasks/T17-particles.md). Every
@@ -7743,60 +7747,49 @@ void main() {
                     let v = vesicles[i];
                     if (Math.hypot(nextX - v.x, nextY - v.y) < v.radius + TRACE_WIDTH + 6) {
 
-                        if (v.type === 'membrane') {
-                            if (p.effects.ghostTimer > 0) {
-                                p.effects.ghostTimer = Math.min(10.0, p.effects.ghostTimer + 3.0);
-                            } else {
-                                if (survivalTime > p.effects.blueWindow) p.effects.blueCount = 0;
-                                p.effects.blueCount++;
-                                p.effects.blueWindow = survivalTime + 10.0;
+                        // T36: 'attack' (red) sends the beneficial effect below to
+                        // an opponent instead of the picker; see boostTarget().
+                        let target = boostTarget(p);
 
-                                if (p.effects.blueCount >= 3) {
-                                    p.effects.ghostTimer = 10.0;
-                                    p.effects.blueCount = 0;
+                        if (v.type === 'membrane') {
+                            if (target.effects.ghostTimer > 0) {
+                                target.effects.ghostTimer = Math.min(10.0, target.effects.ghostTimer + 3.0);
+                            } else {
+                                if (survivalTime > target.effects.blueWindow) target.effects.blueCount = 0;
+                                target.effects.blueCount++;
+                                target.effects.blueWindow = survivalTime + 10.0;
+
+                                if (target.effects.blueCount >= 3) {
+                                    target.effects.ghostTimer = 10.0;
+                                    target.effects.blueCount = 0;
                                 }
-                                p.effects.golgiTimer = Math.min(15.0, p.effects.golgiTimer + EFFECT_DURATION);
+                                target.effects.golgiTimer = Math.min(15.0, target.effects.golgiTimer + EFFECT_DURATION);
                             }
                         }
                         else if (v.type === 'lysosome') {
-                            if (survivalTime > p.effects.redWindow) p.effects.redCount = 0;
-                            p.effects.redCount++;
-                            p.effects.redWindow = survivalTime + 10.0;
+                            if (survivalTime > target.effects.redWindow) target.effects.redCount = 0;
+                            target.effects.redCount++;
+                            target.effects.redWindow = survivalTime + 10.0;
 
-                            if (p.effects.redCount >= 5) {
-                                p.effects.hunterTimer = 10.0;
-                                p.effects.redCount = 0;
-                            } else if (p.effects.redCount === 3) {
-                                deleteOldestTrace(p, 0.5); // 50% wipe
+                            if (target.effects.redCount >= 5) {
+                                target.effects.hunterTimer = 10.0;
+                                target.effects.redCount = 0;
+                            } else if (target.effects.redCount === 3) {
+                                deleteOldestTrace(target, 0.5); // 50% wipe
                             }
-                            if (p.traceSegments.length > 1) { p.traceSegments.shift(); traceRTNeedsFullRedraw = true; } // T25: front geometry removed, RT must be redrawn
+                            if (target.traceSegments.length > 1) { target.traceSegments.shift(); traceRTNeedsFullRedraw = true; } // T25: front geometry removed, RT must be redrawn
                         }
                         else if (v.type === 'mitochondria') {
-                            let targets = [];
-
-                            if (p.targetMode === 'self' || currentMode === 1) {
-                                targets.push(p);
+                            if (target.effects.speedLevel === 2) {
+                                target.effects.speedTimer = Math.min(10.0, target.effects.speedTimer + 3.0);
+                                target.effects.lastMitoHit = survivalTime;
                             } else {
-                                let opponents = players.filter(op => op.id !== p.id && op.alive);
-                                if (opponents.length > 0) {
-                                    targets.push(opponents[Math.floor(Math.random() * opponents.length)]);
-                                } else {
-                                    targets.push(p);
-                                }
+                                if (target.effects.lastMitoHit && (survivalTime - target.effects.lastMitoHit) < 3.0) target.effects.speedLevel = 2;
+                                else target.effects.speedLevel = 1;
+
+                                target.effects.speedTimer = Math.min(15.0, target.effects.speedTimer + EFFECT_DURATION);
+                                target.effects.lastMitoHit = survivalTime;
                             }
-
-                            targets.forEach(target => {
-                                if (target.effects.speedLevel === 2) {
-                                    target.effects.speedTimer = Math.min(10.0, target.effects.speedTimer + 3.0);
-                                    target.effects.lastMitoHit = survivalTime;
-                                } else {
-                                    if (target.effects.lastMitoHit && (survivalTime - target.effects.lastMitoHit) < 3.0) target.effects.speedLevel = 2;
-                                    else target.effects.speedLevel = 1;
-
-                                    target.effects.speedTimer = Math.min(15.0, target.effects.speedTimer + EFFECT_DURATION);
-                                    target.effects.lastMitoHit = survivalTime;
-                                }
-                            });
                         }
                         emitParticles(v.x, v.y, 12, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: v.color }); // T17
                         vesicles.splice(i, 1);
@@ -7931,7 +7924,7 @@ void main() {
                 if (totalPlayers >= 3) controls += " | P3: G/J/H";
                 if (totalPlayers === 4) controls += " | P4: 4/6/5";
 
-                controls += " <br> <span style='color:#a29bfe; font-size:14px;'>3rd Key: Toggle Boost Target (Green=Self, Red=Attack)</span>";
+                controls += " <br> <span style='color:#a29bfe; font-size:14px;'>3rd Key: " + TARGET_MODE_LEGEND + "</span>";
 
                 document.getElementById('controlsText').innerHTML = controls;
 
@@ -7976,6 +7969,8 @@ void main() {
                     `</div>`;
             });
             document.getElementById('splashCards').innerHTML = html;
+            // T36: same legend string as controlsText -- can't drift apart.
+            document.getElementById('splashHint').innerHTML = "3rd key toggles boost target: " + TARGET_MODE_LEGEND + ".";
         }
 
         window.toggleControlSplash = function () {
@@ -8100,6 +8095,25 @@ void main() {
                     pointsToRemove = 0;
                 }
             }
+        }
+
+        // T36: attack-mode ('red') redirects a picked-up vesicle's beneficial
+        // effect to the nearest living opponent instead of the picker, matching
+        // the head-aura colour and the legend text. Deterministic (nearest, not
+        // random) so the choice is explainable in play. Falls back to self with
+        // no living opponent so the pickup is never simply wasted.
+        function boostTarget(p) {
+            if (p.targetMode !== 'attack') return p;
+            let opponents = players.filter(op => op.id !== p.id && op.alive);
+            if (opponents.length === 0) return p;
+            let nearest = opponents[0];
+            let bestDistSq = (nearest.x - p.x) * (nearest.x - p.x) + (nearest.y - p.y) * (nearest.y - p.y);
+            for (let k = 1; k < opponents.length; k++) {
+                let dx = opponents[k].x - p.x, dy = opponents[k].y - p.y;
+                let dSq = dx * dx + dy * dy;
+                if (dSq < bestDistSq) { nearest = opponents[k]; bestDistSq = dSq; }
+            }
+            return nearest;
         }
 
         function deleteOldestTrace(player, percentage) {

@@ -59,6 +59,50 @@ One sentence that describes what actually happens, shown in both the menu
 cannot drift. The head aura already colours green/red — make the wording match
 the colours exactly.
 
+## Findings
+
+**Step 1 — was this a regression?** No. `git log -S "targetMode" -- 260703_Cellsnake.html`
+returns exactly 4 commits: `4bf057f` (initial upload), `aa74cac` (T04), `d434759`
+(T14), `9549a46` (T23). None of them removed a `targetMode` branch from the
+vesicle-pickup path — the mitochondria (speed) branch that does opponent
+targeting has existed **unchanged since the very first commit**. It was never
+lost; it was always broken. The task's own search for the literal string
+`targetMode === 'attack'` (Step 1's own diagnostic) missed it because that
+branch was written as `if (p.targetMode === 'self' || ...) { self } else {
+opponent }` — the inverse of what the grep was looking for.
+
+The actual bug: the branch was gated by `p.targetMode === 'self' || currentMode
+=== 1`. `currentMode` is the *human player count* selector (1-4), not "no
+opponents alive". In the most common configuration — **Solo vs Bots**
+(`currentMode === 1`, `aiCount >= 1`, i.e. Quick Play) — this forced every
+pickup to self regardless of the toggle, even though `controlsText` (shown for
+`totalPlayers >= 2`, which Solo-vs-Bots satisfies) promised "Red = Attack".
+That's exactly the owner's complaint 2. It also means the malformed legend
+(complaint 1) had two different, both-wrong descriptions in two places: the
+menu said "Toggle Boost Target (Green=Self, Red=Attack)" with no explanation,
+while the control splash's static hint said red meant "shatter structures" —
+describing only the T14 malignant-mass side effect and not mentioning boost
+redirection at all.
+
+**Step 2 — design decisions.**
+- *Which effects transfer:* all three vesicle types transfer wholesale
+  (mitochondria/speed, membrane/ghost, lysosome/hunter) — the task's suggested
+  default. Kept simple by extracting one `boostTarget(p)` helper (defined next
+  to `deleteOldestTrace`) that returns either `p` or an opponent, computed once
+  per pickup event, then routing every `p.effects.*` / `p.traceSegments`
+  reference in the three type blocks through that single `target` instead.
+  This is a straightforward generalisation of the mitochondria block's
+  pre-existing `targets.forEach` pattern (now simplified to a single `target`,
+  since there is only ever one).
+- *Target selection:* nearest living opponent by Euclidean distance, not the
+  old random pick, per the task's explicit "choose deterministically" ask.
+- *No living opponent:* falls back to `p` itself (`boostTarget` returns `p`
+  when `opponents.length === 0`), so attack mode never wastes a pickup — this
+  covers both a truly solo round (no bots at all) and every bot/opponent being
+  dead.
+- Gen 3+ malignant-mass shatter-on-attack (T14) is untouched — it reads
+  `p.targetMode` directly and was not part of this change.
+
 ## Verification
 
 1. Console clean.

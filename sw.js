@@ -2,7 +2,7 @@
 // Bump CACHE_NAME whenever 260703_Cellsnake.html, vendor/, the manifest or the
 // icons change -- see AGENT_CONDUCT.md §2. Without the bump, players keep
 // getting the stale cached game forever after their first visit.
-const CACHE_NAME = 'cellular-zatacka-v3';
+const CACHE_NAME = 'cellular-zatacka-v4';
 
 const PRECACHE_URLS = [
     './260703_Cellsnake.html',
