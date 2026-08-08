@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 73d3b4907fcca69b -->
+<!-- standalone-build-inputs: ab93671055816dcf -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3444,7 +3444,19 @@ void main() {
         /* Slide the UI up to hide it */
         #ui.hidden-ui {
             transform: translate(-50%, -90%);
-            /* Leaves a tiny sliver visible */
+            /* Leaves a tiny sliver visible -- the hint that the panel is up
+               there and that moving the mouse to #ui-trigger brings it back. */
+        }
+
+        /* T45: on touch that sliver hints at nothing (the hover listeners are
+           gated to non-touch, T24) and it is not tiny -- the phone panel is far
+           taller than the desktop one (min-width/max-height clamps against the
+           viewport, plus safe-area padding), so 10% of it is a thick band of
+           buttons parked over the arena for the whole round. Push it fully
+           off-screen; the extra 24px clears the box-shadow's downward bleed.
+           #pauseMenuBtn is the affordance for getting the panel back. */
+        body.touch-ui #ui.hidden-ui {
+            transform: translate(-50%, calc(-100% - 24px));
         }
 
         /* The invisible trigger area at the top of the screen */
@@ -3455,6 +3467,13 @@ void main() {
             width: 100%;
             height: 30px;
             z-index: 90;
+        }
+
+        /* T45: with no hover listeners bound on touch this strip does nothing
+           except swallow the top 30px of steering pointerdowns before they
+           reach the canvas. */
+        body.touch-ui #ui-trigger {
+            display: none;
         }
 
         /* Scoreboard remains visible even when menu is hidden. T24: clamp()
