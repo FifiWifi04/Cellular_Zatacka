@@ -525,3 +525,25 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   confirmed in wall-clock terms in the sandboxed (GPU-less) test environment, so
   this may be worth a follow-up task if the owner still sees stutter after T34
   lands. — 2026-08-07
+
+## Owner playtest round 2 — 2026-08-07
+
+- **`golgiTimer` has never been wired up.** The blue vesicle grants it, the HUD
+  draws a bar for it, and it is decremented every frame — but no collision path
+  has ever read it. `git log -S golgiTimer` returns only the initial import
+  `4bf057f`. So the single-pickup "pass through the Golgi" effect grants
+  literally nothing, and has not since the repo began. The 3x blue combo
+  (`ghostTimer`) does work. Written up as **T43**. — 2026-08-07
+
+- **`RenderTexture` does not inherit `antialias` from the renderer.** The app is
+  created with `antialias: true`, but the split-screen viewport textures are
+  `RenderTexture.create({width, height})` with no `multisample`. Shared mode gets
+  MSAA, split mode does not — which is why split "looks lower resolution". A
+  general trap for any future RenderTexture in this codebase, including T25's
+  trace buffers. Written up as **T44**. — 2026-08-07
+
+- **T34 was right to report apply-count rather than wall-clock.** With no GPU in
+  the sandbox, rasterisation dominates and timing numbers do not show filter-pass
+  wins. Countable proxies (draw calls, filter applies, render-target bytes,
+  allocations) are the honest evidence here; wall-clock is a secondary note.
+  Worth remembering for every future perf task. — 2026-08-07

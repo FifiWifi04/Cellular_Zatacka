@@ -15,8 +15,9 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > lowest-numbered rule, which would otherwise send you to T22 — a large
 > refactor — while shipped bugs sit unfixed.
 >
-> Order: **T33 → T34 → T35 → T36 → T37 → T40 → T39**, then Track K as it
-> unblocks, then T22 and Phase 7.
+> Order: **T43 → T40 → T44 → T39**, then Track K as it unblocks, then T22 and
+> Phase 7. (T33–T37 are done.) T43 first: a headline power-up currently grants
+> nothing at all.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
