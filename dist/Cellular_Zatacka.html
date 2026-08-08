@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: e362b7cf36bca43a -->
+<!-- standalone-build-inputs: 8d7f478dbd120845 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3867,7 +3867,7 @@ void main() {
         const golgiERContainer = new PIXI.Container();
         const rotatingContainer = new PIXI.Container();
         const organellesLayer = new PIXI.Graphics();
-        const massLayer = new PIXI.Graphics(); // T14: malignant mass, cleared+redrawn every frame
+        const massLayer = new PIXI.Graphics(); // T14: protein aggregate (T39), cleared+redrawn every frame
         const particleLayer = new PIXI.Graphics(); // T17: splash particle pool, single Graphics for the whole pool
         particleLayer.blendMode = PIXI.BLEND_MODES.ADD;
         const trailLayer = new PIXI.Container();
@@ -4202,10 +4202,14 @@ void main() {
         const NECROSIS_ALPHA = 0.75;         // resting alpha once frozen and grey
         const NECROSIS_PULSE_DURATION = 0.4; // seconds the freeze flicker plays
 
-        // T14: Gen 3+ malignant mass -- a static tumour of grid-aligned blocks
-        // that clones an attached block every MASS_GROW_INTERVAL seconds.
-        const MASS_GROW_INTERVAL = 10;  // seconds of un-frozen game time between growth ticks
-        const MASS_MAX_BLOCKS = 40;     // growth cap; ~7 minutes at one block/10s
+        // T14: Gen 3+ hazard -- in-fiction this is a protein aggregate (misfolded
+        // proteins clumping into a growing inclusion body), not a literal tumour:
+        // a tumour is many cells, and this lives inside one (T39). Identifiers
+        // stay malignantMass/MASS_* to keep the diff small (see AGENT_CONDUCT
+        // §1.3) -- read "mass" as "aggregate" throughout.
+        // Clones an attached block on a growth tick whose interval shortens with
+        // generation; see massGrowInterval() below.
+        const MASS_MAX_BLOCKS = 16;     // growth cap; re-derived for T12's shrunk membrane (T39, see commit msg)
         const MASS_HIT_COOLDOWN = 0.3;  // seconds of attack-mode shatter immunity after a hit
         let malignantMass = {
             active: false,
@@ -4214,6 +4218,11 @@ void main() {
             blocks: [],                  // [{ cx, cy, x, y, spawnTime }]
             nextGrowTime: 0
         };
+
+        // T39: growth interval shortens with generation (mass only spawns Gen 3+,
+        // see updateMalignantMass) instead of a flat 10s -- ~4s at first spawn
+        // (Gen 3), floored at 2s by Gen 5+.
+        function massGrowInterval() { return Math.max(2, 10 - 2 * activeCell.generation); }
 
         // T15: Gen 4+ angiogenesis -- gravity well pulling spawned vesicles toward
         // the nearest cell centre. vx/vy are px per `delta`-tick (delta == 60 *
@@ -7322,7 +7331,7 @@ void main() {
                 malignantMass.origin.x = x;
                 malignantMass.origin.y = y;
                 malignantMass.blocks = [{ cx: 0, cy: 0, x: x, y: y, spawnTime: survivalTime }];
-                malignantMass.nextGrowTime = survivalTime + MASS_GROW_INTERVAL;
+                malignantMass.nextGrowTime = survivalTime + massGrowInterval();
                 malignantMass.active = true;
                 return;
             }
@@ -7374,22 +7383,67 @@ void main() {
             }
             if (malignantMass.blocks.length >= MASS_MAX_BLOCKS) return;
             if (survivalTime >= malignantMass.nextGrowTime) {
-                malignantMass.nextGrowTime = survivalTime + MASS_GROW_INTERVAL;
+                malignantMass.nextGrowTime = survivalTime + massGrowInterval();
                 growMalignantMass();
             }
         }
 
+        // T39: deterministic per-block hash (integer mix, no Math.random) so the
+        // aggregate's blob shape is identical every frame -- re-randomising per
+        // frame would shimmer. salt selects which of several draws for a block.
+        function massHash(cx, cy, salt) {
+            let h = (cx * 374761393 + cy * 668265263 + salt * 2654435761) | 0;
+            h = Math.imul(h ^ (h >>> 15), 1 | h);
+            h ^= h + Math.imul(h ^ (h >>> 7), 61 | h);
+            return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
+        }
+
+        // malignantMass.blocks is capped at MASS_MAX_BLOCKS (16) and this is
+        // called 4x per block once per frame from drawMalignantMass -- a linear
+        // scan is cheap here and, unlike a rebuilt Set/Map, allocates nothing.
+        function findMassBlockAt(cx, cy) {
+            for (let i = 0; i < malignantMass.blocks.length; i++) {
+                let b = malignantMass.blocks[i];
+                if (b.cx === cx && b.cy === cy) return true;
+            }
+            return false;
+        }
+
         // Draw only (§4.4a) -- reads malignantMass.blocks, never mutates it.
+        // T39: irregular amber/ochre blobs -- a protein aggregate, not a grid of
+        // squares -- that merge into one clump: the outer-boundary outline skips
+        // any edge shared with an occupied neighbour.
         function drawMalignantMass() {
             massLayer.clear();
             if (!malignantMass.active) return;
             const half = malignantMass.blockSize / 2;
             for (let b of malignantMass.blocks) {
                 let isNew = (survivalTime - b.spawnTime) < 0.5;
-                massLayer.lineStyle(3, 0x1c1420, 1.0);
-                massLayer.beginFill(isNew ? 0xd9b3ff : 0x4b3b52, 1.0);
-                massLayer.drawRect(b.x - half, b.y - half, malignantMass.blockSize, malignantMass.blockSize);
+
+                massLayer.lineStyle(0);
+                massLayer.beginFill(isNew ? 0xffe6a8 : 0x8a6d2f, 1.0);
+                for (let li = 0; li < 3; li++) {
+                    let ox = (massHash(b.cx, b.cy, li * 3) - 0.5) * half * 0.9;
+                    let oy = (massHash(b.cx, b.cy, li * 3 + 1) - 0.5) * half * 0.9;
+                    let lr = half * (0.5 + massHash(b.cx, b.cy, li * 3 + 2) * 0.35);
+                    massLayer.drawCircle(b.x + ox, b.y + oy, lr);
+                }
                 massLayer.endFill();
+
+                // Faint inner glow, brighter on a freshly spawned block -- reads
+                // as "wrong protein" alongside the scene's additive-glow trims
+                // without changing massLayer's blend mode (smallest diff, §1.3).
+                massLayer.beginFill(0xffdf9e, isNew ? 0.35 : 0.15);
+                massLayer.drawCircle(b.x, b.y, half * 0.4);
+                massLayer.endFill();
+
+                // Outline only the cluster's outer silhouette -- skip any edge
+                // shared with an occupied neighbour so it reads as one clump.
+                massLayer.lineStyle(3, 0x4a3a18, 1.0);
+                if (!findMassBlockAt(b.cx, b.cy - 1)) { massLayer.moveTo(b.x - half, b.y - half); massLayer.lineTo(b.x + half, b.y - half); }
+                if (!findMassBlockAt(b.cx, b.cy + 1)) { massLayer.moveTo(b.x - half, b.y + half); massLayer.lineTo(b.x + half, b.y + half); }
+                if (!findMassBlockAt(b.cx - 1, b.cy)) { massLayer.moveTo(b.x - half, b.y - half); massLayer.lineTo(b.x - half, b.y + half); }
+                if (!findMassBlockAt(b.cx + 1, b.cy)) { massLayer.moveTo(b.x + half, b.y - half); massLayer.lineTo(b.x + half, b.y + half); }
             }
         }
 

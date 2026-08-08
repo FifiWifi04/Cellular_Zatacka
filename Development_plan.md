@@ -31,8 +31,8 @@ Objective: Execute the following 5-Phase production roadmap sequentially. Do not
 3.1 Generation 2 - Membrane Calcification & Organelle Necrosis:
     - Frame-by-frame shrinking of the elliptical membrane radii (`activeCell.radiusX`/`radiusY`).
     - Randomly freeze drifting organelles, turning them stone-gray and switching their collision profile to lethal, static walls.
-3.2 Generation 3 - The Malignant Mass:
-    - Spawn a static tumor sprite that duplicates/clones an attached block every 10 seconds.
+3.2 Generation 3 - The Protein Aggregate:
+    - Spawn a static aggresome (misfolded-protein inclusion body) that duplicates/clones an attached block on a growth tick that speeds up with generation (T39).
     - If a player hits the mass while their `targetMode === 'attack'`, the block shatters.
 3.3 Generation 4 - Angiogenesis:
     - Center a gravity well that exerts a constant, inward pull vector on all spawned vesicles.

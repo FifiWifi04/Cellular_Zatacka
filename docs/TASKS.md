@@ -16,11 +16,15 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > refactor — while shipped bugs sit unfixed.
 >
 > Order: **T43 → T40 → T44 → T39**, then Track K as it unblocks, then T22 and
-> Phase 7. (T33–T37, T40, T43, T44 and T45 are done — T43 landed 2026-08-08, the
-> blue vesicle's Golgi-pass now actually works; T45 was fixed in an owner session
-> the same day; T44 landed 2026-08-08, viewport AA/downscale tiering plus a
-> probe-gated MSAA fallback for backends that silently fail to resolve it — see
-> `docs/tasks/T44-splitscreen-quality-and-cost.md` Findings.) **T39 is next.**
+> Phase 7. (T33–T37, T40, T43, T44, T45 and T39 are done — T43 landed
+> 2026-08-08, the blue vesicle's Golgi-pass now actually works; T45 was fixed in
+> an owner session the same day; T44 landed 2026-08-08, viewport AA/downscale
+> tiering plus a probe-gated MSAA fallback for backends that silently fail to
+> resolve it; T39 landed 2026-08-08, the "tumour" is now a protein aggregate
+> with organic amber-blob visuals and generation-scaled growth — see
+> `docs/tasks/T44-splitscreen-quality-and-cost.md` Findings for T44.) **Track J
+> is fully done. Track K is next — its tasks (T38, T41, T42) are all already
+> `READY`, so the lowest-numbered rule applies: take T38.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -178,7 +182,7 @@ sim/render split can wait behind them.
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
 | T38 | [Necrosis: fuse, shed debris, break apart in red mode](tasks/T38-make-necrosis-matter.md) | T36, T37 | `READY` |
-| T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `READY` |
+| T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `DONE` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `READY` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `READY` |
 
