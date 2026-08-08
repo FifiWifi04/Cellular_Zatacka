@@ -16,9 +16,11 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > refactor — while shipped bugs sit unfixed.
 >
 > Order: **T43 → T40 → T44 → T39**, then Track K as it unblocks, then T22 and
-> Phase 7. (T33–T37, T40, T43 and T45 are done — T43 landed 2026-08-08, the blue
-> vesicle's Golgi-pass now actually works, and T45 was fixed in an owner session
-> the same day.) **T44 is next.**
+> Phase 7. (T33–T37, T40, T43, T44 and T45 are done — T43 landed 2026-08-08, the
+> blue vesicle's Golgi-pass now actually works; T45 was fixed in an owner session
+> the same day; T44 landed 2026-08-08, viewport AA/downscale tiering plus a
+> probe-gated MSAA fallback for backends that silently fail to resolve it — see
+> `docs/tasks/T44-splitscreen-quality-and-cost.md` Findings.) **T39 is next.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -168,7 +170,7 @@ sim/render split can wait behind them.
 | T37 | [Calcification: double membrane, organelle bounce](tasks/T37-calcification-visuals.md) | — | `DONE` |
 | T40 | [Make pause discoverable](tasks/T40-pause-discoverability.md) | — | `DONE` |
 | T43 | [Blue vesicle's Golgi-pass effect does nothing](tasks/T43-blue-vesicle-golgi-pass.md) | — | `DONE` |
-| T44 | [Split-screen RenderTexture quality/cost](tasks/T44-splitscreen-quality-and-cost.md) | — | `READY` |
+| T44 | [Split-screen RenderTexture quality/cost](tasks/T44-splitscreen-quality-and-cost.md) | — | `DONE` |
 | T45 | [Start menu never fully hides on mobile](tasks/T45-mobile-menu-not-hidden.md) | — | `DONE` |
 
 ### Track K — Playtest design & features

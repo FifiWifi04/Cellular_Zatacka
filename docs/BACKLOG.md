@@ -565,3 +565,27 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   legitimately be within `TRACE_HITBOX` of that point). Not investigated
   further — out of scope for T43. Worth a real in-browser near-miss playtest
   at Very Fast before trusting either explanation. — 2026-08-08
+
+## Found while doing T44 (split-screen quality/cost) — 2026-08-08
+
+- **`trailGlowSprite`/`trailCoreSprite` are never culled per split-screen
+  viewport.** They default to `cullable = false`, so every viewport capture
+  samples the full trace RenderTexture (up to ~3550x1350 during mitosis, see
+  T33) even when most of it is off that viewport's visible rect. Setting
+  `cullable = true` would let PIXI skip the draw entirely when a viewport's
+  frame doesn't intersect the sprite's bounds. Not applied in T44: both
+  sprites carry a `BlurFilter`, whose bleed extends the effectively-visible
+  area slightly past the geometric bounds PIXI's culling test uses, and this
+  sandbox has no GPU to visually confirm glow doesn't clip at a viewport
+  boundary as a result. Worth trying with real-browser verification. — 2026-08-08
+
+- **`MSAA_QUALITY` RenderTextures silently resolve to a blank capture on the
+  WebGL2 backend available in this sandbox** (`MAX_SAMPLES` reports 4,
+  `webGLVersion` is 2, no GL error, `extract.pixels()` reads back all zero).
+  T44 added a one-time capability probe (`splitMSAASupported`) that falls back
+  to `MSAA_QUALITY.NONE` when this happens, so split-screen never silently
+  goes blank — but it means antialiasing has not actually been exercised
+  end-to-end in any environment available to an agent session. Worth an
+  owner playtest on real hardware to confirm MSAA actually engages and looks
+  right there (the probe should report `true` and viewport edges should look
+  smoother at Medium/High than they did before T44). — 2026-08-08

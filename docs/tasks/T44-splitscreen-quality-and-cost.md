@@ -97,11 +97,67 @@ evidence, and wall-clock only as a secondary note with the caveat attached.
    `worldChildren` flat, `splitTextures.length` bounded.
 8. Regression sweep §7.6.
 
+## Findings
+
+Measured via `tools/verify_harness.py` (headless, software WebGL2 — no GPU).
+
+1. **MSAA RenderTextures silently produce a blank capture in this sandbox.**
+   Isolated test: `PIXI.RenderTexture.create({width:100,height:100,multisample:
+   PIXI.MSAA_QUALITY.MEDIUM})`, draw a filled rect into it, read back with
+   `renderer.extract.pixels()` — every byte is 0, no GL error, no console
+   warning. `MAX_SAMPLES` reports 4 and `webGLVersion` is 2, so PIXI believes
+   multisampling is supported and takes that path; it just never resolves.
+   Root-caused, not assumed: reproduced with a minimal Graphics rect outside
+   any game code, and confirmed the split-screen blackout only occurred while
+   `multisample !== NONE` (locking the tier to `low`, which has no MSAA,
+   rendered correctly at every other setting unchanged).
+   **Fix:** a one-time capability probe (`splitMSAASupported`, a throwaway 4x4
+   RT rendered and read back at module init) gates `splitMultisample` — a
+   backend that can't actually resolve MSAA gets `MSAA_QUALITY.NONE` for every
+   tier instead of a blank viewport. Confirmed the probe correctly reports
+   `false` here and viewport content renders again with it wired in. Whether
+   real hardware needs the fallback path is unverifiable from this sandbox;
+   the probe means it's automatic either way.
+2. **Viewport texture sizing/multisample per tier** (640x480 screen, 4 alive
+   players, so each viewport is 320x240 on screen):
+   | tier | RT size | multisample requested | multisample applied (this sandbox) |
+   |---|---|---|---|
+   | low | 192x144 (0.6x) | NONE | NONE |
+   | medium | 256x192 (0.8x) | MEDIUM | NONE (probe-gated) |
+   | high | 320x240 (1.0x) | HIGH | NONE (probe-gated) |
+3. **Render-target bytes/frame.** Because `columns` is fixed at 2 and `rows`
+   adjusts to keep the grid filling the screen, total viewport area is the
+   full screen regardless of player count (verified directly: 2 players at
+   640x480 → two 320x480 viewports; 4 players → four 320x240 viewports; both
+   sum to 640x480). So bytes/frame = `screenW * screenH * 4 * splitRenderScale²`,
+   independent of player count:
+   - before (no downscale): 640x480x4 = 1,228,800 bytes/frame
+   - low (0.6x): 442,368 bytes/frame (36%)
+   - medium (0.8x): 786,432 bytes/frame (64%)
+   - high (1.0x): 1,228,800 bytes/frame (unchanged — deliberate, keeps split
+     pixel-comparable to shared mode)
+4. **Trace-sprite sampling per viewport — investigated, not changed.**
+   `trailGlowSprite`/`trailCoreSprite` default `cullable = false` (confirmed in
+   `vendor/pixi.min.js`), so PIXI performs no bounds-test skip today; every
+   viewport capture samples the full trace RT (up to ~3550x1350 during
+   mitosis) regardless of what fraction is on screen. Setting `cullable = true`
+   would let PIXI's built-in `_renderWithCulling` skip the draw call when a
+   viewport's frame doesn't intersect the sprite's bounds at all (e.g. a
+   viewport centred on cell A while the trace spans into cell B). Not applied
+   here: the trace sprite carries a `BlurFilter`, whose bleed extends the
+   visually-drawn area slightly past the geometric bounds culling would test
+   against, and there is no GPU in this sandbox to visually confirm the edge
+   case doesn't clip glow at a viewport boundary. Left as a follow-up in
+   `docs/BACKLOG.md` rather than guessed at.
+5. **Dead players already skip rendering** — confirmed `for (let i = 0; i <
+   alivePlayers.length; i++)` in the capture loop only iterates alive players;
+   no change needed (item 3 in the task file's Cause 2 list).
+
 ## Definition of done
 
-- [ ] Viewport textures antialiased, via the quality tier
-- [ ] Viewport render resolution tied to the tier, with bytes/frame reported
-- [ ] Trace-sprite sampling per viewport investigated and reported
-- [ ] Per-frame `Graphics()` allocation removed
-- [ ] Shared vs split sharpness screenshots attached
-- [ ] `docs/TASKS.md`: T44 → `DONE`
+- [x] Viewport textures antialiased, via the quality tier (probe-gated — see Findings §1)
+- [x] Viewport render resolution tied to the tier, with bytes/frame reported
+- [x] Trace-sprite sampling per viewport investigated and reported
+- [x] Per-frame `Graphics()` allocation removed
+- [x] Shared vs split sharpness screenshots attached
+- [x] `docs/TASKS.md`: T44 → `DONE`

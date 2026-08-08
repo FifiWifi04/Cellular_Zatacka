@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: ab93671055816dcf -->
+<!-- standalone-build-inputs: e362b7cf36bca43a -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3963,16 +3963,53 @@ void main() {
         // raised so fewer pixels bloom at all, and both the bloom and the trail
         // halo are cheaper (lower `quality` and `blur` are the two settings that
         // actually cost frame time). Medium sits midway on every value.
+        // T44: splitMultisample/splitRenderScale govern the split-screen viewport
+        // RenderTextures (see updateCamera()'s split branch) -- MSAA fixes the
+        // "lower resolution" look (RenderTexture does not inherit the app's
+        // antialias), renderScale is the fill-rate lever (render below on-screen
+        // size, let the sprite upscale). High keeps renderScale at 1.0 so split
+        // stays pixel-comparable to shared mode; low skips MSAA entirely since a
+        // weak device needs the fill-rate saving more than the smoothing.
         const QUALITY_TIERS = {
             low:    { threshold: 0.6,  bloomScale: 0.6, brightness: 1.0, blur: 4, quality: 2, trailBlur: 2,
-                      bloomEnabled: false, trailBlurEnabled: false, traceScale: 0.4,  particleBudget: 0,   warningLevel: 0, cytosolCount: 300 },
+                      bloomEnabled: false, trailBlurEnabled: false, traceScale: 0.4,  particleBudget: 0,   warningLevel: 0, cytosolCount: 300,
+                      splitMultisample: PIXI.MSAA_QUALITY.NONE,   splitRenderScale: 0.6 },
             medium: { threshold: 0.45, bloomScale: 1.0, brightness: 1.1, blur: 6, quality: 3, trailBlur: 3,
-                      bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.5,  particleBudget: 150, warningLevel: 1, cytosolCount: 800 },
+                      bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.5,  particleBudget: 150, warningLevel: 1, cytosolCount: 800,
+                      splitMultisample: PIXI.MSAA_QUALITY.MEDIUM, splitRenderScale: 0.8 },
             high:   { threshold: 0.3,  bloomScale: 1.5, brightness: 1.2, blur: 8, quality: 4, trailBlur: 4,
-                      bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.75, particleBudget: 400, warningLevel: 2, cytosolCount: 800 }
+                      bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.75, particleBudget: 400, warningLevel: 2, cytosolCount: 800,
+                      splitMultisample: PIXI.MSAA_QUALITY.HIGH,   splitRenderScale: 1.0 }
         };
         let quality = 'low';      // current tier name; set for real by applyQuality() near the end of the T18 section
         let bloomFilter = null;   // module-scope so applyQuality can retune it
+        // T44: split-screen viewport state. Declared here (not alongside
+        // purgeSplitScreen()/updateCamera() below) because applyQuality() -- which
+        // reads/writes them and calls purgeSplitScreen() -- runs its first pass
+        // before those functions' original declaration point; a `let` that far
+        // down would still be in its TDZ at that first call.
+        // Some WebGL2 backends report multisample support but never actually
+        // resolve it -- the multisampled RenderTexture reads back as fully
+        // transparent black instead of falling back or erroring. Probe once with
+        // a throwaway 4x4 RT so a broken backend gets NONE instead of a blank
+        // split-screen viewport; a capable one gets the real per-tier level.
+        const splitMSAASupported = (function () {
+            if (!PIXI.MSAA_QUALITY || app.renderer.context.webGLVersion < 2) return false;
+            let probeRT = PIXI.RenderTexture.create({ width: 4, height: 4, multisample: PIXI.MSAA_QUALITY.MEDIUM });
+            let probeGfx = new PIXI.Graphics();
+            probeGfx.beginFill(0xffffff).drawRect(0, 0, 4, 4).endFill();
+            app.renderer.render(probeGfx, { renderTexture: probeRT });
+            let px = app.renderer.extract.pixels(probeRT);
+            probeRT.destroy(true);
+            probeGfx.destroy();
+            for (let i = 0; i < px.length; i++) if (px[i] !== 0) return true;
+            return false;
+        })();
+        let splitMultisample = PIXI.MSAA_QUALITY.NONE; // tier-driven MSAA level for viewport RenderTextures
+        let splitRenderScale = 1.0;                    // viewport RenderTexture size relative to on-screen size
+        let splitTextures = [];
+        let splitSprites = [];
+        const splitBorderGraphics = new PIXI.Graphics(); // reused every viewport/frame -- no per-frame allocation (AGENT_CONDUCT 5)
 
         if (typeof PIXI.filters.AdvancedBloomFilter !== 'undefined') {
             bloomFilter = new PIXI.filters.AdvancedBloomFilter(QUALITY_TIERS.low);
@@ -4086,6 +4123,12 @@ void main() {
 
             TRACE_RT_SCALE = t.traceScale;
             if (trailGlowRT) rebuildTraceRT(); // reallocate at the new scale if a round is already live
+
+            // T44: purge so updateCamera() rebuilds the viewport RenderTextures at
+            // the new multisample/scale on next use; safe as a no-op pre-round.
+            splitMultisample = splitMSAASupported ? t.splitMultisample : PIXI.MSAA_QUALITY.NONE;
+            splitRenderScale = t.splitRenderScale;
+            purgeSplitScreen();
 
             particleBudget = t.particleBudget;
 
@@ -4313,8 +4356,6 @@ void main() {
         let players = [];
         let organelles = [];
         let vesicles = [];
-        let splitTextures = [];
-        let splitSprites = [];
         let globalRotation = 0;
 
         // Destroy the split-screen sprites/RenderTextures and empty both arrays.
@@ -6934,9 +6975,20 @@ void main() {
                 let rows = alivePlayers.length > 2 ? 2 : 1;
                 let viewW = Math.floor(w / columns);
                 let viewH = Math.floor(h / rows);
+                // T44: the RenderTexture is rasterised at viewW/viewH * splitRenderScale
+                // and the sprite is upscaled to the full on-screen viewport size -- the
+                // fill-rate lever from the task file. High keeps this at 1.0 (no
+                // downscale) so split stays pixel-comparable to shared mode; low/medium
+                // trade sharpness for fewer shaded pixels per viewport per frame.
+                let rtW = Math.max(1, Math.floor(viewW * splitRenderScale));
+                let rtH = Math.max(1, Math.floor(viewH * splitRenderScale));
 
                 while (splitSprites.length < alivePlayers.length) {
-                    let rt = PIXI.RenderTexture.create({ width: viewW, height: viewH });
+                    // multisample fixes the "lower resolution" look: RenderTexture does
+                    // not inherit the app's antialias:true, so split-screen edges were
+                    // jagged versus shared mode. resolution matches the renderer's so
+                    // the two paths cannot silently drift apart later.
+                    let rt = PIXI.RenderTexture.create({ width: rtW, height: rtH, resolution: app.renderer.resolution, multisample: splitMultisample });
                     let sprite = new PIXI.Sprite(rt);
                     splitScreenLayer.addChild(sprite); // Add to screen
                     splitTextures.push(rt);
@@ -6956,26 +7008,33 @@ void main() {
                     let sprite = splitSprites[i];
                     let rt = splitTextures[i];
 
-                    if (rt.width !== viewW || rt.height !== viewH) rt.resize(viewW, viewH);
+                    if (rt.width !== rtW || rt.height !== rtH) rt.resize(rtW, rtH);
 
                     sprite.x = (i % columns) * viewW;
                     sprite.y = Math.floor(i / columns) * viewH;
+                    sprite.width = viewW;   // T44: stretch the (possibly smaller) capture up to viewport size
+                    sprite.height = viewH;
                     sprite.visible = true;
 
-                    // Center the invisible world on this specific player
-                    let splitZoom = 1.0;
+                    // Center the invisible world on this specific player. Scale/centre
+                    // are expressed in RT-pixel space (rtW/rtH), not viewW/viewH, so the
+                    // world-space span the viewport shows stays constant regardless of
+                    // splitRenderScale -- only the pixel density of the capture changes.
+                    let splitZoom = splitRenderScale;
                     world.scale.set(splitZoom);
-                    world.x = (viewW / 2) - (p.x * splitZoom);
-                    world.y = (viewH / 2) - (p.y * splitZoom);
+                    world.x = (rtW / 2) - (p.x * splitZoom);
+                    world.y = (rtH / 2) - (p.y * splitZoom);
 
                     // SNAPSHOT: Because world is visible, this now captures the graphics!
                     app.renderer.render(world, { renderTexture: rt });
 
-                    // Draw a subtle border around each viewport
-                    let ctx = new PIXI.Graphics();
-                    ctx.lineStyle(2, 0x00d2d3, 0.5);
-                    ctx.drawRect(0, 0, viewW, viewH);
-                    app.renderer.render(ctx, { renderTexture: rt, clear: false });
+                    // Draw a subtle border around each viewport. splitBorderGraphics is
+                    // a single reused Graphics instance (T44) -- this used to allocate a
+                    // new PIXI.Graphics() per viewport per frame.
+                    splitBorderGraphics.clear();
+                    splitBorderGraphics.lineStyle(2, 0x00d2d3, 0.5);
+                    splitBorderGraphics.drawRect(0, 0, rtW, rtH);
+                    app.renderer.render(splitBorderGraphics, { renderTexture: rt, clear: false });
                 }
 
                 world.filters = savedWorldFilters; // T34: restore for the shared-mode path
