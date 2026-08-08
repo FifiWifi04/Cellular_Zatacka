@@ -2110,7 +2110,7 @@
                 }
             }
 
-            if (centralHitboxes.length > 0) {
+            if (centralHitboxes.length > 0 && !(caster !== null && caster.effects.golgiTimer > 0)) {
                 // centralHitboxes (ER/Golgi) live in the cell-local, un-rotated
                 // frame (trap §4.3) — un-rotate the ray endpoints, not the walls.
                 let cosG = Math.cos(-globalRotation), sinG = Math.sin(-globalRotation);
@@ -2420,8 +2420,8 @@
             // 2. If Ghost Mode is active, bypass traces and organelles!
             if (player.effects.ghostTimer > 0) return false;
 
-            // 3. Normal Collision Logic
-            if (checkArcCollision(x, y, player)) return true;
+            // 3. Normal Collision Logic — Golgi pass bypasses the ER/Golgi walls only.
+            if (player.effects.golgiTimer <= 0 && checkArcCollision(x, y, player)) return true;
 
             // Query spatial grid for nearby obstacles
             let stepLen = Math.hypot(x - player.x, y - player.y);
@@ -4223,6 +4223,10 @@
             if (!isCellFrozen) {
                 globalRotation += 0.0015 * delta;
                 rotatingContainer.rotation = globalRotation;
+                // T43: while any local player can pass through the ER/Golgi walls,
+                // dim them to show they are not solid right now. Cheap alpha flip
+                // on the existing container -- no redraw, no allocation.
+                rotatingContainer.alpha = players.some(p => p.alive && !p.isBot && p.effects.golgiTimer > 0) ? 0.35 : 1.0;
                 drawTraces();
                 updateDriftingOrganelles(delta);
                 updateVesicles(delta);
