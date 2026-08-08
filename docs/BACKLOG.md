@@ -547,3 +547,21 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   wins. Countable proxies (draw calls, filter applies, render-target bytes,
   allocations) are the honest evidence here; wall-clock is a secondary note.
   Worth remembering for every future perf task. — 2026-08-07
+
+## Found while doing T43 (golgiTimer wiring) — 2026-08-08
+
+- **Possible neck-immunity edge case at Speed: Very Fast (3.5), unconfirmed.**
+  Regression-sweep script: after 10s of unsteered play at speed 3.5,
+  `checkCollision(near.x, near.y, p)` returns `true` (lethal) for `near` = the
+  most-recently-pushed point of the player's own last trace segment, where at
+  speeds 1.5 and 2.5 the identical check returns `false` as expected. Bisected
+  with `git stash` against the pre-T43 file at the same commit: **identical
+  result on unmodified code**, so this is not something T43's `golgiTimer`
+  change touches or introduces — T43 never reads `traceSegments`, `isOwnNeck`,
+  or `NECK_LENGTH`. Could be a genuine `NECK_LENGTH`/`isOwnNeck` edge case at
+  large per-frame step sizes, or could be a test-methodology artifact (probing
+  the exact last-pushed point rather than a real lateral near-miss trajectory
+  — nearby, non-neck trace geometry from the same short unsteered run could
+  legitimately be within `TRACE_HITBOX` of that point). Not investigated
+  further — out of scope for T43. Worth a real in-browser near-miss playtest
+  at Very Fast before trusting either explanation. — 2026-08-08

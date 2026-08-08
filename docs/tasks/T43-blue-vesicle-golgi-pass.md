@@ -85,8 +85,53 @@ redraw through `drawArcs()`.
 
 ## Definition of done
 
-- [ ] `golgiTimer` skips `checkArcCollision()` and nothing else
-- [ ] `raycast()` suppresses `'wall'` for a boosted caster — both paths agree
-- [ ] Visual cue on the arcs while active
-- [ ] Ghost combo unaffected
-- [ ] `docs/TASKS.md`: T43 → `DONE`
+- [x] `golgiTimer` skips `checkArcCollision()` and nothing else
+- [x] `raycast()` suppresses `'wall'` for a boosted caster — both paths agree
+- [x] Visual cue on the arcs while active
+- [x] Ghost combo unaffected
+- [x] `docs/TASKS.md`: T43 → `DONE`
+
+## Progress notes (verification, 2026-08-08)
+
+Implementation:
+- `checkCollision()`: `if (player.effects.golgiTimer <= 0 && checkArcCollision(x, y, player)) return true;`
+  — replaces the unconditional call, placed exactly where it was (after the
+  membrane/nucleus/ghost checks). `checkArcCollision()` itself is untouched.
+- `raycast()`: the ER/Golgi analytic pre-pass is now gated
+  `if (centralHitboxes.length > 0 && !(caster !== null && caster.effects.golgiTimer > 0))`,
+  using the `caster` lookup that already existed for `isOwnNeck`.
+- Visual cue: `rotatingContainer.alpha` is set once per frame (inside the
+  existing `!isCellFrozen` block, no new allocation) to `0.35` when any
+  `!p.isBot` player has `golgiTimer > 0`, else `1.0`. No `drawArcs()` redraw
+  needed — this is the same container T09/T33 already own.
+
+Verified via `tools/verify_harness.py` (direct function calls through
+`page.evaluate`, plus one real-time bot-watch and two screenshots):
+- Headline test: `checkArcCollision()` still returns `true` at a wall point
+  regardless of `golgiTimer` (unchanged), but `checkCollision()` flips
+  `true` → `false` for the same point solely based on `golgiTimer` state.
+- Only the arcs: with `golgiTimer` active, `isOutsideCell`/`isInsideNucleus`
+  and `checkCollision` against an organelle and another player's trace all
+  still return lethal `true`.
+- Bot agrees: 20 samples of `raycast()` on a live bot over 60 game-seconds
+  with `golgiTimer` kept topped up returned `'clear'` every time, zero
+  `'wall'` hits (would have been `'wall'` at ~8px range before the fix, per
+  the same-point no-timer control in the headline test).
+- Red mode: collector in `targetMode:'attack'` picks up a blue vesicle —
+  opponent's `golgiTimer` goes 0 → 7 (EFFECT_DURATION), collector's stays 0.
+- 3× ghost combo: three blue pickups in-window still set `ghostTimer = 10`
+  on the third, and ghost still bypasses an organelle collision afterward
+  (`checkCollision` → `false`), unaffected by this change.
+- Visual cue: `rotatingContainer.alpha` reads `1.0` with `golgiTimer = 0` and
+  `0.35` with `golgiTimer > 0` after one `gameLoop` tick; confirmed visually
+  in screenshots (`/tmp/verify/t43_golgi_inactive.png`,
+  `t43_golgi_active.png`) — the ER teal line and red ribosome dots visibly
+  dim when active.
+- Regression sweep across all three speeds (1.5/2.5/3.5): membrane,
+  organelle and ER/Golgi-wall collisions with `golgiTimer = 0` (the default
+  all round) are all still lethal at every speed. One anomaly found at
+  Very Fast (3.5) unrelated to this change — see `docs/BACKLOG.md`
+  "Found while doing T43".
+- Console clean throughout (dev server + `assert_console_clean()`).
+- `python3 tools/build_standalone.py --check` passes; `sw.js` `CACHE_NAME`
+  bumped v6 → v7.

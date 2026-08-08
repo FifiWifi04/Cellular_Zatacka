@@ -16,8 +16,8 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > refactor — while shipped bugs sit unfixed.
 >
 > Order: **T43 → T40 → T44 → T39**, then Track K as it unblocks, then T22 and
-> Phase 7. (T33–T37 are done.) T43 first: a headline power-up currently grants
-> nothing at all.
+> Phase 7. (T33–T37 and T40 are done. T43 landed 2026-08-08 — the blue
+> vesicle's Golgi-pass now actually works.) **T44 is next.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -166,6 +166,8 @@ sim/render split can wait behind them.
 | T36 | [Target mode: legend wrong, attack does almost nothing](tasks/T36-targetmode-legend-and-attack.md) | — | `DONE` |
 | T37 | [Calcification: double membrane, organelle bounce](tasks/T37-calcification-visuals.md) | — | `DONE` |
 | T40 | [Make pause discoverable](tasks/T40-pause-discoverability.md) | — | `DONE` |
+| T43 | [Blue vesicle's Golgi-pass effect does nothing](tasks/T43-blue-vesicle-golgi-pass.md) | — | `DONE` |
+| T44 | [Split-screen RenderTexture quality/cost](tasks/T44-splitscreen-quality-and-cost.md) | — | `READY` |
 
 ### Track K — Playtest design & features
 
