@@ -73,8 +73,21 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > same as split-screen already allows. Motif now on 100% of sampled time in
 > every shared-camera config tested (was 0% for the 4-player phone case);
 > `drawTraces()` cost still flat; off-screen deaths/round-end behave
-> normally. See `docs/tasks/T47-dimer-lod-never-reached.md` Findings. Next
-> up: **T56**.
+> normally. See `docs/tasks/T47-dimer-lod-never-reached.md` Findings.
+>
+> **T56 landed 2026-08-09** — the trace motif is now a lattice band (2-4
+> tier-driven longitudinal lines with a staggered, phase-shifted colour seam)
+> instead of T42's two-dot bead chain, the growing tip flares outward at
+> `TIP_FLARE_MAX=1.1` right at the point, and free tubulin dimers spawn near
+> the tip and drift in to "dock" (reusing T17's particle pool, hard-capped at
+> `ASSEMBLY_DIMERS_MAX=8`/player via an exact owner-tracked counter, not just
+> spawn cadence). `drawTraces()` steady-state cost stayed flat (0.20-0.32ms)
+> across a 7.7x trace-length increase (692→5340 points); collision proven
+> byte-identical (same 4.1s membrane-death figure as T42's own check).
+> See `docs/tasks/T56-microtubule-lattice-and-assembly.md` Findings for full
+> numbers, including where 60/120-game-second real-time measurement had to be
+> substituted with a synthetic-length methodology under this session's time
+> budget. Next up: **T51**.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -242,7 +255,7 @@ sim/render split can wait behind them.
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `DONE` |
 | T51 | [Give the player a way to fight the shrinking membrane (ATP)](tasks/T51-slow-the-calcification.md) | T12 | `READY` |
 | T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `READY` |
-| T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `READY` |
+| T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `DONE` |
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `BLOCKED` |
 
 > **Phase 9 — after Gen 4.** Scoped in

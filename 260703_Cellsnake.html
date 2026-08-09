@@ -860,16 +860,23 @@
         // size, let the sprite upscale). High keeps renderScale at 1.0 so split
         // stays pixel-comparable to shared mode; low skips MSAA entirely since a
         // weak device needs the fill-rate saving more than the smoothing.
+        // T56: protoLanes is the number of longitudinal protofilament lines the
+        // lattice band draws (2-4, see stampDimer); assemblyInterval is the
+        // frame gap between a player's incoming-dimer spawns (larger = fewer).
+        // At ASSEMBLY_LIFE=0.35s (21 frames @60fps) these keep the worst-case
+        // concurrent count per player at interval=3 (high) around 7, under
+        // ASSEMBLY_DIMERS_MAX=8; assemblyLiveCount enforces the cap directly
+        // regardless, this is just why "low" spawns noticeably less often.
         const QUALITY_TIERS = {
             low:    { threshold: 0.6,  bloomScale: 0.6, brightness: 1.0, blur: 4, quality: 2, trailBlur: 2,
                       bloomEnabled: false, trailBlurEnabled: false, traceScale: 0.4,  particleBudget: 0,   warningLevel: 0, cytosolCount: 300,
-                      splitMultisample: PIXI.MSAA_QUALITY.NONE,   splitRenderScale: 0.6 },
+                      splitMultisample: PIXI.MSAA_QUALITY.NONE,   splitRenderScale: 0.6, protoLanes: 2, assemblyInterval: 8 },
             medium: { threshold: 0.45, bloomScale: 1.0, brightness: 1.1, blur: 6, quality: 3, trailBlur: 3,
                       bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.5,  particleBudget: 150, warningLevel: 1, cytosolCount: 800,
-                      splitMultisample: PIXI.MSAA_QUALITY.MEDIUM, splitRenderScale: 0.8 },
+                      splitMultisample: PIXI.MSAA_QUALITY.MEDIUM, splitRenderScale: 0.8, protoLanes: 3, assemblyInterval: 4 },
             high:   { threshold: 0.3,  bloomScale: 1.5, brightness: 1.2, blur: 8, quality: 4, trailBlur: 4,
                       bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.75, particleBudget: 400, warningLevel: 2, cytosolCount: 800,
-                      splitMultisample: PIXI.MSAA_QUALITY.HIGH,   splitRenderScale: 1.0 }
+                      splitMultisample: PIXI.MSAA_QUALITY.HIGH,   splitRenderScale: 1.0, protoLanes: 4, assemblyInterval: 3 }
         };
         let quality = 'low';      // current tier name; set for real by applyQuality() near the end of the T18 section
         let bloomFilter = null;   // module-scope so applyQuality can retune it
@@ -1021,6 +1028,8 @@
             purgeSplitScreen();
 
             particleBudget = t.particleBudget;
+            latticeLaneCount = t.protoLanes;         // T56
+            assemblyDimerInterval = t.assemblyInterval; // T56
 
             warningFilterLevel = t.warningLevel;
             if (warningFilterActive) shakeRoot.filters = WARNING_FILTER_STACKS[warningFilterLevel];
@@ -1089,6 +1098,15 @@
         const DIMER_LOD_ZOOM = 0.5;  // below this world.scale.x the motif aliases into noise (RT is TRACE_RT_SCALE=0.5x world px) -- fall back to the plain line; see task Findings
         const DIMER_SPACING = 6;     // world px between alpha/beta colour flips, keyed off each point's stored .d so the pattern is stable regardless of how many points a frame appends
         const TIP_POINT_COUNT = 12;  // growing-tip points redrawn (not baked) every frame -- bounded, independent of total trace length
+
+        // T56: lattice band (replaces the two-dot bead motif) and the assembling
+        // tip. Rendering only, same as the T42 block above -- collision paths
+        // are not touched by any of this.
+        const TIP_FLARE_MAX = 1.1;       // extra half-span multiplier at the very tip of the redrawn TIP_POINT_COUNT window -- protofilaments splay outward like an opening flower, largest right at the tip
+        const ASSEMBLY_DIMERS_MAX = 8;   // hard per-player cap on live "docking" particles -- enforced by assemblyLiveCount, not just spawn cadence, so it holds even under the fuzzer's 4x dilation
+        const ASSEMBLY_SPAWN_DIST = 16;  // world px out from the tip a free dimer spawns before drifting in
+        const ASSEMBLY_LIFE = 0.35;      // seconds a docking dimer lives, tuned with ASSEMBLY_SPEED so it fades out near the tip rather than short of it or past it
+        const ASSEMBLY_SPEED = 2.2;      // matches the magnitude of the other emitParticles() speeds in this file (locomotion 1.0, vesicle bursts 2.5-3.5)
 
         const MAX_TRACE_POINTS = 20000; // per-player memory/perf bound, not a gameplay cap; see T07 commit message
         const NECK_LENGTH = 35; // px of own trace (measured along the current segment) that cannot kill you; replaces the old 15/16-frame skip so the immune neck is the same physical length at every speed (T08)
@@ -1163,20 +1181,35 @@
         // add briefly on top of that. Comfortably under MAX_PARTICLES.
         let particlePool = [];
         for (let i = 0; i < MAX_PARTICLES; i++) {
-            particlePool.push({ x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 0, color: 0xffffff, alpha: 0 });
+            particlePool.push({ x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 0, color: 0xffffff, alpha: 0, assemblyOwner: -1 });
         }
         let particleCount = 0; // live particles occupy particlePool[0, particleCount)
         // T26: active-particle cap for the current quality tier (0/150/400). The
         // pool itself never resizes -- applyQuality() only lowers this ceiling.
         let particleBudget = MAX_PARTICLES;
+        // T56: tier-driven lattice/assembly knobs, written by applyQuality() --
+        // same TDZ-ordering reason as particleBudget above (declared before the
+        // first applyQuality() call just below).
+        let latticeLaneCount = 3;
+        let assemblyDimerInterval = 4;
+        // T56: assemblyLiveCount[playerIndex] is the hard, exactly-tracked count
+        // of that player's currently-live docking-dimer particles (incremented in
+        // emitParticles() when a slot tagged with assemblyOwner is actually
+        // allocated, decremented in updateParticles() when that slot expires).
+        // Fixed size 4 matches the game's max player count; reset in startRound().
+        let assemblyLiveCount = [0, 0, 0, 0];
 
         // First real application of a tier -- deferred to here (see the T26 section
         // above) because applyQuality() writes particleBudget, just declared above.
         applyQuality(detectInitialQuality());
 
-        // opts: { speed, spread, angle, life, size, color }. Drops the request once
-        // the budget is full rather than overwriting the oldest particle (simpler, and
-        // the visual difference is nil per T17).
+        // opts: { speed, spread, angle, life, size, color, assemblyOwner }. Drops
+        // the request once the budget is full rather than overwriting the oldest
+        // particle (simpler, and the visual difference is nil per T17).
+        // assemblyOwner (T56): index into players[], or -1 (default) for every
+        // non-assembly emitter in the file. When set, assemblyLiveCount[owner] is
+        // incremented for each particle actually allocated below -- never for a
+        // request the budget cap drops -- so the counter can never leak.
         function emitParticles(x, y, count, opts) {
             let speed = opts.speed || 0;
             let spread = opts.spread !== undefined ? opts.spread : Math.PI * 2;
@@ -1184,6 +1217,7 @@
             let life = opts.life || 0.5;
             let size = opts.size || 3;
             let color = opts.color !== undefined ? opts.color : 0xffffff;
+            let assemblyOwner = opts.assemblyOwner !== undefined ? opts.assemblyOwner : -1;
 
             let cap = Math.min(MAX_PARTICLES, particleBudget);
             for (let i = 0; i < count; i++) {
@@ -1199,6 +1233,8 @@
                 p.size = size;
                 p.color = color;
                 p.alpha = 1;
+                p.assemblyOwner = assemblyOwner;
+                if (assemblyOwner !== -1) assemblyLiveCount[assemblyOwner]++;
             }
         }
 
@@ -1210,6 +1246,7 @@
                 p.vx *= 0.94; p.vy *= 0.94; // drag, reads as fluid
                 p.life -= deltaSec;
                 if (p.life <= 0) {
+                    if (p.assemblyOwner !== -1) { assemblyLiveCount[p.assemblyOwner]--; p.assemblyOwner = -1; } // T56
                     particleCount--;
                     let last = particlePool[particleCount];
                     particlePool[particleCount] = p;
@@ -3818,25 +3855,39 @@
             }
         }
 
-        // T42: stamps a two-dot "tubulin dimer" motif (alpha/beta) for one
-        // settled-trace edge, replacing a plain lineTo. Colour alternates by
-        // distance travelled (distAtB, i.e. the edge's own stored .d), not by
-        // a counter, so the pattern is stable no matter how many points a
-        // frame happens to append. offsetScale lets the growing-tip caller
-        // pulse the motif without a second code path. No allocation.
+        // T42/T56: stamps a "tubulin lattice" motif for one settled-trace edge,
+        // replacing a plain lineTo. Was two offset dots (T42); at trace width
+        // those merged into a single blob per step, reading as a bead chain
+        // rather than a tube (owner report, 2026-08-09). Now draws
+        // latticeLaneCount (2-4, tier-driven) longitudinal "protofilament"
+        // lines spanning the band, each a short segment from A to B. Colour
+        // alternates by distance travelled (distAtB, i.e. the edge's own
+        // stored .d) same as before, but each lane's flip is phase-shifted
+        // along that same distance axis so adjacent lanes change colour at
+        // different points -- the staggered/diagonal seam a real microtubule
+        // lattice has, instead of every lane flipping in a straight rung.
+        // offsetScale lets the growing-tip caller pulse/flare the band without
+        // a second code path. No allocation, no Math.random -- deterministic
+        // from distAtB alone, so the baked texture never shimmers against itself.
         function stampDimer(gfx, ax, ay, bx, by, distAtB, colorA, colorB, offsetScale) {
             let dx = bx - ax, dy = by - ay;
             let len = Math.hypot(dx, dy) || 1;
             let px = -dy / len, py = dx / len;
-            let off = TRACE_WIDTH * 0.35 * offsetScale;
-            let r = TRACE_WIDTH * 0.42 * offsetScale;
-            let parity = Math.floor(distAtB / DIMER_SPACING) & 1;
-            gfx.beginFill(parity ? colorA : colorB, 1);
-            gfx.drawCircle(bx + px * off, by + py * off, r);
-            gfx.endFill();
-            gfx.beginFill(parity ? colorB : colorA, 1);
-            gfx.drawCircle(bx - px * off, by - py * off, r);
-            gfx.endFill();
+            // Half-span deliberately reaches most of the way to the trailGlow
+            // halo's own half-width (TRACE_WIDTH+4)/2 -- the T42 bead offset
+            // (0.35) stayed close to the centreline and read as a bead chain,
+            // not a tube wall, at these sizes (owner report, 2026-08-09).
+            let halfSpan = TRACE_WIDTH * 0.9 * offsetScale;
+            let lineW = Math.max(1.0, TRACE_WIDTH * 0.4 * offsetScale);
+            let lanes = latticeLaneCount;
+            let phaseStep = DIMER_SPACING / lanes;
+            for (let lane = 0; lane < lanes; lane++) {
+                let off = lanes === 1 ? 0 : ((lane / (lanes - 1)) * 2 - 1) * halfSpan;
+                let parity = Math.floor((distAtB + lane * phaseStep) / DIMER_SPACING) & 1;
+                gfx.lineStyle(lineW, parity ? colorA : colorB, 1);
+                gfx.moveTo(ax + px * off, ay + py * off);
+                gfx.lineTo(bx + px * off, by + py * off);
+            }
         }
 
         // T25: (re)allocate trailGlowRT/trailCoreRT for activeCell's current
@@ -3973,17 +4024,22 @@
             players.forEach(p => {
                 if (!p.alive) return;
 
-                // --- T42: GROWING TIP -- last TIP_POINT_COUNT points of the current
-                // segment, redrawn (not baked) every frame with a pulsing offset so
-                // the tip visibly animates. Bounded per player regardless of trace
-                // length -- never touches traceScratchCore/the RT (T25's flat cost
-                // is untouched).
+                // --- T42/T56: GROWING TIP -- last TIP_POINT_COUNT points of the
+                // current segment, redrawn (not baked) every frame with a pulsing,
+                // flaring offset so the tip visibly animates and splays outward
+                // like an opening flower right at the end -- the single most
+                // recognisable frame of a real assembly animation. Bounded per
+                // player regardless of trace length -- never touches
+                // traceScratchCore/the RT (T25's flat cost is untouched).
                 if (useDimerLOD) {
                     let seg = p.traceSegments[p.traceSegments.length - 1];
                     let start = Math.max(1, seg.length - TIP_POINT_COUNT);
+                    let span = Math.max(1, seg.length - 1 - start);
                     for (let i = start; i < seg.length; i++) {
+                        let flareT = (i - start) / span; // 0 at the base of this window, 1 at the very tip
                         let pulse = 1 + 0.25 * Math.sin(survivalTime * 7 - i * 0.9);
-                        stampDimer(trailCore, seg[i - 1].x, seg[i - 1].y, seg[i].x, seg[i].y, seg[i].d, p.color, p.coreColor, pulse);
+                        let scale = pulse * (1 + flareT * TIP_FLARE_MAX);
+                        stampDimer(trailCore, seg[i - 1].x, seg[i - 1].y, seg[i].x, seg[i].y, seg[i].d, p.color, p.coreColor, scale);
                     }
                 }
 
@@ -5010,7 +5066,7 @@
                 }
             }
 
-            players.forEach(p => {
+            players.forEach((p, pi) => {
                 if (!p.alive) return;
 
                 if (!isCellFrozen) {
@@ -5280,6 +5336,31 @@
                         // onto the trace as it forms.
                         let dimerColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.color : p.coreColor;
                         emitParticles(p.x, p.y, 1, { speed: 1.0, spread: 0.6, angle: p.angle + Math.PI, life: 0.4, size: 2, color: dimerColor });
+                    }
+
+                    // T56: incoming tubulin dimers -- free subunits spawn just off
+                    // the tip and drift inward, "docking" as they fade, the mirror
+                    // of the depolymerisation burst above (lysosome pickup, same
+                    // sampled-outward-from-a-point-and-scattered shape, opposite
+                    // direction). Same pooled emitParticles() as everything else in
+                    // this file -- no second particle system. Gated on useDimerLOD
+                    // (the lattice motif itself being visible) so nothing spawns
+                    // toward a tip nobody can see, and hard-capped per player via
+                    // assemblyLiveCount regardless of spawn cadence.
+                    if (world.scale.x >= DIMER_LOD_ZOOM) {
+                        p.assemblyTick = (p.assemblyTick + 1) % assemblyDimerInterval;
+                        if (p.assemblyTick === 0 && assemblyLiveCount[pi] < ASSEMBLY_DIMERS_MAX) {
+                            let side = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? 1 : -1;
+                            let spawnAngle = p.angle + side * (0.5 + Math.random() * 0.4);
+                            let sx = p.x + Math.cos(spawnAngle) * ASSEMBLY_SPAWN_DIST;
+                            let sy = p.y + Math.sin(spawnAngle) * ASSEMBLY_SPAWN_DIST;
+                            let toTipAngle = Math.atan2(p.y - sy, p.x - sx);
+                            let dockColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.coreColor : p.color;
+                            emitParticles(sx, sy, 1, {
+                                speed: ASSEMBLY_SPEED, spread: 0.15, angle: toTipAngle,
+                                life: ASSEMBLY_LIFE, size: 2.2, color: dockColor, assemblyOwner: pi
+                            });
+                        }
                     }
                 }
 
@@ -5632,6 +5713,7 @@
             uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
             particleCount = 0; particleLayer.clear(); // T17
+            assemblyLiveCount.fill(0); // T56
 
             // 2. Reset the Virus Cycle (Set to 30s for testing)
             infection = {
@@ -5687,6 +5769,7 @@
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
                     controls: config.controls, isBot: isBot,
                     alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
+                    assemblyTick: 0, // T56
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
