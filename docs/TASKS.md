@@ -29,11 +29,18 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > **Track K is now fully done** — T42 (tubulin-dimer trace) landed 2026-08-09,
 > see `docs/tasks/T42-tubulin-trace.md` Findings.
 >
-> **Owner session 2026-08-09 reopened Track J with two playtest defects.** T46
-> (Help did not pause) is already fixed. **Take T47 next** — T42's dimer motif
-> is gated on a camera zoom that shared camera essentially never reaches, so the
-> headline visual is off for whole rounds; it carries a design choice to make.
-> After T47: **T22** (sim/render split), then Phase 7.**
+> **Owner session 2026-08-09 reopened Track J.** T46 (Help did not pause) is
+> already fixed. Order from here:
+>
+> **T50 → T48 → T49 → T47 → T51 → T52 → T22 → Track L → Phase 7.**
+>
+> T50 is first because it kills players who did the right thing: in red mode a
+> *lone* necrotic organelle is not breakable at all, and a second cluster contact
+> inside the 0.3s break cooldown falls through to death. Both reproduced with
+> numbers in the task file. T48/T49 are the visual defects from the owner's Gen 3
+> screenshot; T47 is T42's motif never reaching its LOD gate. T51 and T52 are
+> design work (counterplay to calcification; making Gen 4 legible). Track L is
+> Phase 8, the first persistent state — see `PHASE8-META-PROGRESSION.md`.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -187,6 +194,9 @@ sim/render split can wait behind them.
 | T45 | [Start menu never fully hides on mobile](tasks/T45-mobile-menu-not-hidden.md) | — | `DONE` |
 | T46 | [Opening Help does not pause the round](tasks/T46-help-does-not-pause.md) | T41 | `DONE` |
 | T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `READY` |
+| T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `READY` |
+| T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `READY` |
+| T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `READY` |
 
 ### Track K — Playtest design & features
 
@@ -196,6 +206,20 @@ sim/render split can wait behind them.
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `DONE` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `DONE` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `DONE` |
+| T51 | [Give the player a way to fight the shrinking membrane](tasks/T51-slow-the-calcification.md) | T12 | `READY` |
+| T52 | [Generation 4 reads as "vesicles drift oddly"](tasks/T52-gen4-legibility.md) | T15 | `READY` |
+
+### Track L — Phase 8: Scoring, statistics and upgrades
+
+Scoped in [`PHASE8-META-PROGRESSION.md`](PHASE8-META-PROGRESSION.md). This is the
+game's first state that survives a round, so it goes after Track J's defects and
+after T22 — build and play each layer before adding the next.
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T53 | [Run stats and a score](tasks/T53-run-stats-and-score.md) | — | `READY` |
+| T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `BLOCKED` |
+| T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `BLOCKED` |
 
 ### Parked
 
