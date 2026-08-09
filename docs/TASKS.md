@@ -27,8 +27,13 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > lethal debris that scales with cluster size, and break apart one member at a
 > time in red mode; see `docs/tasks/T38-make-necrosis-matter.md` Findings.
 > **Track K is now fully done** — T42 (tubulin-dimer trace) landed 2026-08-09,
-> see `docs/tasks/T42-tubulin-trace.md` Findings. Next up: **T22** (sim/render
-> split), then Phase 7.**
+> see `docs/tasks/T42-tubulin-trace.md` Findings.
+>
+> **Owner session 2026-08-09 reopened Track J with two playtest defects.** T46
+> (Help did not pause) is already fixed. **Take T47 next** — T42's dimer motif
+> is gated on a camera zoom that shared camera essentially never reaches, so the
+> headline visual is off for whole rounds; it carries a design choice to make.
+> After T47: **T22** (sim/render split), then Phase 7.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -180,6 +185,8 @@ sim/render split can wait behind them.
 | T43 | [Blue vesicle's Golgi-pass effect does nothing](tasks/T43-blue-vesicle-golgi-pass.md) | — | `DONE` |
 | T44 | [Split-screen RenderTexture quality/cost](tasks/T44-splitscreen-quality-and-cost.md) | — | `DONE` |
 | T45 | [Start menu never fully hides on mobile](tasks/T45-mobile-menu-not-hidden.md) | — | `DONE` |
+| T46 | [Opening Help does not pause the round](tasks/T46-help-does-not-pause.md) | T41 | `DONE` |
+| T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `READY` |
 
 ### Track K — Playtest design & features
 

@@ -4241,7 +4241,7 @@
             if (isPlaying && (e.key === 'Escape' || e.key === 'p' || e.key === 'P')) {
                 // T41: Escape/P closes the help overlay first if it's open,
                 // rather than also toggling the pause menu underneath it.
-                if (!document.getElementById('helpOverlay').classList.contains('hidden-help')) {
+                if (helpIsOpen()) {
                     toggleHelpPanel(false);
                 } else {
                     togglePauseMenu();
@@ -4348,6 +4348,11 @@
         if (!isTouchDevice) {
             uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
             uiElement.addEventListener('mouseleave', () => {
+                // T46: toggleHelpPanel(true) hides #ui, which slides the panel out
+                // from under the cursor and fires this handler -- which then
+                // resumed the very round the overlay had just paused. The overlay
+                // owns pause for as long as it is open.
+                if (helpIsOpen()) return;
                 if (isPlaying) {
                     // Also clears any pause opened via pauseMenuBtn -- otherwise the
                     // mouse leaving would hide the menu but leave the round paused
@@ -4389,7 +4394,7 @@
             if (uiElement.contains(e.target) || e.target === pauseMenuBtn) return;
             // T41: the help overlay owns its own outside-click close (and its
             // own resume-on-close logic) while it's open -- don't race it here.
-            if (!document.getElementById('helpOverlay').classList.contains('hidden-help')) return;
+            if (helpIsOpen()) return;
             uiElement.classList.add('hidden-ui');
             paused = false;
         });
@@ -5407,6 +5412,13 @@
         };
 
         function toHex(n) { return '#' + n.toString(16).padStart(6, '0'); }
+
+        // T41: is the How-to-Play overlay currently up? Several other paths
+        // (the #ui mouseleave peek, the outside-click resume, Escape/P) have to
+        // defer to it while it is open, so they all ask through here.
+        function helpIsOpen() {
+            return !document.getElementById('helpOverlay').classList.contains('hidden-help');
+        }
 
         // T41: opening pauses a round in progress (mirrors togglePauseMenu);
         // closing always resumes. Hides #ui while open so the pause menu and
