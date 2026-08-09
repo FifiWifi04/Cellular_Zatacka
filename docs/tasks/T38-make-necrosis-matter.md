@@ -167,19 +167,89 @@ membrane is already shrinking underneath all of this.
 
 ## Definition of done
 
-- [ ] Fusion implemented as clustering — **no new collision geometry**
-- [ ] Debris in `spatialGrid`, `checkCollision` **and** `raycast`, swept only
-- [ ] Red mode removes one member per hit, with cooldown
-- [ ] Debris rate measurably scales with cluster size, and measurably falls after
+- [x] Fusion implemented as clustering — **no new collision geometry**
+- [x] Debris in `spatialGrid`, `checkCollision` **and** `raycast`, swept only
+- [x] Red mode removes one member per hit, with cooldown
+- [x] Debris rate measurably scales with cluster size, and measurably falls after
       breaking — numbers in the commit message
-- [ ] Mineralised crystalline look, distinct from organelles and from T39
-- [ ] All caps enforced and stated in `## Findings`
-- [ ] Gen 1 unchanged
-- [ ] `docs/TASKS.md`: T38 → `DONE`
+- [x] Mineralised crystalline look, distinct from organelles and from T39
+- [x] All caps enforced and stated in `## Findings`
+- [x] Gen 1 unchanged
+- [x] `docs/TASKS.md`: T38 → `DONE`
 
 ---
 
 ## Findings
 
-*(Chosen constants and why; measured debris rates by cluster size and after
-breaking; how the cluster silhouette is drawn.)*
+**Constants** (`260703_Cellsnake.html`, near `NECROSIS_*`):
+- `CLUSTER_MAX_MEMBERS = 6` — caps fusion so a cluster stays readable and its
+  shed rate stays bounded (`DEBRIS_BASE_INTERVAL / memberCount` bottoms out at
+  1s instead of trending to zero).
+- `CLUSTER_HIT_COOLDOWN = 0.3` — copied from `MASS_HIT_COOLDOWN`; same purpose
+  (one pass cannot strip a whole cluster).
+- `DEBRIS_BASE_INTERVAL = 6` — a 2-member cluster sheds every 3s, a 6-member
+  cluster every 1s. Gen 2's shrinking membrane (T12) makes the arena tight
+  enough that a faster floor felt unfair in a quick playtest.
+- `DEBRIS_MAX = 24`, `DEBRIS_LIFETIME = 3.0`s, `DEBRIS_RADIUS = 7`,
+  `DEBRIS_SPEED = 0.6` px/tick outward drift — a fragment covers roughly
+  0.6*60*3 = 108px over its life, well inside one grid cell's reach for the
+  bot to react to.
+
+**Measured debris scaling** (`tools/verify_harness.py`, isolated synthetic
+clusters far from the player so nothing else perturbs the count; emission
+counted via a monkey-patched `necroticDebris.push`, not live array length,
+since fragments expire mid-window):
+- 2-member cluster: 7 emitted over 20.5 game-seconds -> **20.5/min** (theory:
+  60/3 = 20/min).
+- 5-member cluster: 17 emitted over 20.6 game-seconds -> **49.5/min** (theory:
+  60/1.2 = 50/min).
+- Before/after a break, same cluster: 4-member 10 emitted/15.45s ->
+  **38.8/min**; 3-member (one member removed) 8 emitted/15.3s -> **31.4/min**
+  (theory 40 -> 30/min). The rate measurably drops after breaking.
+
+**Breaking**: isolated members (>60px apart, so only one is ever in the swept
+step's contact range at once) confirm attack-mode contact removes exactly one
+member and the player survives; contacting a second, still-intact member
+inside the same 0.3s cooldown window falls through to the ordinary organelle
+death in `checkCollision()` (this is a deliberate reading of "otherwise ->
+death, as today" -- unlike the malignant-mass path, a necrotic member that
+checkCollision() doesn't know is "on cooldown" cannot grant a free-pass, so
+grazing two members in one pass is punished, not just capped at one break).
+Self mode kills on cluster contact unchanged (`selfKillAfter: false`).
+
+**Caps hold**: 40 emission attempts against an oversized synthetic cluster
+stopped at `necroticDebris.length === 24`; chain-fusing 10 organelles
+pairwise capped the resulting cluster at exactly 6 members (the rest fused
+into their own separate cluster instead of growing the first past the cap).
+
+**`org.dead` (trap 4.1)**: a member flagged `dead` (as `breakClusterMember()`
+does mid-frame) is skipped by both `checkCollision()` and `raycast()` --
+verified directly (`collidesWithDeadOrg: false`, `raycast` reports `clear`
+through it). Needed because a break can happen mid-frame, after
+`rebuildSpatialGrid()` already snapshotted the old organelle reference for
+every player's checkCollision()/raycast() call this frame; without the flag a
+later player in the same frame's loop (or the bot's raycast) would still see
+the just-destroyed member.
+
+**Silhouette**: no compound hitbox and no convex-hull allocation (would
+violate §5's no-allocation-in-the-render-pass norm for a system this size,
+even off the strict collision hot path) -- each member is filled as a
+same-colour circle (seamless overlap, no stroke), then each member's
+7-facet jittered polygon edge is stroked only if its midpoint doesn't fall
+inside a neighbouring member's radius, which suppresses the internal seams
+without a global union. Facet jitter is hashed from each member's frozen
+(never-moving) x/y, so it's stable frame to frame. Screenshot comparison
+against T39's aggregate (`/tmp/verify/t38_vs_t39.png` during this session)
+shows a grey/blue-grey angular cluster clearly distinct from the amber/ochre
+protein-aggregate blocks alongside it.
+
+**Regression** (direct `checkCollision()` calls, since the diff never touches
+the trace or membrane paths): membrane death, own-trace death past the neck,
+neck-immunity survival within `NECK_LENGTH`, and plain-organelle death all
+still fire exactly as before.
+
+**Leak**: `world` + `organellesLayer` child counts flat over 60 game-seconds
+at Gen 2 while necrosis naturally froze 5 organelles (48 and 25 children
+throughout, no growth) -- the new layers are `.clear()`-and-redraw Graphics
+like `massLayer`, and `breakClusterMember()` follows the existing
+`removeChild()` + `.destroy()` pattern from the T13 freeze-sprite-swap code.

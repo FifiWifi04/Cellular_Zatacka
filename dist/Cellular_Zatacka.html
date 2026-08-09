@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 8d7f478dbd120845 -->
+<!-- standalone-build-inputs: ea57b8aefbf93cbc -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3867,7 +3867,9 @@ void main() {
         const golgiERContainer = new PIXI.Container();
         const rotatingContainer = new PIXI.Container();
         const organellesLayer = new PIXI.Graphics();
+        const necroticClusterLayer = new PIXI.Graphics(); // T38: fused necrotic clusters, cleared+redrawn every frame
         const massLayer = new PIXI.Graphics(); // T14: protein aggregate (T39), cleared+redrawn every frame
+        const necroticDebrisLayer = new PIXI.Graphics(); // T38: lethal shed fragments, cleared+redrawn every frame
         const particleLayer = new PIXI.Graphics(); // T17: splash particle pool, single Graphics for the whole pool
         particleLayer.blendMode = PIXI.BLEND_MODES.ADD;
         const trailLayer = new PIXI.Container();
@@ -3888,11 +3890,13 @@ void main() {
         world.addChild(golgiERContainer);
         golgiERContainer.addChild(rotatingContainer);
         world.addChild(organellesLayer);
+        world.addChild(necroticClusterLayer);
         world.addChild(massLayer);
         world.addChild(particleLayer);
         world.addChild(trailLayer);
         world.addChild(dynamicLayer);
         world.addChild(virusLayer);
+        world.addChild(necroticDebrisLayer);
         world.addChild(uiBarsLayer);
 
         // Detach and fully release every child of a container (T05).
@@ -4202,6 +4206,18 @@ void main() {
         const NECROSIS_ALPHA = 0.75;         // resting alpha once frozen and grey
         const NECROSIS_PULSE_DURATION = 0.4; // seconds the freeze flicker plays
 
+        // T38: necrotic organelles that touch fuse into a cluster; bigger clusters
+        // shed more debris; red mode removes one member per hit. See
+        // docs/tasks/T38-make-necrosis-matter.md for the design and ## Findings
+        // for why these numbers.
+        const CLUSTER_MAX_MEMBERS = 6;     // fusion cap -- keeps clusters readable and debris bounded
+        const CLUSTER_HIT_COOLDOWN = 0.3;  // seconds of attack-mode break immunity after a hit (mirrors MASS_HIT_COOLDOWN)
+        const DEBRIS_BASE_INTERVAL = 6;    // seconds; a cluster emits every DEBRIS_BASE_INTERVAL / memberCount
+        const DEBRIS_MAX = 24;             // live debris cap
+        const DEBRIS_LIFETIME = 3.0;       // seconds before a fragment expires
+        const DEBRIS_RADIUS = 7;
+        const DEBRIS_SPEED = 0.6;          // px/tick outward drift
+
         // T14: Gen 3+ hazard -- in-fiction this is a protein aggregate (misfolded
         // proteins clumping into a growing inclusion body), not a literal tumour:
         // a tumour is many cells, and this lives inside one (T39). Identifiers
@@ -4332,6 +4348,12 @@ void main() {
         let currentSpeed = 1.5;
         let survivalTime = 0;
         let necrosisTimer = 0; // T13: seconds of un-frozen game time accumulated since the last freeze
+        // T38: clusterId -> { members: [organelle,...], nextEmitTime }. Organelles
+        // gain a .clusterId field once fused (undefined until then); the cluster
+        // itself owns no new hitbox, see fuseNecroticPair().
+        let necroticClusters = new Map();
+        let nextClusterId = 1;
+        let necroticDebris = []; // T38: { x, y, vx, vy, radius, life, maxLife } -- lethal, short-lived
         let playerWins = [0, 0, 0, 0, 0]; // Index matches player ID (1 to 4, index 0 is unused)
 
         // T20: hoisted out of startRound() so the control-splash screen can read the
@@ -5330,6 +5352,16 @@ void main() {
                     });
                 });
             }
+
+            // 6. Insert necrotic debris (T38; Gen 2+ cluster shedding). Lethal and
+            // swept just like a virus particle -- both paths (§4.1) must see it.
+            necroticDebris.forEach(d => {
+                spatialGrid.insertCircle(d.x, d.y, d.radius, {
+                    type: 'debris',
+                    raw: d,
+                    _seen: -1
+                });
+            });
         }
 
         function raycast(startX, startY, angle, maxDist, casterId = null) {
@@ -5500,6 +5532,7 @@ void main() {
                             }
                         } else if (item.type === 'organelle') {
                             let org = item.raw;
+                            if (org.dead) continue; // T38: cluster member broken this frame, stale grid entry (trap 4.1)
                             if (org.type === 'mitochondria') {
                                 let cosA = Math.cos(-org.rotation);
                                 let sinA = Math.sin(-org.rotation);
@@ -5555,6 +5588,14 @@ void main() {
                             if (hitT >= 0) {
                                 let hitDist = hitT * maxDist;
                                 if (hitDist < bestDist) { bestDist = hitDist; bestType = 'mass'; bestRaw = undefined; }
+                            }
+                        } else if (item.type === 'debris') {
+                            // T38: necrotic cluster shrapnel -- same point+radius test as virus.
+                            let d = item.raw;
+                            let hitT = raySegT(startX, startY, endX, endY, d.x, d.y, d.x, d.y, d.radius + TRACE_HITBOX);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'debris'; bestRaw = undefined; }
                             }
                         }
                     }
@@ -5715,6 +5756,60 @@ void main() {
             }
         }
 
+        // T38: precise per-type sweep test against one cluster member -- mirrors
+        // the organelle branch of checkCollision() (mitochondria spine vs. lysosome
+        // circle) so a break only registers where the real hitbox actually is.
+        function clusterMemberHit(org, x1, y1, x2, y2) {
+            if (org.type === 'mitochondria') {
+                let cosA = Math.cos(-org.rotation), sinA = Math.sin(-org.rotation);
+                let dx1 = x1 - org.x, dy1 = y1 - org.y;
+                let lx1 = dx1 * cosA - dy1 * sinA, ly1 = dx1 * sinA + dy1 * cosA;
+                let dx2 = x2 - org.x, dy2 = y2 - org.y;
+                let lx2 = dx2 * cosA - dy2 * sinA, ly2 = dx2 * sinA + dy2 * cosA;
+                let halfL = (org.radius * 1.6) / 2;
+                let halfW = (org.radius * 0.9) / 2;
+                let rSq = (halfW + TRACE_HITBOX) * (halfW + TRACE_HITBOX);
+                let prevX = -halfL, prevY = 0;
+                for (let i = 1; i <= 5; i++) {
+                    let t = i / 5;
+                    let bx = Math.pow(1 - t, 2) * (-halfL) + Math.pow(t, 2) * (halfL);
+                    let by = 2 * (1 - t) * t * (org.bendY || 0);
+                    if (segSegDistSq(lx1, ly1, lx2, ly2, prevX, prevY, bx, by) < rSq) return true;
+                    prevX = bx; prevY = by;
+                }
+                return false;
+            }
+            let rSq = (org.radius + TRACE_HITBOX) * (org.radius + TRACE_HITBOX);
+            return ptSegDistSq(org.x, org.y, x1, y1, x2, y2) < rSq;
+        }
+
+        // Destroys one cluster member: drops it from `organelles` (so the next
+        // rebuildSpatialGrid() forgets it) and from its cluster, releases its
+        // sprite (§2 PixiJS lifecycle), and marks it dead so THIS frame's already
+        // -built spatialGrid entry is skipped by checkCollision()/raycast() (trap
+        // 4.1) instead of killing someone off a stale reference. A cluster reduced
+        // to one member is just a lone necrotic organelle again.
+        function breakClusterMember(clusterId, memberIndex) {
+            let cluster = necroticClusters.get(clusterId);
+            let member = cluster.members[memberIndex];
+            cluster.members.splice(memberIndex, 1);
+            member.clusterId = null;
+            member.dead = true;
+
+            let idx = organelles.indexOf(member);
+            if (idx >= 0) organelles.splice(idx, 1);
+            if (member.sprite) {
+                organellesLayer.removeChild(member.sprite);
+                member.sprite.destroy();
+            }
+            emitParticles(member.x, member.y, 10, { speed: 2.2, spread: Math.PI * 2, life: 0.5, size: 3, color: 0x8899aa }); // T17
+
+            if (cluster.members.length <= 1) {
+                for (let m of cluster.members) m.clusterId = null;
+                necroticClusters.delete(clusterId);
+            }
+        }
+
         function checkCollision(x, y, player) {
             // 1. ALWAYS check physical boundaries
             if (isOutsideCell(x, y)) return true;
@@ -5740,6 +5835,7 @@ void main() {
             for (let item of localItems) {
                 if (item.type === 'organelle') {
                     let org = item.raw;
+                    if (org.dead) continue; // T38: cluster member broken this frame, stale grid entry (trap 4.1)
                     if (org.type === 'mitochondria') {
                         // Transform BOTH head endpoints into the mitochondrion's local space
                         let cosA = Math.cos(-org.rotation), sinA = Math.sin(-org.rotation);
@@ -5775,6 +5871,11 @@ void main() {
                     if (segSegDistSq(hx1, hy1, hx2, hy2, item.x1, item.y1, item.x2, item.y2) < HITBOX_SQ) {
                         return true;
                     }
+                } else if (item.type === 'debris') {
+                    // T38: necrotic cluster shrapnel -- lethal, not breakable.
+                    let d = item.raw;
+                    let rSq = (d.radius + TRACE_HITBOX) * (d.radius + TRACE_HITBOX);
+                    if (ptSegDistSq(d.x, d.y, hx1, hy1, hx2, hy2) < rSq) return true;
                 }
             }
 
@@ -5792,6 +5893,38 @@ void main() {
 
             return false;
         }
+        // T38: fuse two touching necrotic organelles into one cluster, or grow an
+        // existing cluster, or merge two clusters. Members keep their own hitbox
+        // unchanged -- checkCollision() and raycast() need no change for the
+        // cluster itself, since it stays exactly the union of members already in
+        // organelles[] (see docs/tasks/T38-make-necrosis-matter.md).
+        function fuseNecroticPair(o, o2) {
+            if (o.clusterId != null && o.clusterId === o2.clusterId) return;
+            let clusterA = o.clusterId != null ? necroticClusters.get(o.clusterId) : null;
+            let clusterB = o2.clusterId != null ? necroticClusters.get(o2.clusterId) : null;
+
+            if (!clusterA && !clusterB) {
+                let id = nextClusterId++;
+                necroticClusters.set(id, { members: [o, o2], nextEmitTime: survivalTime + DEBRIS_BASE_INTERVAL / 2 });
+                o.clusterId = id; o2.clusterId = id;
+            } else if (clusterA && !clusterB) {
+                if (clusterA.members.length >= CLUSTER_MAX_MEMBERS) return;
+                clusterA.members.push(o2);
+                o2.clusterId = o.clusterId;
+            } else if (!clusterA && clusterB) {
+                if (clusterB.members.length >= CLUSTER_MAX_MEMBERS) return;
+                clusterB.members.push(o);
+                o.clusterId = o2.clusterId;
+            } else {
+                let smallId = clusterA.members.length <= clusterB.members.length ? o.clusterId : o2.clusterId;
+                let largeId = smallId === o.clusterId ? o2.clusterId : o.clusterId;
+                let small = necroticClusters.get(smallId), large = necroticClusters.get(largeId);
+                if (large.members.length + small.members.length > CLUSTER_MAX_MEMBERS) return;
+                for (let m of small.members) { m.clusterId = largeId; large.members.push(m); }
+                necroticClusters.delete(smallId);
+            }
+        }
+
         // --- 6. AI, Viruses, & Camera Updates ---
         function updateDriftingOrganelles(delta) {
             for (let i = 0; i < organelles.length; i++) {
@@ -5874,8 +6007,11 @@ void main() {
                         } else if (!o.necrotic && !o2.necrotic) {
                             o.x += Math.cos(ang) * overlap / 2; o.y += Math.sin(ang) * overlap / 2;
                             o2.x -= Math.cos(ang) * overlap / 2; o2.y -= Math.sin(ang) * overlap / 2;
+                        } else {
+                            // T38: both necrotic and touching -- neither moves (unchanged
+                            // from T13), but they fuse into one cluster.
+                            fuseNecroticPair(o, o2);
                         }
-                        // both necrotic: neither moves, nothing to resolve
                     }
                 }
 
@@ -7447,6 +7583,106 @@ void main() {
             }
         }
 
+        // T38: state only (§4.4a) -- emission timers per cluster, larger clusters
+        // emit more often (interval = DEBRIS_BASE_INTERVAL / memberCount).
+        function updateNecroticClusters(delta, deltaSec) {
+            if (genAtLeast(2)) {
+                for (let [id, cluster] of necroticClusters) {
+                    if (survivalTime >= cluster.nextEmitTime) {
+                        cluster.nextEmitTime = survivalTime + DEBRIS_BASE_INTERVAL / cluster.members.length;
+                        emitNecroticDebris(cluster);
+                    }
+                }
+            }
+            updateNecroticDebris(delta, deltaSec);
+        }
+
+        function emitNecroticDebris(cluster) {
+            if (necroticDebris.length >= DEBRIS_MAX) return;
+            let from = cluster.members[Math.floor(Math.random() * cluster.members.length)];
+            let ang = Math.random() * Math.PI * 2;
+            necroticDebris.push({
+                x: from.x + Math.cos(ang) * from.radius,
+                y: from.y + Math.sin(ang) * from.radius,
+                vx: Math.cos(ang) * DEBRIS_SPEED,
+                vy: Math.sin(ang) * DEBRIS_SPEED,
+                radius: DEBRIS_RADIUS,
+                life: DEBRIS_LIFETIME,
+                maxLife: DEBRIS_LIFETIME
+            });
+        }
+
+        // Movement/expiry only (state, §4.4a) -- drawNecroticDebris() reads this.
+        function updateNecroticDebris(delta, deltaSec) {
+            for (let i = necroticDebris.length - 1; i >= 0; i--) {
+                let d = necroticDebris[i];
+                d.x += d.vx * delta;
+                d.y += d.vy * delta;
+                d.life -= deltaSec;
+                if (d.life <= 0 || isOutsideCell(d.x, d.y, d.radius)) necroticDebris.splice(i, 1);
+            }
+        }
+
+        // Draw only (§4.4a) -- one persistent Graphics for every cluster (never one
+        // per cluster). Angular/mineralised, deliberately unlike T39's soft amber
+        // blobs: solid same-colour fills overlap seamlessly (no per-member stroke),
+        // and an outline is drawn only on facet edges that don't face another
+        // member, so the cluster reads as one stone instead of a pile. Facet jitter
+        // is hashed from each member's frozen (never-moving) position, so it never
+        // shimmers frame to frame. The faded original organelle sprite still shows
+        // faintly through the fill's alpha, tying the mass back to what it ate.
+        function drawNecroticClusters() {
+            necroticClusterLayer.clear();
+            const SIDES = 7;
+            for (let [id, cluster] of necroticClusters) {
+                let members = cluster.members;
+
+                necroticClusterLayer.lineStyle(0);
+                necroticClusterLayer.beginFill(0x5a6b78, 0.82);
+                for (let m of members) necroticClusterLayer.drawCircle(m.x, m.y, m.radius * 0.92);
+                necroticClusterLayer.endFill();
+
+                necroticClusterLayer.lineStyle(2.5, 0x2c3a42, 0.95);
+                for (let m of members) {
+                    let seed = (Math.round(m.x) * 374761393) ^ (Math.round(m.y) * 668265263);
+                    let prevX = 0, prevY = 0, havePrev = false;
+                    for (let s = 0; s <= SIDES; s++) {
+                        let a = ((s % SIDES) / SIDES) * Math.PI * 2;
+                        let r = m.radius * (0.85 + massHash(seed, s) * 0.3);
+                        let x = m.x + Math.cos(a) * r, y = m.y + Math.sin(a) * r;
+                        if (havePrev) {
+                            let mx = (prevX + x) / 2, my = (prevY + y) / 2;
+                            let facesNeighbor = false;
+                            for (let m2 of members) {
+                                if (m2 === m) continue;
+                                if (Math.hypot(mx - m2.x, my - m2.y) < m2.radius * 0.92) { facesNeighbor = true; break; }
+                            }
+                            if (!facesNeighbor) {
+                                necroticClusterLayer.moveTo(prevX, prevY);
+                                necroticClusterLayer.lineTo(x, y);
+                            }
+                        }
+                        prevX = x; prevY = y;
+                        havePrev = true;
+                    }
+                }
+            }
+        }
+
+        // Draw only (§4.4a) -- lethal fragments, fading in the last third of life.
+        function drawNecroticDebris() {
+            necroticDebrisLayer.clear();
+            for (let d of necroticDebris) {
+                let alpha = Math.min(1, d.life / (DEBRIS_LIFETIME * 0.3));
+                necroticDebrisLayer.lineStyle(0);
+                necroticDebrisLayer.beginFill(0x8899aa, 0.85 * alpha);
+                necroticDebrisLayer.drawCircle(d.x, d.y, d.radius);
+                necroticDebrisLayer.endFill();
+                necroticDebrisLayer.lineStyle(1.5, 0x3c4a52, 0.9 * alpha);
+                necroticDebrisLayer.drawCircle(d.x, d.y, d.radius);
+            }
+        }
+
         function gameLoop(delta) {
             if (!isPlaying) return;
             // T24: freeze simulation (incl. survivalTime) without stopping the
@@ -7645,10 +7881,16 @@ void main() {
                 // T14: Gen 3+ malignant mass. Spawn/growth is state only; see
                 // drawMalignantMass() below for the render half of the split (§4.4a).
                 updateMalignantMass();
+
+                // T38: Gen 2+ necrotic cluster debris shedding + drift. State only;
+                // see drawNecroticClusters()/drawNecroticDebris() below (§4.4a).
+                updateNecroticClusters(delta, deltaSec);
             }
             updateMitosis(deltaSec);
             drawMitosisVisuals();
             drawMalignantMass();
+            drawNecroticClusters();
+            drawNecroticDebris();
 
             updateInfection(delta, deltaSec);
             updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition
@@ -7863,6 +8105,28 @@ void main() {
                 let nextX = p.x + Math.cos(p.angle) * actualSpeed * delta;
                 let nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
                 let isGhost = p.effects.ghostTimer > 0;
+
+                // 0.9 Necrotic Cluster Break-or-Kill (T38; Gen 2+, modelled on the
+                // malignant mass check below). Runs BEFORE the generic organelle
+                // check in section 1: in attack mode with its cooldown elapsed it
+                // destroys one member and marks it dead so that check (and any
+                // later player's check this same frame) doesn't also kill someone
+                // off the now-stale spatialGrid entry (trap 4.1). Self mode leaves
+                // the member alone and falls through to death in section 1, same as
+                // any other organelle.
+                if (necroticClusters.size > 0 && !p.isGap && !isGhost && !godMode) {
+                    clusterCheck: for (let [cid, cluster] of necroticClusters) {
+                        for (let mi = 0; mi < cluster.members.length; mi++) {
+                            let member = cluster.members[mi];
+                            if (!clusterMemberHit(member, p.x, p.y, nextX, nextY)) continue;
+                            if (p.targetMode === 'attack' && survivalTime - p.effects.lastClusterHit > CLUSTER_HIT_COOLDOWN) {
+                                breakClusterMember(cid, mi);
+                                p.effects.lastClusterHit = survivalTime;
+                            }
+                            break clusterCheck;
+                        }
+                    }
+                }
 
                 // 1. Trace and Organelle Collisions
                 if (!p.isGap && !isGhost && !godMode && checkCollision(nextX, nextY, p)) { // <-- Added !godMode
@@ -8215,6 +8479,7 @@ void main() {
             survivalTime = 0;
             necrosisTimer = 0; // T13
             malignantMass = { active: false, blockSize: 60, origin: { x: 0, y: 0 }, blocks: [], nextGrowTime: 0 }; // T14
+            necroticClusters = new Map(); nextClusterId = 1; necroticDebris = []; // T38
             // T26: fresh adaptive-quality sampling window each round.
             qualitySampleElapsed = 0;
             qualitySampleTotalMs = 0;
@@ -8240,7 +8505,8 @@ void main() {
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
-                        redCount: 0, redWindow: 0, hunterTimer: 0, lastMassHit: -10 // T14
+                        redCount: 0, redWindow: 0, hunterTimer: 0, lastMassHit: -10, // T14
+                        lastClusterHit: -10 // T38
                     }
                 });
             }
