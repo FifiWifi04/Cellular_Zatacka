@@ -29,6 +29,19 @@ the pumps run harder for a while; the wall stops advancing, or retreats.
 This is real cell biology (PMCA/SERCA are ATP-driven Ca²⁺ pumps), it reuses the
 game's existing vesicle-collection verb, and it is not another lethal thing.
 
+## How it plays, in one paragraph
+
+From Gen 2 the wall starts creeping in. Small pale-yellow granules begin
+appearing, and they appear **preferentially in the ring of floor the wall is
+about to take** — the part of the arena that is about to stop existing. Grab one
+and the wall stops dead for a few seconds; a bar in the HUD counts that time
+down, and the membrane itself glows while it is held. So the round becomes: the
+room is closing, the thing that stops it closing is out near the edge, and every
+trip out there is a trip into the part of the map you are least able to leave.
+Sit safe in the middle and you get no granules and the wall keeps coming. The cap
+on stacking means you can delay the wall but never stop it — you are buying
+seconds, not winning.
+
 ## Design
 
 ### The pickup

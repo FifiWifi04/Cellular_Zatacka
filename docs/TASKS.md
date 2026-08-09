@@ -32,15 +32,19 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > **Owner session 2026-08-09 reopened Track J.** T46 (Help did not pause) is
 > already fixed. Order from here:
 >
-> **T50 → T48 → T49 → T47 → T51 → T52 → T22 → Track L → Phase 7.**
+> **T50 → T48 → T49 → T47 → T56 → T51 → T52 → T57 → T22 → Track L → Phase 7.**
 >
 > T50 is first because it kills players who did the right thing: in red mode a
 > *lone* necrotic organelle is not breakable at all, and a second cluster contact
 > inside the 0.3s break cooldown falls through to death. Both reproduced with
 > numbers in the task file. T48/T49 are the visual defects from the owner's Gen 3
-> screenshot; T47 is T42's motif never reaching its LOD gate. T51 and T52 are
-> design work (counterplay to calcification; making Gen 4 legible). Track L is
-> Phase 8, the first persistent state — see `PHASE8-META-PROGRESSION.md`.
+> screenshot; T47 is T42's motif never reaching its LOD gate. T56 (owner session,
+> same day) then rebuilds the trace as an actual microtubule lattice with an
+> assembly animation at the tip — it depends on T47 because at the zooms T47
+> measured none of it is visible. T51 and T52/T57 are design work: counterplay to
+> calcification, and Gen 4 rebuilt as a race between the player and a feeding
+> nucleus. Track L is Phase 8, the first persistent state — see
+> `PHASE8-META-PROGRESSION.md`.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -206,8 +210,10 @@ sim/render split can wait behind them.
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `DONE` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `DONE` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `DONE` |
-| T51 | [Give the player a way to fight the shrinking membrane](tasks/T51-slow-the-calcification.md) | T12 | `READY` |
-| T52 | [Generation 4 reads as "vesicles drift oddly"](tasks/T52-gen4-legibility.md) | T15 | `READY` |
+| T51 | [Give the player a way to fight the shrinking membrane (ATP)](tasks/T51-slow-the-calcification.md) | T12 | `READY` |
+| T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `READY` |
+| T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `READY` |
+| T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `BLOCKED` |
 
 ### Track L — Phase 8: Scoring, statistics and upgrades
 
