@@ -4508,17 +4508,6 @@
             return ((h ^ (h >>> 14)) >>> 0) / 4294967296;
         }
 
-        // malignantMass.blocks is capped at MASS_MAX_BLOCKS (16) and this is
-        // called 4x per block once per frame from drawMalignantMass -- a linear
-        // scan is cheap here and, unlike a rebuilt Set/Map, allocates nothing.
-        function findMassBlockAt(cx, cy) {
-            for (let i = 0; i < malignantMass.blocks.length; i++) {
-                let b = malignantMass.blocks[i];
-                if (b.cx === cx && b.cy === cy) return true;
-            }
-            return false;
-        }
-
         // Draw only (§4.4a) -- reads malignantMass.blocks, never mutates it.
         // T39: irregular amber/ochre blobs -- a protein aggregate, not a grid of
         // squares -- that merge into one clump: the outer-boundary outline skips
@@ -4546,14 +4535,6 @@
                 massLayer.beginFill(0xffdf9e, isNew ? 0.35 : 0.15);
                 massLayer.drawCircle(b.x, b.y, half * 0.4);
                 massLayer.endFill();
-
-                // Outline only the cluster's outer silhouette -- skip any edge
-                // shared with an occupied neighbour so it reads as one clump.
-                massLayer.lineStyle(3, 0x4a3a18, 1.0);
-                if (!findMassBlockAt(b.cx, b.cy - 1)) { massLayer.moveTo(b.x - half, b.y - half); massLayer.lineTo(b.x + half, b.y - half); }
-                if (!findMassBlockAt(b.cx, b.cy + 1)) { massLayer.moveTo(b.x - half, b.y + half); massLayer.lineTo(b.x + half, b.y + half); }
-                if (!findMassBlockAt(b.cx - 1, b.cy)) { massLayer.moveTo(b.x - half, b.y - half); massLayer.lineTo(b.x - half, b.y + half); }
-                if (!findMassBlockAt(b.cx + 1, b.cy)) { massLayer.moveTo(b.x + half, b.y - half); massLayer.lineTo(b.x + half, b.y + half); }
             }
         }
 
@@ -4785,6 +4766,16 @@
                     let shrunkX = Math.max(floorX, activeCell.radiusX - CALCIFY_RATE * deltaSec);
                     activeCell.radiusY *= shrunkX / activeCell.radiusX;
                     activeCell.radiusX = shrunkX;
+                }
+                // T48: cull aggregate blocks the membrane has now retreated past --
+                // otherwise they linger as unreachable dead geometry outside the cell.
+                if (malignantMass.blocks.length > 0) {
+                    let massHalf = malignantMass.blockSize / 2;
+                    for (let i = malignantMass.blocks.length - 1; i >= 0; i--) {
+                        let b = malignantMass.blocks[i];
+                        if (isOutsideCell(b.x, b.y, massHalf)) malignantMass.blocks.splice(i, 1);
+                    }
+                    if (malignantMass.blocks.length === 0) malignantMass.active = false;
                 }
             }
             calcifyLayer.lineStyle(15, 0x1e3799, 0.4);

@@ -639,3 +639,12 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   devices — but worth knowing for any future particle-system verification in
   this harness: a `particleCount` that stays 0 for an entire run does not by
   itself mean the emission code is broken. — 2026-08-09
+
+- **Drifting organelles are not culled when the membrane shrinks past them
+  (T48).** T48 added a cull for `malignantMass.blocks` in the calcification
+  block of `gameLoop`, but `updateDriftingOrganelles()` moves organelles on
+  its own schedule with no equivalent check against
+  `isOutsideCell(o.x, o.y, o.radius)`. The owner's Gen 3 screenshot that
+  prompted T48 shows one organelle stranded outside the floor radius
+  alongside the aggregate blocks — same visible defect, different
+  subsystem, confirmed real but explicitly out of scope for T48. — 2026-08-09

@@ -48,7 +48,14 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
-> Findings. Next up: **T48**.
+> Findings.
+>
+> **T48 landed 2026-08-09** — deleted the rectilinear grid-edge outline (the
+> overlapping blob circles already read as one silhouette) and added a cull
+> pass in the calcification block that drops aggregate blocks once the
+> shrinking membrane retreats past them, respawning the aggregate if every
+> block is culled; see `docs/tasks/T48-aggregate-grid-outline-and-containment.md`
+> Findings. Next up: **T49**.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -202,7 +209,7 @@ sim/render split can wait behind them.
 | T45 | [Start menu never fully hides on mobile](tasks/T45-mobile-menu-not-hidden.md) | — | `DONE` |
 | T46 | [Opening Help does not pause the round](tasks/T46-help-does-not-pause.md) | T41 | `DONE` |
 | T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `READY` |
-| T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `READY` |
+| T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `READY` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `DONE` |
 
