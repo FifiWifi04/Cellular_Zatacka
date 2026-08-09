@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 0856256be2cbe042 -->
+<!-- standalone-build-inputs: e67521cd4c78949b -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -5921,26 +5921,33 @@ void main() {
             return ptSegDistSq(org.x, org.y, x1, y1, x2, y2) < rSq;
         }
 
-        // Destroys one cluster member: drops it from `organelles` (so the next
-        // rebuildSpatialGrid() forgets it) and from its cluster, releases its
-        // sprite (§2 PixiJS lifecycle), and marks it dead so THIS frame's already
-        // -built spatialGrid entry is skipped by checkCollision()/raycast() (trap
-        // 4.1) instead of killing someone off a stale reference. A cluster reduced
-        // to one member is just a lone necrotic organelle again.
+        // T50: shared teardown for ANY broken necrotic organelle, lone or
+        // clustered -- drops it from `organelles` (so the next
+        // rebuildSpatialGrid() forgets it), releases its sprite (§2 PixiJS
+        // lifecycle), and marks it dead so THIS frame's already-built
+        // spatialGrid entry is skipped by checkCollision()/raycast() (trap 4.1)
+        // instead of killing someone off a stale reference. Cluster bookkeeping
+        // (splicing out of `members`, clearing `clusterId`) is the caller's job.
+        function destroyNecroticOrganelle(o) {
+            o.dead = true;
+            let idx = organelles.indexOf(o);
+            if (idx >= 0) organelles.splice(idx, 1);
+            if (o.sprite) {
+                organellesLayer.removeChild(o.sprite);
+                o.sprite.destroy();
+            }
+            emitParticles(o.x, o.y, 10, { speed: 2.2, spread: Math.PI * 2, life: 0.5, size: 3, color: 0x8899aa }); // T17
+        }
+
+        // Destroys one cluster member: drops it from its cluster and tears it
+        // down via destroyNecroticOrganelle(). A cluster reduced to one member
+        // is just a lone necrotic organelle again.
         function breakClusterMember(clusterId, memberIndex) {
             let cluster = necroticClusters.get(clusterId);
             let member = cluster.members[memberIndex];
             cluster.members.splice(memberIndex, 1);
             member.clusterId = null;
-            member.dead = true;
-
-            let idx = organelles.indexOf(member);
-            if (idx >= 0) organelles.splice(idx, 1);
-            if (member.sprite) {
-                organellesLayer.removeChild(member.sprite);
-                member.sprite.destroy();
-            }
-            emitParticles(member.x, member.y, 10, { speed: 2.2, spread: Math.PI * 2, life: 0.5, size: 3, color: 0x8899aa }); // T17
+            destroyNecroticOrganelle(member);
 
             if (cluster.members.length <= 1) {
                 for (let m of cluster.members) m.clusterId = null;
@@ -5974,6 +5981,7 @@ void main() {
                 if (item.type === 'organelle') {
                     let org = item.raw;
                     if (org.dead) continue; // T38: cluster member broken this frame, stale grid entry (trap 4.1)
+                    if (org.necrotic && player.targetMode === 'attack') continue; // T50: grey matter is never lethal in attack mode -- section 0.9 handles breaking it
                     if (org.type === 'mitochondria') {
                         // Transform BOTH head endpoints into the mitochondrion's local space
                         let cosA = Math.cos(-org.rotation), sinA = Math.sin(-org.rotation);
@@ -8304,25 +8312,30 @@ void main() {
                 let nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
                 let isGhost = p.effects.ghostTimer > 0;
 
-                // 0.9 Necrotic Cluster Break-or-Kill (T38; Gen 2+, modelled on the
-                // malignant mass check below). Runs BEFORE the generic organelle
-                // check in section 1: in attack mode with its cooldown elapsed it
-                // destroys one member and marks it dead so that check (and any
-                // later player's check this same frame) doesn't also kill someone
-                // off the now-stale spatialGrid entry (trap 4.1). Self mode leaves
-                // the member alone and falls through to death in section 1, same as
-                // any other organelle.
-                if (necroticClusters.size > 0 && !p.isGap && !isGhost && !godMode) {
-                    clusterCheck: for (let [cid, cluster] of necroticClusters) {
-                        for (let mi = 0; mi < cluster.members.length; mi++) {
-                            let member = cluster.members[mi];
-                            if (!clusterMemberHit(member, p.x, p.y, nextX, nextY)) continue;
-                            if (p.targetMode === 'attack' && survivalTime - p.effects.lastClusterHit > CLUSTER_HIT_COOLDOWN) {
-                                breakClusterMember(cid, mi);
-                                p.effects.lastClusterHit = survivalTime;
+                // 0.9 Necrotic Organelle Break (T38, extended by T50 to lone
+                // necrotic organelles, not just cluster members). Runs BEFORE the
+                // generic organelle check in section 1, which itself never kills
+                // for a necrotic organelle touched in attack mode (see the
+                // `org.necrotic` skip in checkCollision) -- so this loop's only
+                // job is the cooldown-gated break/anti-strip bookkeeping. When the
+                // cooldown has not elapsed, or the player is not in attack mode,
+                // it does nothing and the player simply passes through unharmed
+                // (attack mode) or dies normally in section 1 (self mode, same as
+                // any other organelle).
+                if (genAtLeast(2) && !p.isGap && !isGhost && !godMode) {
+                    for (let o of organelles) {
+                        if (!o.necrotic) continue;
+                        if (!clusterMemberHit(o, p.x, p.y, nextX, nextY)) continue;
+                        if (p.targetMode === 'attack' && survivalTime - p.effects.lastClusterHit > CLUSTER_HIT_COOLDOWN) {
+                            if (o.clusterId != null) {
+                                let cluster = necroticClusters.get(o.clusterId);
+                                breakClusterMember(o.clusterId, cluster.members.indexOf(o));
+                            } else {
+                                destroyNecroticOrganelle(o);
                             }
-                            break clusterCheck;
+                            p.effects.lastClusterHit = survivalTime;
                         }
+                        break;
                     }
                 }
 
@@ -8751,7 +8764,7 @@ void main() {
                 <table class="help-table">
                     <tr><th></th><th>Lethal</th><th>Moves</th><th>Breakable in Attack mode</th></tr>
                     <tr><td>Living organelle</td><td>yes</td><td>drifts</td><td>no</td></tr>
-                    <tr><td>Necrotic cluster (Gen 2+)</td><td>yes</td><td>static</td><td>yes -- one member per hit</td></tr>
+                    <tr><td>Necrotic organelle or cluster (Gen 2+)</td><td>yes</td><td>static</td><td>yes -- one organelle per hit</td></tr>
                     <tr><td>Protein aggregate (Gen 3+)</td><td>yes</td><td>static</td><td>yes -- one block per hit</td></tr>
                 </table>
 

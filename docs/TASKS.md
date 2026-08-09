@@ -45,6 +45,10 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > calcification, and Gen 4 rebuilt as a race between the player and a feeding
 > nucleus. Track L is Phase 8, the first persistent state — see
 > `PHASE8-META-PROGRESSION.md`.
+>
+> **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
+> lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
+> Findings. Next up: **T48**.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -200,7 +204,7 @@ sim/render split can wait behind them.
 | T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `READY` |
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `READY` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `READY` |
-| T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `READY` |
+| T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `DONE` |
 
 ### Track K — Playtest design & features
 

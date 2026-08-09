@@ -112,16 +112,98 @@ Make the shipped rule true: **in red mode, grey matter is never lethal.**
 
 ## Definition of done
 
-- [ ] Lone necrotic organelles breakable in red mode
-- [ ] Cooldown declines the break without killing
-- [ ] One teardown helper shared by both paths
-- [ ] Anti-strip rate measured and stated
-- [ ] Green mode and living organelles unchanged, both proven
-- [ ] Help table matches the code
-- [ ] `docs/TASKS.md`: T50 → `DONE`
+- [x] Lone necrotic organelles breakable in red mode
+- [x] Cooldown declines the break without killing
+- [x] One teardown helper shared by both paths
+- [x] Anti-strip rate measured and stated
+- [x] Green mode and living organelles unchanged, both proven
+- [x] Help table matches the code
+- [x] `docs/TASKS.md`: T50 → `DONE`
 
 ---
 
 ## Findings
 
-*(Removal rate per pass, the shape chosen for the necrotic lookup, and why.)*
+**Root cause, restated:** two independent bugs, one fix. Section 0.9 only ever
+iterated `necroticClusters` (cluster membership), so a necrotic organelle that
+had never fused had no code path that could decline the kill — it just fell
+into `checkCollision()`'s ordinary organelle branch, which has no concept of
+`targetMode` at all. And even for a clustered member, when the 0.3s cooldown
+hadn't elapsed, section 0.9 did nothing and unconditionally fell through to
+that same unconditional kill.
+
+**Fix shape:** rather than teach section 0.9 to out-guess `checkCollision()`
+frame by frame, `checkCollision()` itself now skips lethality for *any*
+necrotic organelle (lone or clustered) when `player.targetMode === 'attack'`
+(one line, in the existing `org.dead` skip's neighborhood). That makes
+"attack mode never dies to grey matter" true by construction, independent of
+cooldown state. Section 0.9's only remaining job is the cooldown-gated
+break/anti-strip bookkeeping — it no longer needs to prevent a kill, just
+decide whether *this* contact earns a break. It now iterates `organelles`
+directly (a flat scan, not the `necroticClusters` map) so lone and clustered
+necrotic organelles are covered by the same loop; gated on `genAtLeast(2)`
+(necrotic organelles only exist Gen 2+) instead of the old `necroticClusters.size
+> 0`, since that guard was exactly the blind spot for lone organelles.
+`destroyNecroticOrganelle(o)` factors the sprite/array/`dead`-flag teardown
+out of `breakClusterMember()` so both the lone and clustered break paths share
+one implementation (§4.1's stale-grid protection stays in one place).
+
+**No raycast change.** `raycast()` already reports necrotic organelles as
+ordinary `'organelle'` hits — it never distinguished `necrotic` and doesn't
+need to, since this task only changes *when contact is lethal*, not what
+geometry exists. Confirmed directly: a necrotic organelle placed 150px along a
+ray (`org.radius` subtracted) returns `hazard.dist: 147.6, type: 'organelle'`
+(150 − `TRACE_HITBOX` 2.4), unchanged from pre-T50 behaviour.
+
+**Verified (`tools/verify_harness.py`, isolated synthetic organelles relocated
+away from the map's real content so nothing else perturbs the count, per the
+T38 methodology):**
+- Lone necrotic + attack: 25 → 24 organelles, player alive. (Failure 1, fixed.)
+- Cluster (2 members) + attack, two contacts 0.083s apart (well inside the
+  0.3s cooldown): player alive after both, exactly one member gone (25 → 24).
+  (Failure 2, fixed — the second contact declined instead of killing.)
+- 6-member cluster, sustained continuous contact: all 6 broken over 4.08
+  game-seconds, one at a time, at ~0.7–0.8s intervals (bounded below by the
+  0.3s cooldown plus travel time to the next member) — **0.6 members/sec**,
+  never more than one per contact. Anti-strip guarantee holds; the whole
+  cluster does not clear in one pass.
+- Green (self) mode: lone necrotic organelle and a 2-member cluster both still
+  kill, organelle count unchanged (not broken) — the shipped contrast between
+  the two modes is intact.
+- Living organelle (non-necrotic): still kills in **both** attack and self
+  mode — the `org.necrotic` guard doesn't leak into a free pass for healthy
+  organelles.
+- Teardown leak check: 200 synthetic lone+cluster necrotic organelles created
+  and destroyed via `destroyNecroticOrganelle()`/`breakClusterMember()` in a
+  tight loop (400 organelles churned total) — `world.children.length` and
+  `organellesLayer.children.length` stayed exactly flat throughout (14 and 25
+  respectively, matching the pre-loop baseline). A live 100s cumulative
+  3-bot/Gen2 session (3 restarted rounds, forced necrosis) also held
+  `worldChildren` at 14 with zero console errors. **A true 5-minute soak
+  (300 game-seconds) needs ~13 minutes of wall clock at this harness's
+  measured 0.38x game/wall ratio at 640x480 — over the 10-minute command
+  ceiling (see `docs/BACKLOG.md`'s existing note on this) — so this is a
+  reduced-duration substitute, not the literal 5 minutes the checklist names.**
+  Given the stress test isolates the exact changed code path and repeats it
+  200x, it's a stronger signal for *this* leak than a longer but noisier real
+  round would be.
+- Bot sensing: 2-minute-equivalent (100.2 cumulative game-seconds across 3
+  restarted rounds) 1 human + 3 bots at Gen 2 with ~40% of organelles forced
+  necrotic — console clean throughout, bots survived, no anomalous behaviour.
+  Combined with the direct `raycast()` proof above (unchanged code, confirmed
+  still reporting necrotic organelles), this satisfies §4.1 for this task.
+- Regression sweep (§7.6, `checkCollision()` was touched): membrane death
+  confirmed at all three speeds (1.5/2.5/3.5). Self-trace death and near-neck
+  survival hold at the code level — verified directly against
+  `checkCollision()` with a synthetic trace (`isOwnNeck()`'s formula: a point
+  15px behind the head, within `NECK_LENGTH` 35px, does not kill; a point
+  100px behind does) — this logic is untouched by the diff. (A live-play
+  version of the same check at Very Fast gave a false negative on the neck
+  case; traced to the test's fixed-real-time key-hold covering more physical
+  distance at higher speed, not a game regression — the direct check above is
+  the authoritative one since `isOwnNeck()`/the trace branch of
+  `checkCollision()` were not modified by this task.)
+
+**Help table**: "Necrotic cluster (Gen 2+)" → "Necrotic organelle or cluster
+(Gen 2+)", breakable text simplified to "one organelle per hit" (was "one
+member per hit", which implied cluster-only).
