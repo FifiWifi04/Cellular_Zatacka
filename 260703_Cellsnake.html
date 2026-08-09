@@ -418,6 +418,114 @@
             color: #a29bfe;
         }
 
+        /* T41: How-to-Play panel. Its own overlay, above #ui (z-index 100). */
+        .help-btn {
+            background: #636e72;
+        }
+
+        .help-btn:hover {
+            background: #b2bec3;
+        }
+
+        .help-overlay {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: fixed;
+            inset: 0;
+            z-index: 150;
+            background: rgba(0, 0, 0, 0.6);
+        }
+
+        .help-overlay.hidden-help {
+            display: none;
+        }
+
+        .help-panel {
+            position: relative;
+            box-sizing: border-box;
+            text-align: left;
+            background: rgba(13, 13, 26, 0.97);
+            border: 1px solid rgba(0, 210, 211, 0.3);
+            border-radius: 16px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.6);
+            padding: 20px 24px;
+            padding-top: max(56px, env(safe-area-inset-top) + 46px);
+            max-width: min(720px, 92vw);
+            max-height: 90dvh;
+            overflow-y: auto;
+        }
+
+        .help-close-btn {
+            top: max(6px, env(safe-area-inset-top));
+            right: 6px;
+            left: auto;
+        }
+
+        .help-panel h2 {
+            text-align: center;
+            margin-top: 0;
+            color: #00d2d3;
+        }
+
+        .help-panel h3 {
+            color: #a29bfe;
+            margin: 18px 0 6px;
+            font-size: 16px;
+        }
+
+        .help-panel p,
+        .help-panel li {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .help-panel ul {
+            margin: 4px 0;
+            padding-left: 20px;
+        }
+
+        .help-swatch-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin: 6px 0;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .help-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            flex: none;
+            margin-top: 3px;
+        }
+
+        .help-swatch.round {
+            border-radius: 50%;
+        }
+
+        .help-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin: 6px 0 14px;
+        }
+
+        .help-table td,
+        .help-table th {
+            padding: 4px 6px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* T41 reuses T20's control-splash cards inside the Help panel --
+           give them a bit more breathing room than the compact menu popover. */
+        #helpContent .splash-cards {
+            max-width: 100%;
+        }
+
         h3 {
             margin: 5px 0;
             font-weight: normal;
@@ -491,6 +599,9 @@
             <button onclick="startRound()">Start Game</button>
             <button class="fullscreen-btn" onclick="toggleFullScreen()">Fullscreen</button>
             <button class="splash-toggle-btn" onclick="toggleControlSplash()">Controls</button>
+            <!-- T41: reachable from here both before a round (main menu) and
+                 during one (this same #ui doubles as the pause menu, T24). -->
+            <button class="help-btn" onclick="toggleHelpPanel(true)">? Help</button>
         </div>
         <div id="controlSplash" class="control-splash">
             <div id="splashCards" class="splash-cards"></div>
@@ -498,6 +609,15 @@
         </div>
         <h3 id="controlsText">P1 (Blue): Left/Right Arrows</h3>
         <h2 id="scoreboard">Survival Time: 0.0s</h2>
+    </div>
+
+    <!-- T41: static How-to-Play guide, closable, reachable from the menu above. -->
+    <div id="helpOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleHelpPanel(false)">
+        <div class="help-panel">
+            <button class="ui-close-btn help-close-btn" onclick="toggleHelpPanel(false)" aria-label="Close help">&#10005;</button>
+            <h2>How to Play</h2>
+            <div id="helpContent"></div>
+        </div>
     </div>
 
     <div id="game-container"></div>
@@ -1168,6 +1288,18 @@
             splitTextures = [];
         }
 
+        // T41: named so the environment timers below and the Help panel's
+        // tutorial text (which reads these directly) can never drift apart --
+        // previously each of these was a bare literal repeated at every call
+        // site (the exact trap AGENT_CONDUCT.md 4.1 warns about).
+        const NUCLEUS_RADIUS = 130;          // px; the lethal core at every cell's center
+        const CALCIFY_RATE = 6;              // px/sec the membrane shrinks by (Gen 2+); see T12
+        const CALCIFY_FLOOR = 0.45;          // never shrinks below this fraction of the base radius
+        const MITOSIS_INTERVAL = 240;        // seconds between cell-division events
+        const MITOSIS_SWEEP_DURATION = 120;  // seconds for the death-ring to sweep across a cell
+        const INFECTION_INTERVAL = 120;      // seconds between viral infection events
+        const INFECTION_WARNING = 5;         // seconds of warning before a viral breach
+
         // INFECTION STATE OBJECT
         let infection = {
             state: 'none',
@@ -1180,7 +1312,7 @@
         // THE MITOSIS EVENT SYSTEM
         let mitosis = {
             state: 'idle', // 'idle', 'forming', 'narrowing'
-            nextTriggerTime: 240, // Production: 4 minutes
+            nextTriggerTime: MITOSIS_INTERVAL, // Production: 4 minutes
             eventStartTime: 0,
             cellB: { x: 0, y: 0 },
             bridge: { x: 0, y: 0, width: 0, height: 0, maxWidth: 600 },
@@ -2249,12 +2381,12 @@
                         if (sampleT < bestDist) { bestDist = sampleT; bestType = 'boundary'; bestRaw = undefined; }
                         break;
                     }
-                    if (Math.hypot(rx - activeCell.x, ry - activeCell.y) < 130 + TRACE_HITBOX) {
+                    if (Math.hypot(rx - activeCell.x, ry - activeCell.y) < NUCLEUS_RADIUS + TRACE_HITBOX) {
                         if (sampleT < bestDist) { bestDist = sampleT; bestType = 'nucleus'; bestRaw = undefined; }
                         break;
                     }
                     if (mitosis.state !== 'idle') {
-                        let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                        let sweepProgress = (survivalTime - mitosis.eventStartTime) / MITOSIS_SWEEP_DURATION;
                         let caught = false;
                         if (mitosis.direction === 0) {
                             let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
@@ -2497,15 +2629,15 @@
         }
 
         function isInsideNucleus(x, y) {
-            // If distance to center is >= 130, it's not inside the nucleus at all
-            if (Math.hypot(x - activeCell.x, y - activeCell.y) >= 130 + TRACE_HITBOX) return false;
+            // If distance to center is >= NUCLEUS_RADIUS, it's not inside the nucleus at all
+            if (Math.hypot(x - activeCell.x, y - activeCell.y) >= NUCLEUS_RADIUS + TRACE_HITBOX) return false;
 
             // If mitosis is not active, it's always inside
             if (mitosis.state === 'idle') return true;
 
             // If mitosis is active, check if it's on the destroyed side of the laser line
             let timeInEvent = survivalTime - mitosis.eventStartTime;
-            let sweepProgress = timeInEvent / 120.0;
+            let sweepProgress = timeInEvent / MITOSIS_SWEEP_DURATION;
 
             if (mitosis.direction === 0) { // Sweeps Left to Right (destroying left, keeping right)
                 let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
@@ -3002,7 +3134,7 @@
             if (survivalTime >= infection.nextWarningTime && infection.state === 'none') {
                 infection.state = 'warning';
                 infection.triggerTime = survivalTime;
-                warningElement.innerText = "WARNING: VIRUS ATTACHED! BREACH IN 5 SECONDS!";
+                warningElement.innerText = "WARNING: VIRUS ATTACHED! BREACH IN " + INFECTION_WARNING + " SECONDS!";
                 warningElement.style.display = 'block';
 
                 let spawnAngle = Math.random() * Math.PI * 2;
@@ -3030,7 +3162,7 @@
                     virusLayer.endFill();
                 }
 
-                if (survivalTime >= infection.triggerTime + 5.0) {
+                if (survivalTime >= infection.triggerTime + INFECTION_WARNING) {
                     warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES!";
                     warningElement.style.display = 'block';
                     infection.textClearTime = survivalTime + 3.0;
@@ -3050,7 +3182,7 @@
                     }
 
                     addShake(0.6, 0.5); // T16: virus explosion/breach
-                    infection.nextWarningTime = survivalTime + 120.0;
+                    infection.nextWarningTime = survivalTime + INFECTION_INTERVAL;
                     infection.state = 'none';
                 }
             }
@@ -3429,7 +3561,7 @@
 
                     // 9. Reset the cycle for another 4 minutes later
                     mitosis.state = 'idle';
-                    mitosis.nextTriggerTime = survivalTime + 240;
+                    mitosis.nextTriggerTime = survivalTime + MITOSIS_INTERVAL;
                     if (mitosis.progenitor) mitosis.progenitor.active = false;
 
                     // T33: activeCell just moved to Cell B -- shrink the trace
@@ -3540,7 +3672,7 @@
             // 4. Overlapping lines cleanup removed to prevent covering cytosol particles
 
             // 5. THE DEATH RING (Contractile Wave)
-            let sweepProgress = timeInEvent / 120.0; // Moves from 0.0 to 1.0 over the 120s event
+            let sweepProgress = timeInEvent / MITOSIS_SWEEP_DURATION; // Moves from 0.0 to 1.0 over the sweep
 
             // FIX: Set a bright red line style so the laser is actually visible!
             mitosisLayer.lineStyle(8, 0xff4757, 0.8);
@@ -4053,7 +4185,13 @@
             // T40: Escape/P are free of every playerConfigs binding (checked against
             // all four) -- primary pause/resume shortcut, mirrors pauseMenuBtn.
             if (isPlaying && (e.key === 'Escape' || e.key === 'p' || e.key === 'P')) {
-                togglePauseMenu();
+                // T41: Escape/P closes the help overlay first if it's open,
+                // rather than also toggling the pause menu underneath it.
+                if (!document.getElementById('helpOverlay').classList.contains('hidden-help')) {
+                    toggleHelpPanel(false);
+                } else {
+                    togglePauseMenu();
+                }
             }
 
             // --- DEBUG / DEV MODE HOTKEYS ---
@@ -4195,6 +4333,9 @@
         document.addEventListener('pointerdown', e => {
             if (!paused) return;
             if (uiElement.contains(e.target) || e.target === pauseMenuBtn) return;
+            // T41: the help overlay owns its own outside-click close (and its
+            // own resume-on-close logic) while it's open -- don't race it here.
+            if (!document.getElementById('helpOverlay').classList.contains('hidden-help')) return;
             uiElement.classList.add('hidden-ui');
             paused = false;
         });
@@ -4572,8 +4713,6 @@
             // ring into cellBg -- this is the only membrane boundary, ever.
             calcifyLayer.clear();
             if (genAtLeast(2) && !isCellFrozen && mitosis.state === 'idle') {
-                const CALCIFY_RATE = 6;    // px/sec off radiusX; radiusY scales by the same fraction, preserving aspect ratio
-                const CALCIFY_FLOOR = 0.45; // never shrink below this fraction of base
                 let floorX = activeCell.baseRadiusX * CALCIFY_FLOOR;
                 if (activeCell.radiusX > floorX) {
                     let shrunkX = Math.max(floorX, activeCell.radiusX - CALCIFY_RATE * deltaSec);
@@ -4717,7 +4856,7 @@
 
             // --- DEATH RING SHATTER LOGIC (Organelles & Golgi) ---
             if (mitosis.state !== 'idle') {
-                let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                let sweepProgress = (survivalTime - mitosis.eventStartTime) / MITOSIS_SWEEP_DURATION;
                 let ringX = 0, ringY = 0;
 
                 if (mitosis.direction === 0) ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
@@ -5056,7 +5195,7 @@
 
                 // --- DEATH RING COLLISION ---
                 if (mitosis.state !== 'idle' && p.alive && !isGhost) {
-                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / 120.0;
+                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / MITOSIS_SWEEP_DURATION;
                     let caught = false;
 
                     if (mitosis.direction === 0) {
@@ -5169,8 +5308,9 @@
             return key.length === 1 ? key.toUpperCase() : key;
         }
 
-        function renderControlSplash() {
-            let totalPlayers = currentMode + aiCount;
+        // T41: factored out of renderControlSplash so the Help panel can show
+        // the same player/key mapping without a second copy of this markup.
+        function controlCardsHtml(totalPlayers) {
             let html = '';
             playerConfigs.forEach((config, i) => {
                 let active = i < totalPlayers;
@@ -5182,7 +5322,12 @@
                     `<div class="splash-row"><kbd class="splash-key">${keyDisplayName(config.controls.toggle)}</kbd> toggle mode</div>` +
                     `</div>`;
             });
-            document.getElementById('splashCards').innerHTML = html;
+            return html;
+        }
+
+        function renderControlSplash() {
+            let totalPlayers = currentMode + aiCount;
+            document.getElementById('splashCards').innerHTML = controlCardsHtml(totalPlayers);
             // T36: same legend string as controlsText -- can't drift apart.
             document.getElementById('splashHint').innerHTML = "3rd key toggles boost target: " + TARGET_MODE_LEGEND + ".";
         }
@@ -5192,9 +5337,145 @@
             document.getElementById('controlSplash').classList.toggle('hidden-splash', !splashVisible);
         };
 
+        function toHex(n) { return '#' + n.toString(16).padStart(6, '0'); }
+
+        // T41: opening pauses a round in progress (mirrors togglePauseMenu);
+        // closing always resumes. Hides #ui while open so the pause menu and
+        // the help overlay are never stacked, and restores it on close only
+        // when there is no round to resume back into (the pre-round main menu).
+        window.toggleHelpPanel = function (show) {
+            let overlay = document.getElementById('helpOverlay');
+            if (show) {
+                uiElement.classList.add('hidden-ui');
+                overlay.classList.remove('hidden-help');
+                if (isPlaying) paused = true;
+            } else {
+                overlay.classList.add('hidden-help');
+                if (isPlaying) paused = false;
+                else uiElement.classList.remove('hidden-ui');
+            }
+        };
+
+        // T41: static How-to-Play content, built once from the same constants
+        // and helpers the game itself runs on (controlCardsHtml, TARGET_MODE_LEGEND,
+        // EFFECT_DURATION, the generation-gate thresholds, etc.) so this guide
+        // cannot silently drift from the game the way the control legend once did.
+        // See docs/tasks/T41-tutorial.md.
+        function renderHelpPanel() {
+            let erColor = toHex(ARCS.find(a => a.type === 'ER').color);
+            let golgiColor = toHex(ARCS.find(a => a.type === 'Golgi').color);
+            let membColor = toHex(C_MEMB), mitoColor = toHex(C_MITO), lysoColor = toHex(C_LYSO);
+            let traceGradient = 'linear-gradient(90deg, ' + playerConfigs.map(c => toHex(c.color)).join(',') + ')';
+
+            // massGrowInterval() reads activeCell.generation -- borrow it briefly
+            // to quote the real Gen-3 growth rate instead of restating its formula.
+            let savedGen = activeCell.generation;
+            activeCell.generation = 3;
+            let gen3MassInterval = massGrowInterval();
+            activeCell.generation = savedGen;
+
+            let html = `
+                <h3>Goal</h3>
+                <p>Survive. The arena and everything in it is trying to kill you --
+                touch nothing lethal and outlast the other players.</p>
+
+                <h3>Controls</h3>
+                <p>Each player steers with two turn keys and a 3rd key that toggles
+                their boost target (see Target Mode below) -- the same mapping shown
+                on the main menu:</p>
+                <div class="splash-cards">${controlCardsHtml(4)}</div>
+
+                <h3>What kills you</h3>
+                <div class="help-swatch-row"><span class="help-swatch" style="background:#82ccdd"></span>
+                    <span><b>The membrane</b> -- the glowing rim around the cell. Always lethal;
+                    from Generation 2 it also slowly closes in (see Generations).</span></div>
+                <div class="help-swatch-row"><span class="help-swatch" style="background:${traceGradient}"></span>
+                    <span><b>Traces</b> -- every player leaves a solid trail behind them, colour-matched
+                    to their head (see the cards above). Touching any trail is lethal, including your
+                    own -- except for the last ${NECK_LENGTH}px right behind your head, so you can turn
+                    tightly without self-destructing.</span></div>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:${mitoColor}"></span>
+                    <span><b>Organelles</b> -- green and pink blobs that drift around the arena. Touch
+                    = death. From Generation 2 some freeze solid and grey, and fuse into clusters that
+                    shed lethal debris (see Generations).</span></div>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:#6c5ce7"></span>
+                    <span><b>The nucleus</b> -- the dark core at the centre of every cell,
+                    ${NUCLEUS_RADIUS}px of always-lethal radius.</span></div>
+                <div class="help-swatch-row"><span style="display:flex; gap:3px; flex:none; margin-top:3px;">
+                    <span class="help-swatch" style="background:${erColor}"></span><span class="help-swatch" style="background:${golgiColor}"></span></span>
+                    <span><b>ER / Golgi walls</b> -- the ring structures inside the cell. Solid and
+                    lethal unless you have an active Golgi Pass (see Vesicles).</span></div>
+                <div class="help-swatch-row"><span class="help-swatch" style="background:${mitoColor}"></span>
+                    <span><b>Microtubules</b> -- solid bars that appear across the bridge during a
+                    cell division (see Events).</span></div>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:#ff4757"></span>
+                    <span><b>Virus particles</b> -- spawned by a viral infection breach (see Events).
+                    In-game tip: hide behind lysosome organelles.</span></div>
+                <div class="help-swatch-row"><span class="help-swatch" style="background:#8a6d2f"></span>
+                    <span><b>Protein aggregate</b> -- a growing amber clump that appears from
+                    Generation 3 onward (see Generations).</span></div>
+
+                <h3>Vesicles</h3>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:${membColor}"></span>
+                    <span><b>Membrane vesicle (blue)</b> -- Golgi Pass: cross ER/Golgi walls unharmed
+                    for up to ${EFFECT_DURATION}s per pickup, capped at 15s. Collect 3 within 10s and
+                    you get Ghost Mode instead: pass through every trace and organelle (not the
+                    membrane or nucleus) for up to 10s.</span></div>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:${lysoColor}"></span>
+                    <span><b>Lysosome vesicle (pink)</b> -- trims your own oldest trace on pickup;
+                    your 3rd pickup within 10s wipes half of it outright. Your 5th within that window
+                    grants Hunter Mode for 10s: pass through opponents' trails and eliminate anyone
+                    you run into head-on.</span></div>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:${mitoColor}"></span>
+                    <span><b>Mitochondria vesicle (green)</b> -- speed boost for up to
+                    ${EFFECT_DURATION}s, capped at 15s. Grab a second one within 3s of the last and
+                    the boost doubles (capped at 10s).</span></div>
+
+                <h3>Target mode</h3>
+                <p>${TARGET_MODE_LEGEND}. Toggle it with the 3rd key shown on your player card above.</p>
+                <table class="help-table">
+                    <tr><th></th><th>Lethal</th><th>Moves</th><th>Breakable in Attack mode</th></tr>
+                    <tr><td>Living organelle</td><td>yes</td><td>drifts</td><td>no</td></tr>
+                    <tr><td>Necrotic cluster (Gen 2+)</td><td>yes</td><td>static</td><td>yes -- one member per hit</td></tr>
+                    <tr><td>Protein aggregate (Gen 3+)</td><td>yes</td><td>static</td><td>yes -- one block per hit</td></tr>
+                </table>
+
+                <h3>Events</h3>
+                <ul>
+                    <li><b>Viral infection</b> -- roughly every ${INFECTION_INTERVAL / 60} minutes, a
+                    virus attaches to the membrane and counts down ${INFECTION_WARNING}s before
+                    breaching. On breach it scatters a swarm of small, lethal, roaming virus particles
+                    into the cell.</li>
+                    <li><b>Cell division (mitosis)</b> -- every ${MITOSIS_INTERVAL / 60} minutes the
+                    cell starts dividing: a bridge grows toward a new cell, guarded by microtubule bars
+                    in its outer two lanes (the middle lane stays clear). A red wave then sweeps across
+                    the old cell over the following ${MITOSIS_SWEEP_DURATION / 60} minutes -- reach the
+                    new cell before it catches you, or you die. Everyone who crosses carries on into
+                    the next generation.</li>
+                </ul>
+
+                <h3>Generations</h3>
+                <ul>
+                    <li><b>Generation 2</b> -- the membrane starts slowly shrinking (down to
+                    ${Math.round(CALCIFY_FLOOR * 100)}% of its original size), and organelles begin
+                    randomly freezing solid roughly every ${NECROSIS_INTERVAL}s. Frozen ones fuse into
+                    clusters (up to ${CLUSTER_MAX_MEMBERS} members) when they touch, and bigger
+                    clusters shed lethal debris faster.</li>
+                    <li><b>Generation 3</b> -- a protein aggregate spawns and keeps growing new blocks
+                    (about every ${gen3MassInterval}s at first, faster each generation after), up to
+                    ${MASS_MAX_BLOCKS} blocks.</li>
+                    <li><b>Generation 4</b> -- an angiogenesis gravity well appears at the centre of
+                    each cell, pulling nearby vesicles inward; they're consumed before reaching the
+                    lethal nucleus so they don't pile up there.</li>
+                </ul>
+            `;
+            document.getElementById('helpContent').innerHTML = html;
+        }
+
         // updateUI() is not called at startup (see applyQuality above), so seed
         // the cards here or they stay empty until a dropdown is touched.
         renderControlSplash();
+        renderHelpPanel();
 
         // T19: one click into a playable 1-player-vs-1-bot round. Sets the
         // same selects the manual path reads, then reuses startRound() so the
@@ -5227,7 +5508,7 @@
             warningRamp = 0;
             // --- MITOSIS RESET ---
             mitosis.state = 'idle';
-            mitosis.nextTriggerTime = 240; // Production: 4 minutes
+            mitosis.nextTriggerTime = MITOSIS_INTERVAL; // Production: 4 minutes
             mitosis.eventStartTime = 0;
             mitosis.currentWidth = 600;
             mitosis.nucleusDestroyed = false;

@@ -589,3 +589,28 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   owner playtest on real hardware to confirm MSAA actually engages and looks
   right there (the probe should report `true` and viewport edges should look
   smoother at Medium/High than they did before T44). — 2026-08-08
+
+## Found while doing T41 (how-to-play tutorial) — 2026-08-09
+
+- **Vesicle-effect magic numbers are not named constants.** The pickup block
+  (`checkCollision`'s caller loop, "3. Vesicle Collection Logic") hand-codes
+  the golgi/speed cap (`15.0`), the ghost/speed chain-combo cap and window
+  (`10.0`, `3.0`), and the blue/red pickup-count thresholds (`blueCount >= 3`,
+  `redCount >= 5`, `redCount === 3`) as bare literals — only `EFFECT_DURATION`
+  (the base `+10s` per pickup) is a real constant. T41's Vesicles section
+  transcribes these numbers directly from that code (verified by reading, not
+  guessed), but they can drift silently if this block is edited later, since
+  nothing would point back at the tutorial text. Left alone here: the pickup
+  block is dense and high-traffic, and hoisting every literal there is a
+  bigger, riskier diff than a tutorial task should carry. If someone touches
+  vesicle economy tuning next, consider naming these too — `NUCLEUS_RADIUS`,
+  `MITOSIS_INTERVAL`, `MITOSIS_SWEEP_DURATION`, `INFECTION_INTERVAL`,
+  `INFECTION_WARNING`, `CALCIFY_RATE`/`CALCIFY_FLOOR` were hoisted by this
+  same task and are the model to follow (see `260703_Cellsnake.html` near
+  the `NECROSIS_*` constants).
+- **An interactive tutorial level still isn't built.** T41 deliberately scoped
+  down to a static Help panel per its own instructions ("build the explanation
+  first"). A scripted walkthrough round (spawn a lone player in a stripped-down
+  arena, narrate each hazard as it's encountered) would need its own state
+  machine and is a materially larger project — logged here per T41's explicit
+  ask, to revisit if the static guide turns out not to be enough.
