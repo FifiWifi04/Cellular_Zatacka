@@ -215,6 +215,15 @@ sim/render split can wait behind them.
 | T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `READY` |
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `BLOCKED` |
 
+> **Phase 9 — after Gen 4.** Scoped in
+> [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
+> and is **empty** (the largest `genAtLeast()` gate in the codebase is 4, and
+> `massGrowInterval()` floors from Gen 4 on), so surviving Gen 4 today earns a
+> counter increment and nothing else. The note recommends Gen 5 = immune
+> response (reuses T57's chasing entity, and introduces baiting) and Gen 6 =
+> escape, which would be the game's first win condition. **Deliberately no task
+> files yet** — none of it should be written before T52/T57 have been played.
+
 ### Track L — Phase 8: Scoring, statistics and upgrades
 
 Scoped in [`PHASE8-META-PROGRESSION.md`](PHASE8-META-PROGRESSION.md). This is the
