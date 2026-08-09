@@ -648,3 +648,24 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   prompted T48 shows one organelle stranded outside the floor radius
   alongside the aggregate blocks — same visible defect, different
   subsystem, confirmed real but explicitly out of scope for T48. — 2026-08-09
+
+- **`window.bgMask` (the cytosol container's mask, `generateMap()`) is baked
+  from the round-start `activeCell.radiusX/radiusY` and never redrawn**, same
+  root cause as T49's protrusions/`cellBg`/cytosol bug but for the mask that
+  clips them. T49 fixed cytosol containment at the physics-position level (a
+  blob's `x`/`y` are now kept inside the *current* ellipse every frame), which
+  makes the stale, oversized mask a non-issue in practice — no blob's true
+  position is ever far enough out for the gap between the current wall and
+  the stale mask to show. Left as-is since T49's fix already closes the
+  visible defect; flagging in case a future task removes or changes the
+  containment logic and the stale mask becomes visible again. — 2026-08-09
+
+- **`tools/verify_harness.py`'s `start_round()` silently accepts an invalid
+  `speed` value.** The game's `speedSelect` only has options `1.5`/`2.5`/`3.5`
+  ("Normal"/"Fast"/"Very Fast"); passing e.g. `"1.0"` or `"2.0"` sets the
+  `<select>`'s `.value` to a non-existent option, which the DOM silently
+  ignores (the select keeps its previous value) rather than throwing — a test
+  written against the wrong speed strings gets a confusing result instead of
+  an error. Worth a one-line assertion or docstring note in the harness for
+  the next session. Found and worked around during T49's regression sweep
+  (§7.6). — 2026-08-09

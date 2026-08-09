@@ -55,7 +55,17 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > pass in the calcification block that drops aggregate blocks once the
 > shrinking membrane retreats past them, respawning the aggregate if every
 > block is culled; see `docs/tasks/T48-aggregate-grid-outline-and-containment.md`
-> Findings. Next up: **T49**.
+> Findings.
+>
+> **T49 landed 2026-08-09** — membrane protrusions and `cellBg` now re-anchor
+> to the current (post-calcification) radii every frame the radii actually
+> change (28/28 protrusions now sit exactly on the wall, mean ratio 1.0, both
+> mid-shrink and at the floor — was 28/28 outside, mean radius 1304 vs a wall
+> at 1249), and drifting cytosol blobs are pulled back inside the ellipse the
+> instant they'd cross it (0/226 outside at every measured point). Per-frame
+> cost of the re-anchor: 0.0085ms with the radii-unchanged early-out. See
+> `docs/tasks/T49-membrane-furniture-follows-shrink.md` Findings. Next up:
+> **T47**.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -210,7 +220,7 @@ sim/render split can wait behind them.
 | T46 | [Opening Help does not pause the round](tasks/T46-help-does-not-pause.md) | T41 | `DONE` |
 | T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `READY` |
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
-| T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `READY` |
+| T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `DONE` |
 
 ### Track K — Playtest design & features

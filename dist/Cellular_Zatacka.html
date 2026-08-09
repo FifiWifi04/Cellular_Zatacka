@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: e2827f830c711b3f -->
+<!-- standalone-build-inputs: ff5de1372c9af9b9 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4311,6 +4311,8 @@ void main() {
         let cytosolParticles = []; // Fluid background particles
         let membraneProtrusionsList = []; // Animated membrane blobs
         let cytosolContainer;
+        let cellBgSprite; // T49: persistent membrane-fill Graphics, redrawn as radii shrink
+        let lastMembraneRadiusX = null, lastMembraneRadiusY = null; // T49: early-out cache for the re-anchor below
 
 
         const TRACE_WIDTH = 4;
@@ -4903,18 +4905,24 @@ void main() {
             window.golgiData = null; // Reset Golgi layout parameters for a fresh round!
             window.erData = null; // Reset ER layout parameters for a fresh round!
 
-            const cellBg = new PIXI.Graphics();
+            cellBgSprite = new PIXI.Graphics();
 
             // 1. Fill base dark color
-            cellBg.beginFill(0x0d0d1a);
-            cellBg.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
-            cellBg.endFill();
+            cellBgSprite.beginFill(0x0d0d1a);
+            cellBgSprite.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+            cellBgSprite.endFill();
 
             // T37: the membrane ring itself is owned entirely by calcifyLayer
             // (drawn every frame in gameLoop, at every generation) so there is
             // never a second, stale ring baked in here alongside it.
 
-            backgroundLayer.addChild(cellBg);
+            backgroundLayer.addChild(cellBgSprite);
+
+            // T49: cellBgSprite and the protrusions below are baked from the radii
+            // in force right now -- reset the re-anchor cache so gameLoop treats
+            // this as already in sync and does not immediately redo the same work.
+            lastMembraneRadiusX = activeCell.radiusX;
+            lastMembraneRadiusY = activeCell.radiusY;
 
             // Membrane Protrusions (Drawn on top of membrane to look fused)
             const membraneProtrusionsContainer = new PIXI.Container();
@@ -8540,9 +8548,50 @@ void main() {
 
             // Animate Background Elements once per frame globally
             if (!isCellFrozen) {
+                // T49: protrusions and cellBgSprite were baked once from the round-start
+                // radii and never followed Gen 2+ calcification inward. Re-anchor them
+                // from the current radii, but only redo the trig when the radii actually
+                // moved since last frame (they only change while calcifying).
+                if (activeCell.radiusX !== lastMembraneRadiusX || activeCell.radiusY !== lastMembraneRadiusY) {
+                    let a = activeCell.radiusX, b = activeCell.radiusY;
+
+                    cellBgSprite.clear();
+                    cellBgSprite.beginFill(0x0d0d1a);
+                    cellBgSprite.drawEllipse(activeCell.x, activeCell.y, a, b);
+                    cellBgSprite.endFill();
+
+                    membraneProtrusionsList.forEach(p => {
+                        let t = p.angleRad;
+                        p.normAngle = Math.atan2(a * Math.sin(t), b * Math.cos(t));
+                        p.rotation = p.normAngle;
+                        let a2_sin2 = Math.pow(a * Math.sin(t), 2);
+                        let b2_cos2 = Math.pow(b * Math.cos(t), 2);
+                        p.rc = Math.pow(a2_sin2 + b2_cos2, 1.5) / (a * b);
+                        p.x = activeCell.x + a * Math.cos(t);
+                        p.y = activeCell.y + b * Math.sin(t);
+                    });
+
+                    lastMembraneRadiusX = a;
+                    lastMembraneRadiusY = b;
+                }
+
                 cytosolParticles.forEach(blob => {
                     blob.x += blob.vx * delta;
                     blob.y += blob.vy * delta;
+                    // T49: pull drifting blobs back inside the current (possibly
+                    // shrunk) membrane instead of letting them wander past it.
+                    if (isOutsideCell(blob.x, blob.y)) {
+                        let dx = blob.x - activeCell.x;
+                        let dy = blob.y - activeCell.y;
+                        let norm = Math.sqrt((dx * dx) / (activeCell.radiusX * activeCell.radiusX) + (dy * dy) / (activeCell.radiusY * activeCell.radiusY));
+                        if (norm > 0) {
+                            let pull = 0.98 / norm;
+                            blob.x = activeCell.x + dx * pull;
+                            blob.y = activeCell.y + dy * pull;
+                        }
+                        blob.vx *= -1;
+                        blob.vy *= -1;
+                    }
                     blob.scale.set(1.0 + Math.sin(survivalTime * 2 + blob.phase) * 0.1);
                     blob.alpha = blob.baseAlpha + Math.sin(survivalTime + blob.phase) * 0.1;
                 });

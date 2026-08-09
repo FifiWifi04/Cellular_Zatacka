@@ -79,14 +79,98 @@ Two neighbours have the same root cause and should be handled in the same pass:
 
 ## Definition of done
 
-- [ ] Protrusions ride the shrinking wall, with the radii-unchanged early-out
-- [ ] `cellBg` follows too; still one persistent `Graphics`
-- [ ] Cytosol blobs contained
-- [ ] Gen 1 unchanged
-- [ ] `docs/TASKS.md`: T49 → `DONE`
+- [x] Protrusions ride the shrinking wall, with the radii-unchanged early-out
+- [x] `cellBg` follows too; still one persistent `Graphics`
+- [x] Cytosol blobs contained
+- [x] Gen 1 unchanged
+- [x] `docs/TASKS.md`: T49 → `DONE`
 
 ---
 
 ## Findings
 
-*(Counts before/after, the per-frame cost, and how cytosol containment was done.)*
+**Protrusions.** `generateMap()` now stores the `Graphics` reference as
+`cellBgSprite` and seeds two module-level caches (`lastMembraneRadiusX/Y`) from
+the round-start radii. `gameLoop`'s existing "Animate Background Elements"
+block re-derives `p.normAngle`, `p.rotation`, `p.rc`, `p.x`, `p.y` from
+`p.angleRad` (fixed) and the *current* `activeCell.radiusX/radiusY`, gated
+behind `radiusX/Y !== last…` so the trig only reruns on frames where
+calcification actually moved the wall — every other frame it is a single
+`!==` comparison per axis. `cellBgSprite` is cleared and redrawn in the same
+branch; still one persistent `Graphics`, no per-frame allocation.
+
+Measured with the harness (`activeCell.generation` forced to 2, `640×480`,
+`infection.nextWarningTime`/`mitosis.nextTriggerTime` pushed out so the
+unrelated freeze windows don't interfere with the measurement):
+
+| Moment | radiusX | protrusion ratio to wall (mean / max) | protrusions "over tolerance" (>2%) |
+|---|---|---|---|
+| 60s of Gen 2 calcification | 1028.6 | 1.0000 / 1.0000 | 0 / 28 |
+| radii forced to `CALCIFY_FLOOR` | 630 | 1.0000 / 1.0000 | 0 / 28 |
+
+(Before this task: 28/28 outside, mean radius 1304 vs a wall at 1249, per the
+owner's original report above.) All 28 now sit exactly on the current wall at
+every measured point, both mid-shrink and at the floor.
+
+**cellBg.** Redrawn in the same branch from the current radii — no muted band
+outside the wall in either screenshot (`/tmp/verify/t49_gen2_60s.png`,
+`/tmp/verify/t49_floor.png`).
+
+**Cytosol containment.** Kept in `updateX`, not `drawX`: after the existing
+`blob.x += blob.vx*delta` step, if `isOutsideCell(blob.x, blob.y)` the blob is
+radially pulled back to 98% of the current ellipse (`pull = 0.98 / norm`,
+which algebraically guarantees the new position is inside regardless of how
+far outside the pre-correction point was) and its velocity is reflected. No
+new physics system, no allocation — reuses the existing `isOutsideCell()`
+helper and the blob's own `vx/vy` fields. Verified 0/226 cytosol blobs outside
+at the 60s mark and 0/226 at the floor (mean containment ratio 0.777 → 0.891,
+max 0.999 at both points, well inside). A debug run also confirmed the
+correction is immediate: forcing radii straight from round-start (1400) to the
+floor (630) put 189/234 blobs outside for exactly one frame, then 0/234 the
+very next tick.
+
+One trap hit and worked around during verification, not a code defect: the
+game's first infection warning is hard-coded to fire at `survivalTime === 60`
+(`infection.nextWarningTime: 60`), which sets `isCellFrozen = true` and
+(correctly, pre-existing behaviour) pauses this entire background-animation
+block, including the new containment logic, for the warning's duration. A
+measurement taken while frozen briefly showed 178/226 cytosol blobs "outside"
+— not a regression, just the freeze pausing updates as designed; the count
+dropped to 0 on the very first unfrozen frame. Later measurements pushed
+`nextWarningTime` out to avoid the freeze entirely.
+
+**Per-frame cost.** Benchmarked the exact recompute (28 protrusions +
+`cellBgSprite` redraw) in-page via `performance.now()` over 200 iterations
+using the live game objects: **0.0085ms per call**, against a 16.6ms frame
+budget at 60fps — with the early-out, this only runs on frames where the
+radii actually changed.
+
+**Rotation popping.** Sampled `p.rotation` for all 28 protrusions every 15
+game-seconds across the 60s calcification run; max change between consecutive
+samples was `0` (rounded to 4 decimals) — no popping, no spinning.
+
+**Gen 1.** Verified bit-for-bit: captured all protrusion `{x,y,rotation,rc}`
+and `activeCell.radiusX/Y` at round start and again after 5 game-seconds with
+no generation forced — every field identical (`gen1_identical_after_5s:
+true`), since the radii-changed branch never fires when nothing calcifies.
+Screenshot at `/tmp/verify/t49_play30s.png` (Gen 1, 30s, 1 bot) shows the
+membrane, its protrusions and cytosol all reading as one coherent boundary,
+matching expectations.
+
+**Regression sweep (§7.6).** Not required by the letter of the rule — this
+task never touched `checkCollision`, `checkArcCollision`, `raycast`, or
+`rebuildSpatialGrid` (confirmed by diff: the only hunks are in `generateMap()`
+around line 1671-1690 and the background-animation block in `gameLoop` around
+line 5314-5369, both well outside those functions). Ran it anyway: at all
+three speeds (1.5/2.5/3.5) a player teleported onto the membrane boundary
+dies, a player teleported onto an organelle dies, a player teleported onto
+their own fresh trace segment dies, and a player teleported onto their own
+neck (freshest trace point) survives (neck immunity intact). Console clean
+throughout every check in this task.
+
+Harness note: `speedSelect`'s actual option values are `1.5`/`2.5`/`3.5`
+("Normal"/"Fast"/"Very Fast"), not `1.0`/`2.0` — an invalid `option.value`
+silently leaves the select in a broken state. Worth a line in
+`verify_harness.py`'s docstring for the next session; filed to
+`docs/BACKLOG.md` rather than touched here since it's outside this task's
+diff.
