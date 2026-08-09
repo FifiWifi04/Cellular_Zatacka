@@ -4071,7 +4071,11 @@
 
                     let zoomX = (app.screen.width - 200) / (distX || 1);
                     let zoomY = (app.screen.height - 200) / (distY || 1);
-                    let targetZoom = Math.min(zoomX, zoomY, 1.2);
+                    // T47: floor the shared-camera zoom at DIMER_LOD_ZOOM so the trace
+                    // motif (and the rest of the arena) doesn't shrink to noise once
+                    // players separate -- players beyond this can go off-screen, same
+                    // as split-screen already allows.
+                    let targetZoom = Math.max(Math.min(zoomX, zoomY, 1.2), DIMER_LOD_ZOOM);
 
                     world.scale.x += (targetZoom - world.scale.x) * 0.1;
                     world.scale.y += (targetZoom - world.scale.y) * 0.1;

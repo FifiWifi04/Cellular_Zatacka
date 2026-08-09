@@ -85,15 +85,84 @@ Whichever is chosen, the LOD fallback itself stays — it is the correct structu
 
 ## Definition of done
 
-- [ ] One option chosen, with the reasoning in `## Findings`
-- [ ] Motif visible for most of a shared-camera round at 844×390 — new zoom
+- [x] One option chosen, with the reasoning in `## Findings`
+- [x] Motif visible for most of a shared-camera round at 844×390 — new zoom
       table committed
-- [ ] Screenshots at 2 and 4 players
-- [ ] `drawTraces()` cost still flat
-- [ ] `docs/TASKS.md`: T47 → `DONE`
+- [x] Screenshots at 2 and 4 players
+- [x] `drawTraces()` cost still flat
+- [x] `docs/TASKS.md`: T47 → `DONE`
 
 ---
 
 ## Findings
 
-*(Which option, why, the new zoom/coverage table, and the screenshots.)*
+**Option 1 chosen** (floor the shared-camera zoom). Changed one line in
+`updateCamera()`'s non-emergency shared-camera branch:
+
+```js
+let targetZoom = Math.max(Math.min(zoomX, zoomY, 1.2), DIMER_LOD_ZOOM);
+```
+
+Reusing `DIMER_LOD_ZOOM` (0.5) as the floor ties the camera clamp to the exact
+threshold the dimer LOD gate checks, so the two can't drift apart later. The
+`isEmergency` branch (virus warning / mitosis reveal, `viewSpan` 3000-6500) is
+deliberately untouched — that reveal camera needs to zoom out past 0.5 to show
+both cells, and it doesn't render the motif since gate context is different
+per T42. Split-screen was already fixed at 0.6 and is unaffected.
+
+Rejected option 3 (scale motif in world units) per the task's own warning —
+changing `DIMER_SPACING` with zoom would make the trace read as a different
+material at different zooms. Rejected option 2 (raise RT resolution) as more
+expensive and unnecessary once the zoom floor keeps the RT's fixed
+`TRACE_RT_SCALE` adequately resolved.
+
+**New zoom table** (`tools/verify_harness.py`, `world.scale.x` sampled every
+60ms for 25 wall-seconds, godMode/immortal, no human input):
+
+| Config | zoom min | zoom max | % samples ≥ 0.5 |
+|---|---|---|---|
+| Phone 844×390, shared, 2 players | 0.500 | 0.677 | 100.0% |
+| Phone 844×390, shared, 4 players | 0.500 | 0.500 | 100.0% |
+| Phone 844×390, split-screen | 0.600 | 0.600 | 100.0% (unaffected, as expected) |
+| Desktop 1280×800, shared, 4 players | 0.510 | 1.066 | 100.0% |
+
+Was 0% of a full round for the 4-player phone case before this change (zoom
+capped at 0.441, per the task's original measurement table). The motif is now
+on for the entire sampled span in every shared-camera config, not just at
+spawn.
+
+**Screenshots** at the new floor, `/tmp/verify/t47_shared_2p_844x390.png`
+(zoom 0.500) and `t47_shared_4p_844x390.png` (zoom 0.500): the alternating
+cyan/red beading on both the human's and bots' traces reads clearly as a
+beaded polymer chain, not noise, at 844×390.
+
+**`drawTraces()` cost** (mean of last ~120 calls, 1 player + 3 bots, immortal,
+640×480 — unaffected by this change since it only touches `updateCamera()`,
+confirmed flat as expected):
+
+| game-time | drawTraces (ms) |
+|---|---|
+| 15s | 0.298 |
+| 30s | 0.270 |
+| 60s | 0.179 |
+| 120s | 0.141 |
+
+Flat/decreasing (no growth), consistent with T25/T42's finding that per-frame
+cost does not scale with trace length.
+
+**Off-screen survivability** (item 5): 1 player (no human input) + 3 bots,
+shared camera, 844×390, `setGeneration(2)`, not immortal. Zoom sat at 0.654
+(above the floor, players hadn't separated past it). Round ran 46.3s before
+ending naturally (3 of 4 players died to normal hazards, 1 bot survived alone,
+`isPlaying` flipped false cleanly) — confirms death, bot AI and round-end all
+behave normally under the new clamp; nothing hung, degraded, or errored.
+
+**Verified:** console clean (all six harness scripts, `assert_console_clean`
+passed every time, zero console/page errors); `python3 tools/build_standalone.py`
+rebuilt `dist/Cellular_Zatacka.html`; `sw.js` `CACHE_NAME` bumped (v17 → v18)
+since `260703_Cellsnake.html` changed; split-screen zoom unaffected (0.6
+constant, matches pre-change behaviour); regression sweep not required per
+AGENT_CONDUCT §4.1/§7.6 — this change does not touch `checkCollision`,
+`checkArcCollision`, `raycast`, or `rebuildSpatialGrid`, and the off-screen
+survivability run above exercised normal membrane/hazard deaths without
+incident.

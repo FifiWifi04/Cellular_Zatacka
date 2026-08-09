@@ -64,8 +64,17 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > at 1249), and drifting cytosol blobs are pulled back inside the ellipse the
 > instant they'd cross it (0/226 outside at every measured point). Per-frame
 > cost of the re-anchor: 0.0085ms with the radii-unchanged early-out. See
-> `docs/tasks/T49-membrane-furniture-follows-shrink.md` Findings. Next up:
-> **T47**.
+> `docs/tasks/T49-membrane-furniture-follows-shrink.md` Findings.
+>
+> **T47 landed 2026-08-09** — shared-camera zoom is now floored at
+> `DIMER_LOD_ZOOM` (0.5) in `updateCamera()`'s non-emergency branch, so the
+> tubulin-dimer motif (and the rest of the arena) no longer shrinks to noise
+> once players separate; players beyond the floor go off-screen instead,
+> same as split-screen already allows. Motif now on 100% of sampled time in
+> every shared-camera config tested (was 0% for the 4-player phone case);
+> `drawTraces()` cost still flat; off-screen deaths/round-end behave
+> normally. See `docs/tasks/T47-dimer-lod-never-reached.md` Findings. Next
+> up: **T56**.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -218,7 +227,7 @@ sim/render split can wait behind them.
 | T44 | [Split-screen RenderTexture quality/cost](tasks/T44-splitscreen-quality-and-cost.md) | — | `DONE` |
 | T45 | [Start menu never fully hides on mobile](tasks/T45-mobile-menu-not-hidden.md) | — | `DONE` |
 | T46 | [Opening Help does not pause the round](tasks/T46-help-does-not-pause.md) | T41 | `DONE` |
-| T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `READY` |
+| T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `DONE` |
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `DONE` |
