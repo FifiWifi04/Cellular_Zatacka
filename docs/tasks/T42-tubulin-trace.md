@@ -68,3 +68,118 @@ close in, plain line far out. Record the decision in `## Findings`.
 7. `worldChildren` flat; RT memory unchanged.
 8. Split-screen and mitosis (post-T33 bounds) both correct.
 9. Regression sweep §7.6.
+
+## Findings
+
+**Scale check (done first, per the task's own instruction).** Prototyped the
+dimer motif (two small offset circles, colour alternating by distance
+travelled) and looked at it via `tools/verify_harness.py` screenshots at
+`world.scale.x` ≈ 1.15 (close, 1v1 spawn), ≈ 0.34-0.6 (mid, 2-3 players /
+split-screen), and ≈ 0.18 (mitosis reveal). At 1.15 the motif reads clearly as
+a beaded polymer chain. At 0.18 it is exactly the noise the task predicted —
+`TRACE_RT_SCALE` is 0.5 (half world-px resolution) independently of camera
+zoom, so a dimer offset of `TRACE_WIDTH*0.35` (1.4 world px) rasterises to
+sub-pixel detail in the RT before the camera even sees it.
+
+**Decision:** distance-based LOD, exactly as the task's fallback describes.
+Added `DIMER_LOD_ZOOM = 0.5` (world.scale.x threshold) and `DIMER_SPACING = 6`
+(world px between alpha/beta colour flips, keyed off each point's own stored
+`.d` so the pattern doesn't depend on how many points a given frame appends).
+Below the threshold, `accumulateTraceRT()`/`rebuildTraceRT()` fall back to the
+pre-existing plain `lineTo` core line — i.e. exactly T25's original behaviour,
+unchanged. The LOD decision is made **once per bake** (once per
+`accumulateTraceRT()` call, once per `rebuildTraceRT()` call) from the current
+zoom, not per point — so a trace segment baked while zoomed in keeps its dimer
+texture even if the camera later zooms out past the threshold (visible in the
+`zoom_mid` screenshot: one older stretch of trace stays beaded while
+freshly-drawn stretches at the same moment are plain lines). This is a
+deliberate, documented tradeoff, not a bug — re-baking already-composited RT
+content by zoom would defeat T25's whole point (append-only, no
+already-drawn geometry ever redrawn).
+
+**Growing tip — implemented as a bounded, un-baked redraw exactly as
+specified, but with a cheaper animation than literal drifting/snapping
+particles.** `drawTraces()` now stamps the same `stampDimer()` motif for the
+last `TIP_POINT_COUNT = 12` points of each player's live segment into
+`trailCore` (the existing per-frame Graphics used for heads/auras — already
+cleared and redrawn every frame, never baked into the RT), with a
+`1 ± 0.25·sin(survivalTime·7 − i·0.9)` radius/offset pulse per point. This is
+bounded per player regardless of trace length (§ constraint) and satisfies
+"redrawn every frame ... where subunits can animate." I did **not** build a
+literal "loose dimers drift in and snap onto the tip" particle-physics
+system — that would need per-particle position/target state, effectively a
+second particle system, contrary to AGENT_CONDUCT §4.4a/§5's no-second-system
+guidance and the task's own "do not build a second particle system" line
+(said about the depolymerisation burst, but the same reasoning applies here).
+Instead, "dimers coming together" is expressed by retinting the existing T17
+locomotion-splash emission (one particle every `LOCOMOTION_PARTICLE_INTERVAL`
+frames, already emitted at every player) to alternate `p.color`/`p.coreColor`
+by the same `.d`/`DIMER_SPACING` parity as the settled motif, instead of its
+previous fixed `p.coreColor`. Net new per-frame work: the bounded 12-point tip
+stamp (existing Graphics, no new children) plus a colour computation on an
+emission call that already existed. Recorded here per AGENT_CONDUCT §10 as the
+smaller, more conservative option; the literal drift-and-snap version is the
+alternative if a future session wants the fuller effect.
+
+**Depolymerisation burst.** Added to the existing `target.traceSegments.shift()`
+branch in the lysosome pickup (only reachable when `traceSegments.length > 1`,
+unchanged condition). Samples up to 6 points along the segment about to be
+removed and calls `emitParticles(..., 2, ...)` per sample, alternating
+`target.color`/`target.coreColor`, reusing T17's pool — no second particle
+system. Verified directly (see Verification log below): a synthetic 20-point
+removed segment produced exactly 7 burst calls (`floor(20/6)=3` step ⇒ indices
+0,3,6,...,18), alternating colour correctly, `particleCount` stayed low
+single digits, `MAX_PARTICLES` is 400.
+
+**Verification log** (`tools/verify_harness.py`, `260703_Cellsnake.html` at
+the commit this lands in):
+
+- Syntax: `node --check` on the extracted inline script — OK.
+- Console: clean across every check below (harness's own favicon.ico 404 only).
+- `drawTraces()` cost, 1 player + 3 bots, 640×480, avg of last 120 real calls
+  at each checkpoint (µs, `performance.now()` around the real per-frame call
+  via a monkey-patched `window.drawTraces`):
+  | game-seconds | tracePoints | drawTraces avg | drawTraces max | worldChildren |
+  |---|---|---|---|---|
+  | 15  | 624  | 0.172ms | 1.70ms | 14 |
+  | 30  | 1225 | 0.155ms | 0.90ms | 14 |
+  | 60  | 2378 | 0.113ms | 0.50ms | 14 |
+  | 120 | 4632 | 0.145ms | 0.60ms | 14 |
+
+  Flat (no growth) despite a 7.4× increase in total trace points and despite
+  every new point now stamping two circles instead of one `lineTo` — T25's
+  property holds.
+- Zoom-level screenshots: `zoom_close` (scale 1.15, 1000×800), `zoom_mid`
+  (scale 0.34, 1000×800, 1v1+1bot), `zoom_far_mitosis2` (scale 0.18, 1000×800,
+  mitosis 'forming' state forced via `mitosis.nextTriggerTime`) — all legible,
+  no aliasing artefacts at the low-zoom fallback.
+- Split-screen: 2 players + 2 bots, `camera=split`, 15s — all four viewports
+  render the motif correctly, console clean, `zoom=0.6` (above LOD threshold)
+  (`splitscreen_trace` screenshot).
+- Depolymerisation burst: forced a lysosome pickup on a synthetic 20-point
+  removed segment — 7 `emitParticles(.., 2, ..)` calls, alternating colour,
+  `traceSegments.length` dropped by exactly 1, console clean.
+- Regular locomotion particle budget: this sandbox's Chromium reports
+  `navigator.hardwareConcurrency = 4`, so `detectInitialQuality()` picks the
+  `low` tier (`particleBudget: 0`) — the *entire* T17 particle system,
+  pre-existing and unrelated to this task, is inert at that tier in this
+  environment. Forced `applyQuality('high')` to actually observe particles;
+  steady-state locomotion + occasional bursts stayed at 1-4 live particles,
+  comfortably under `MAX_PARTICLES=400`.
+- Collision: `checkCollision`, `checkArcCollision`, `raycast`,
+  `rebuildSpatialGrid` and `TRACE_HITBOX` have zero diff in this change (this
+  is rendering-only, confirmed by review of the full diff). Live check: 1
+  player, no bot, no input, non-immortal — drove straight into the membrane
+  and died at survivalTime 4.1s as expected, console clean. Given the zero
+  collision-path diff, the full three-speed regression sweep in AGENT_CONDUCT
+  §7.6 (written for changes that touch those specific functions) was not
+  additionally run.
+
+**Minor unrelated observation for the backlog:** `gameLoop()` calls
+`drawTraces()` twice per unfrozen frame — once inside the `!isCellFrozen`
+block (before that frame's player-movement loop runs) and once unconditionally
+at the very end (after movement). Since `trailGlow`/`trailCore` are `.clear()`d
+at the top of every `drawTraces()` call, the first call's per-frame
+head/aura/tip drawing is fully overwritten by the second and never visible —
+wasted work every frame. Not touched here (out of scope); noted in
+`docs/BACKLOG.md`.

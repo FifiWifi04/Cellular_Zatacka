@@ -614,3 +614,28 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   arena, narrate each hazard as it's encountered) would need its own state
   machine and is a materially larger project — logged here per T41's explicit
   ask, to revisit if the static guide turns out not to be enough.
+
+## Found while doing T42 (tubulin-dimer trace) — 2026-08-09
+
+- **`gameLoop()` calls `drawTraces()` twice every unfrozen frame.** Once inside
+  the `!isCellFrozen` block (before that frame's player-movement loop runs,
+  so before any new trace points exist) and once unconditionally at the very
+  end (after movement). `trailGlow`/`trailCore` are `.clear()`d at the top of
+  every `drawTraces()` call, so the first call's head/aura/tip drawing is
+  fully overwritten by the second and never visible on screen — wasted work
+  every frame (roughly double the per-frame head/aura/tip cost, though
+  `accumulateTraceRT()`'s own cost is cheap either way since the first call
+  finds nothing new to bake). Not touched here — out of scope for a
+  rendering-only task and risky to change without understanding why two
+  calls exist in the first place. — 2026-08-09
+
+- **This sandbox's headless Chromium reports `navigator.hardwareConcurrency
+  = 4`**, which `detectInitialQuality()` treats as "weak device" and starts
+  every round at the `low` quality tier — whose `particleBudget` is `0`. The
+  entire T17 particle system (locomotion splash, vesicle-pickup bursts, and
+  now T42's depolymerisation burst) is silently inert in this environment
+  unless a test explicitly calls `applyQuality('medium'|'high')` first. Not a
+  bug — `low`'s 0 budget is presumably intentional for genuinely weak
+  devices — but worth knowing for any future particle-system verification in
+  this harness: a `particleCount` that stays 0 for an entire run does not by
+  itself mean the emission code is broken. — 2026-08-09

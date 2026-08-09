@@ -26,8 +26,9 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > is fully done. T38 landed 2026-08-09 — necrotic organelles now fuse, shed
 > lethal debris that scales with cluster size, and break apart one member at a
 > time in red mode; see `docs/tasks/T38-make-necrosis-matter.md` Findings.
-> Track K continues with T42, `READY` — T41 (how-to-play tutorial) landed
-> 2026-08-09.**
+> **Track K is now fully done** — T42 (tubulin-dimer trace) landed 2026-08-09,
+> see `docs/tasks/T42-tubulin-trace.md` Findings. Next up: **T22** (sim/render
+> split), then Phase 7.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -187,7 +188,7 @@ sim/render split can wait behind them.
 | T38 | [Necrosis: fuse, shed debris, break apart in red mode](tasks/T38-make-necrosis-matter.md) | T36, T37 | `DONE` |
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `DONE` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `DONE` |
-| T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `READY` |
+| T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `DONE` |
 
 ### Parked
 

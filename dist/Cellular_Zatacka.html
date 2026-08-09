@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 31b93fd4cb737608 -->
+<!-- standalone-build-inputs: 92dce590e9fa3d08 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4316,6 +4316,12 @@ void main() {
         const TRACE_WIDTH = 4;
         const TRACE_HITBOX = TRACE_WIDTH * 0.6;
 
+        // T42: tubulin-dimer trace motif. Rendering only -- TRACE_HITBOX and every
+        // collision path above are untouched by this section.
+        const DIMER_LOD_ZOOM = 0.5;  // below this world.scale.x the motif aliases into noise (RT is TRACE_RT_SCALE=0.5x world px) -- fall back to the plain line; see task Findings
+        const DIMER_SPACING = 6;     // world px between alpha/beta colour flips, keyed off each point's stored .d so the pattern is stable regardless of how many points a frame appends
+        const TIP_POINT_COUNT = 12;  // growing-tip points redrawn (not baked) every frame -- bounded, independent of total trace length
+
         const MAX_TRACE_POINTS = 20000; // per-player memory/perf bound, not a gameplay cap; see T07 commit message
         const NECK_LENGTH = 35; // px of own trace (measured along the current segment) that cannot kill you; replaces the old 15/16-frame skip so the immune neck is the same physical length at every speed (T08)
         const MIN_TAIL_POINTS = 48; // never trim the growing last segment below this; must cover NECK_LENGTH px at the slowest speed (1.5px/frame -> ~24 points), doubled for safety margin like the constant it replaces
@@ -7030,6 +7036,27 @@ void main() {
             }
         }
 
+        // T42: stamps a two-dot "tubulin dimer" motif (alpha/beta) for one
+        // settled-trace edge, replacing a plain lineTo. Colour alternates by
+        // distance travelled (distAtB, i.e. the edge's own stored .d), not by
+        // a counter, so the pattern is stable no matter how many points a
+        // frame happens to append. offsetScale lets the growing-tip caller
+        // pulse the motif without a second code path. No allocation.
+        function stampDimer(gfx, ax, ay, bx, by, distAtB, colorA, colorB, offsetScale) {
+            let dx = bx - ax, dy = by - ay;
+            let len = Math.hypot(dx, dy) || 1;
+            let px = -dy / len, py = dx / len;
+            let off = TRACE_WIDTH * 0.35 * offsetScale;
+            let r = TRACE_WIDTH * 0.42 * offsetScale;
+            let parity = Math.floor(distAtB / DIMER_SPACING) & 1;
+            gfx.beginFill(parity ? colorA : colorB, 1);
+            gfx.drawCircle(bx + px * off, by + py * off, r);
+            gfx.endFill();
+            gfx.beginFill(parity ? colorB : colorA, 1);
+            gfx.drawCircle(bx - px * off, by - py * off, r);
+            gfx.endFill();
+        }
+
         // T25: (re)allocate trailGlowRT/trailCoreRT for activeCell's current
         // home/size and redraw every player's CURRENT traceSegments into them
         // from scratch. This is the only path that may resize or reposition
@@ -7073,16 +7100,22 @@ void main() {
 
             traceScratchGlow.clear();
             traceScratchCore.clear();
+            let useDimerLOD = world.scale.x >= DIMER_LOD_ZOOM; // T42: LOD decided once for this (re)bake, from the current camera zoom
             players.forEach(p => {
                 p.traceSegments.forEach(seg => {
                     if (seg.length < 2) return;
                     traceScratchGlow.lineStyle(TRACE_WIDTH + 4, p.color, 0.6);
                     traceScratchGlow.moveTo(seg[0].x, seg[0].y);
-                    traceScratchCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
-                    traceScratchCore.moveTo(seg[0].x, seg[0].y);
+                    if (useDimerLOD) {
+                        traceScratchCore.lineStyle(0);
+                    } else {
+                        traceScratchCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
+                        traceScratchCore.moveTo(seg[0].x, seg[0].y);
+                    }
                     for (let i = 1; i < seg.length; i++) {
                         traceScratchGlow.lineTo(seg[i].x, seg[i].y);
-                        traceScratchCore.lineTo(seg[i].x, seg[i].y);
+                        if (useDimerLOD) stampDimer(traceScratchCore, seg[i - 1].x, seg[i - 1].y, seg[i].x, seg[i].y, seg[i].d, p.color, p.coreColor, 1);
+                        else traceScratchCore.lineTo(seg[i].x, seg[i].y);
                     }
                 });
                 // Mark every point currently on record as drawn, whether or not
@@ -7111,6 +7144,7 @@ void main() {
             let any = false;
             traceScratchGlow.clear();
             traceScratchCore.clear();
+            let useDimerLOD = world.scale.x >= DIMER_LOD_ZOOM; // T42: LOD decided once per call, from the current camera zoom
             players.forEach(p => {
                 for (let si = p.traceDrawSeg; si < p.traceSegments.length; si++) {
                     let seg = p.traceSegments[si];
@@ -7122,11 +7156,16 @@ void main() {
                     }
                     traceScratchGlow.lineStyle(TRACE_WIDTH + 4, p.color, 0.6);
                     traceScratchGlow.moveTo(seg[fromI].x, seg[fromI].y);
-                    traceScratchCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
-                    traceScratchCore.moveTo(seg[fromI].x, seg[fromI].y);
+                    if (useDimerLOD) {
+                        traceScratchCore.lineStyle(0);
+                    } else {
+                        traceScratchCore.lineStyle(TRACE_WIDTH, p.coreColor, 1);
+                        traceScratchCore.moveTo(seg[fromI].x, seg[fromI].y);
+                    }
                     for (let i = fromI + 1; i < seg.length; i++) {
                         traceScratchGlow.lineTo(seg[i].x, seg[i].y);
-                        traceScratchCore.lineTo(seg[i].x, seg[i].y);
+                        if (useDimerLOD) stampDimer(traceScratchCore, seg[i - 1].x, seg[i - 1].y, seg[i].x, seg[i].y, seg[i].d, p.color, p.coreColor, 1);
+                        else traceScratchCore.lineTo(seg[i].x, seg[i].y);
                     }
                     any = true;
                     p.traceDrawSeg = si;
@@ -7148,8 +7187,23 @@ void main() {
             // plain per-frame Graphics drawn on top of the accumulated sprites.
             trailGlow.clear();
             trailCore.clear();
+            let useDimerLOD = world.scale.x >= DIMER_LOD_ZOOM; // T42: same LOD call as the bake, recomputed here since this runs every frame
             players.forEach(p => {
                 if (!p.alive) return;
+
+                // --- T42: GROWING TIP -- last TIP_POINT_COUNT points of the current
+                // segment, redrawn (not baked) every frame with a pulsing offset so
+                // the tip visibly animates. Bounded per player regardless of trace
+                // length -- never touches traceScratchCore/the RT (T25's flat cost
+                // is untouched).
+                if (useDimerLOD) {
+                    let seg = p.traceSegments[p.traceSegments.length - 1];
+                    let start = Math.max(1, seg.length - TIP_POINT_COUNT);
+                    for (let i = start; i < seg.length; i++) {
+                        let pulse = 1 + 0.25 * Math.sin(survivalTime * 7 - i * 0.9);
+                        stampDimer(trailCore, seg[i - 1].x, seg[i - 1].y, seg[i].x, seg[i].y, seg[i].d, p.color, p.coreColor, pulse);
+                    }
+                }
 
                 // --- TARGET MODE AURA ---
                 let auraColor = p.targetMode === 'self' ? 0x2ecc71 : 0xe74c3c;
@@ -8364,7 +8418,18 @@ void main() {
                             } else if (target.effects.redCount === 3) {
                                 deleteOldestTrace(target, 0.5); // 50% wipe
                             }
-                            if (target.traceSegments.length > 1) { target.traceSegments.shift(); traceRTNeedsFullRedraw = true; } // T25: front geometry removed, RT must be redrawn
+                            if (target.traceSegments.length > 1) {
+                                // T42: depolymerisation burst -- sample the segment
+                                // before it's shifted away and scatter loose dimers
+                                // from it, reusing T17's pool (no second particle system).
+                                let removed = target.traceSegments[0];
+                                let sampleStep = Math.max(1, Math.floor(removed.length / 6));
+                                for (let ri = 0; ri < removed.length; ri += sampleStep) {
+                                    let rp = removed[ri];
+                                    emitParticles(rp.x, rp.y, 2, { speed: 3.5, spread: Math.PI * 2, life: 0.5, size: 2, color: (ri & 1) ? target.color : target.coreColor });
+                                }
+                                target.traceSegments.shift(); traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
+                            }
                         }
                         else if (v.type === 'mitochondria') {
                             if (target.effects.speedLevel === 2) {
@@ -8423,7 +8488,11 @@ void main() {
                 if (!p.isGap && !isGhost) {
                     p.particleTick = (p.particleTick + 1) % LOCOMOTION_PARTICLE_INTERVAL;
                     if (p.particleTick === 0) {
-                        emitParticles(p.x, p.y, 1, { speed: 1.0, spread: 0.6, angle: p.angle + Math.PI, life: 0.4, size: 2, color: p.coreColor });
+                        // T42: alternate alpha/beta tubulin colour, keyed off the same
+                        // .d-based parity as stampDimer() -- reads as dimers assembling
+                        // onto the trace as it forms.
+                        let dimerColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.color : p.coreColor;
+                        emitParticles(p.x, p.y, 1, { speed: 1.0, spread: 0.6, angle: p.angle + Math.PI, life: 0.4, size: 2, color: dimerColor });
                     }
                 }
 
