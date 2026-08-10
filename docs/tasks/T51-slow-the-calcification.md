@@ -113,17 +113,96 @@ seeing rewards is what T03 normalised).
 
 ## Definition of done
 
-- [ ] New pickup array, Gen 2+, spawn-biased to the annulus being lost
-- [ ] One effect chosen, bounded, with the reasoning in `## Findings`
-- [ ] Membrane feedback + HUD readout + pickup burst
-- [ ] Bots see and collect them
-- [ ] Generation still ends under active collection — proven over 10 minutes
-- [ ] Help panel updated from live constants
-- [ ] `docs/TASKS.md`: T51 → `DONE`
+- [x] New pickup array, Gen 2+, spawn-biased to the annulus being lost
+- [x] One effect chosen, bounded, with the reasoning in `## Findings`
+- [x] Membrane feedback + HUD readout + pickup burst
+- [x] Bots see and collect them
+- [x] Generation still ends under active collection — proven over 10 minutes
+- [x] Help panel updated from live constants
+- [x] `docs/TASKS.md`: T51 → `DONE`
 
 ---
 
 ## Findings
 
-*(Effect chosen and why; radius-vs-time across a pickup; the caps; bot pickup
-rate; the 10-minute proof that the wall still closes.)*
+**Effect chosen: Pause (option 1).** Clearest to read (a flat span on a
+logged `radiusX` trace is unambiguous, unlike Slow's subtler rate change),
+and doesn't fight T12's floor the way Reverse would. Implemented as a single
+**global** `calcifyPauseTimer`, not a per-player effect routed through
+`boostTarget()` like the three vesicle types: the membrane and its shrink are
+shared by every player in the cell, so there's nothing for an 'attack'-mode
+redirect to target — every pickup, by any player, adds
+`ATP_PAUSE_DURATION`(4s) to the one timer, clamped at `ATP_PAUSE_MAX`(12s).
+
+**Spawn annulus — read literally vs. as implemented.** The design doc's
+"annulus between the current wall and where the wall started" (`radiusX` to
+`baseRadiusX`) is, read literally, ground the membrane has *already* retreated
+past — outside the current cell, unreachable. Implemented instead as
+`ATP_ANNULUS_FRAC`(0.72) to 1.0 of the **current** `radiusX`/`radiusY` — the
+band of ground closest to the current wall, matching the design's own flavour
+text ("out near the edge... about to stop existing"). Noted rather than
+blocked per AGENT_CONDUCT §10.3 (smaller/conservative reading, alternative
+noted).
+
+**Radius-vs-time across a pickup** (`t51_pause_cap.py`, Gen 2, direct
+`calcifyPauseTimer` mutation via the exact clamp expression the real pickup
+path uses):
+
+| sample | radiusX | pauseTimer |
+|---|---|---|
+| before pickup | 1398.2 → 1389.2 → 1380.2 | 0 (shrinking normally, ~6px/game-s) |
+| after 1 pickup | 1379.6 | 2.3 |
+| " | 1379.6 | 0.9 (flat while paused) |
+| " | 1376.0 | 0 (resumed the instant the pause hit 0) |
+| +1.5s later | 1368.2 → 1357.4 | 0 (shrink continues normally) |
+
+**Stacking cap**: 5 rapid pickups (`calcifyPauseTimer = min(ATP_PAUSE_MAX,
++= ATP_PAUSE_DURATION)` called 5×, not 5×4=20) clamped at **11.9/12** (the
+0.1 short of 12 is real time elapsing between the 5 back-to-back `evaluate()`
+calls, not a clamp error).
+
+**Generation still ends under active collection** (`t51_soak.py`, Gen 2, 1
+player + 3 bots, `godMode` on so nobody dies to anything else and truncates
+the round — verified this doesn't also suppress the shrink, which has no
+`godMode` gate): reached `CALCIFY_FLOOR` (630px, from `baseRadiusX` 1400) at
+`survivalTime` **142.0s**, and held there through the rest of the ~210
+game-second/236 wall-second window. `everPaused: true` — the timer was
+observed at 1.87s mid-run, i.e. a bot did pause the shrink at least once —
+and the wall still closed. This is a **real, non-synthetic run** (unlike some
+recent tasks' time-boxed substitutions): at 640×480 in this configuration the
+game/wall-time ratio measured ~0.9x, well over the harness docstring's
+general 0.38x, so the literal ask fit inside one invocation. Capped the
+window at 210 game-seconds specifically to stay clear of `MITOSIS_INTERVAL`
+(240s) — see the two `docs/BACKLOG.md` entries filed today on the mitosis
+snap's `godMode` gap and on `atpGranules` not being rescued there.
+
+**Bots collect them**: same run — `everPaused: true` is direct evidence (the
+timer only moves via a pickup), and `atpLive` (live granule count) fluctuated
+down as well as up across samples, consistent with pickups happening
+alongside spawns, not just expiry.
+
+**Caps hold**: `atpLive` peaked at exactly **6** (`ATP_MAX`) across 20 samples
+over the same run, never exceeded.
+
+**No leak**: `worldChildren` flat at **15** across all 20 samples of the same
+~210-game-second run. Granules have no PIXI display object of their own
+(drawn immediate-mode into the single `atpLayer` Graphics, cleared+redrawn
+every frame — same pattern as `dynamicLayer`/vesicles), so there is no
+per-granule sprite to leak in the first place.
+
+**Regression sweep (§7.6)**, since `raycast()` and `rebuildSpatialGrid()`
+were touched: direct `checkCollision()` calls at each speed's real
+per-frame step size (90/150/210px, from 1.5/2.5/3.5 × 60fps) —
+membrane/own-trace/organelle death and own-neck survival all correct at all
+three speeds (`t51_regression2.py`). An earlier live-movement version of this
+same check produced two false negatives (organelle death, neck survival) —
+traced to test-script issues (organelle drift during the ~1.5s real-time
+polling window; a full 180° reversal isn't actually a "near-miss along the
+neck" since `traceDist` accumulates path length regardless of direction, so
+it walks back out of its own `NECK_LENGTH` window by design) — not to any
+regression in the collision code itself, which the deterministic version
+confirms untouched by this diff.
+
+**Console clean** across every check above (`http://` and `file://` smoke,
+`t51_final_smoke.py`); `python3 tools/build_standalone.py --check` passes;
+`sw.js` `CACHE_NAME` bumped v19→v20.

@@ -669,3 +669,27 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   an error. Worth a one-line assertion or docstring note in the harness for
   the next session. Found and worked around during T49's regression sweep
   (§7.6). — 2026-08-09
+
+- **Mitosis snap's "kill players who didn't make it to Cell B" check is
+  gated on `devMode`, not `godMode` (gameLoop, THE SNAP).** `if (devMode) {
+  teleport } else { p.alive = false }` predates T04's split of `devMode`
+  (hotkeys/HUD) from `godMode` (death-check bypass) and was never updated —
+  every other elimination path in `gameLoop` now checks `!godMode`, but this
+  one still doesn't, so a player with `godMode` on can die at the mitosis
+  snap while every other hazard leaves them untouchable. Found via
+  `tools/verify_harness.py`'s `immortal=True` (which sets `godMode`) during
+  T51's soak check: a 4-alive round dropped to 0 alive the instant
+  `survivalTime` crossed `MITOSIS_INTERVAL + MITOSIS_SWEEP_DURATION` (240 +
+  120 = 360s), with no other explanation. Out of scope for T51; the soak
+  script worked around it by staying under 210 game-seconds. — 2026-08-10
+
+- **`atpGranules` (T51) isn't rescued or vaporized at the mitosis snap**,
+  unlike `vesicles`/`infection.particles`/`organelles` (`gameLoop`, THE SNAP,
+  `survivingVesicles`/`survivingViruses`/`survivingOrganelles`). Any granule
+  outside the bridge/new-cell-B footprint keeps its stale Cell-A world
+  position after `activeCell` re-homes to Cell B, so it becomes an
+  unreachable, uncollectable point until `ATP_LIFETIME` (25s) expires it —
+  same failure mode the vesicle rescue exists to prevent, just self-healing
+  here instead of permanent because of the lifetime cap. Left alone to keep
+  T51's diff out of the snap's already-dense rescue logic; worth folding in
+  alongside the other three arrays if that block is touched again. — 2026-08-10

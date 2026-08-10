@@ -87,7 +87,23 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > See `docs/tasks/T56-microtubule-lattice-and-assembly.md` Findings for full
 > numbers, including where 60/120-game-second real-time measurement had to be
 > substituted with a synthetic-length methodology under this session's time
-> budget. Next up: **T51**.
+> budget.
+>
+> **T51 landed 2026-08-10** — ATP granules (Gen 2+, own array, spawn-biased
+> to the outer `ATP_ANNULUS_FRAC`(0.72) band of the current wall) pause the
+> shared membrane shrink for `ATP_PAUSE_DURATION`(4s) per pickup, capped at
+> `ATP_PAUSE_MAX`(12s); membrane glows and a HUD bar reads out the remaining
+> pause. Proven over a real (non-synthetic) 210-game-second Gen 2 run with 3
+> bots and `godMode` on: wall reached `CALCIFY_FLOOR` at 142s despite at
+> least one confirmed bot pickup mid-run; granule count held at ≤6
+> (`ATP_MAX`) throughout; `worldChildren` flat at 15 (no leak). Collision
+> regression sweep at all three speeds passed via direct `checkCollision()`
+> calls (raycast/rebuildSpatialGrid were touched to add the new reward
+> channel). See `docs/tasks/T51-slow-the-calcification.md` Findings; two
+> incidental issues (mitosis snap's kill check still gated on `devMode`
+> instead of `godMode`; `atpGranules` not rescued at the snap like the other
+> hazard arrays) filed to `docs/BACKLOG.md`, both out of scope here. Next up:
+> **T52**.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -253,7 +269,7 @@ sim/render split can wait behind them.
 | T39 | [Replace the "tumour" with a protein aggregate; grow faster](tasks/T39-aggregate-not-tumour.md) | — | `DONE` |
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `DONE` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `DONE` |
-| T51 | [Give the player a way to fight the shrinking membrane (ATP)](tasks/T51-slow-the-calcification.md) | T12 | `READY` |
+| T51 | [Give the player a way to fight the shrinking membrane (ATP)](tasks/T51-slow-the-calcification.md) | T12 | `DONE` |
 | T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `READY` |
 | T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `DONE` |
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `BLOCKED` |

@@ -765,6 +765,8 @@
         const GLOW_BLEND = PIXI.BLEND_MODES.ADD;
         const dynamicLayer = new PIXI.Graphics(); // Vesicles
         dynamicLayer.blendMode = GLOW_BLEND;
+        const atpLayer = new PIXI.Graphics(); // T51: ATP granules
+        atpLayer.blendMode = GLOW_BLEND;
         const virusLayer = new PIXI.Graphics();   // New layer for the Infection event
         virusLayer.blendMode = GLOW_BLEND;
         const uiBarsLayer = new PIXI.Graphics();
@@ -781,6 +783,7 @@
         world.addChild(particleLayer);
         world.addChild(trailLayer);
         world.addChild(dynamicLayer);
+        world.addChild(atpLayer);
         world.addChild(virusLayer);
         world.addChild(necroticDebrisLayer);
         world.addChild(uiBarsLayer);
@@ -1318,6 +1321,8 @@
         let players = [];
         let organelles = [];
         let vesicles = [];
+        let atpGranules = []; // T51: modeled on vesicles' lifecycle, kept separate -- see const block above
+        let calcifyPauseTimer = 0; // T51: seconds remaining the shared membrane refuses to shrink
         let globalRotation = 0;
 
         // Destroy the split-screen sprites/RenderTextures and empty both arrays.
@@ -1340,6 +1345,22 @@
         const NUCLEUS_RADIUS = 130;          // px; the lethal core at every cell's center
         const CALCIFY_RATE = 6;              // px/sec the membrane shrinks by (Gen 2+); see T12
         const CALCIFY_FLOOR = 0.45;          // never shrinks below this fraction of the base radius
+
+        // T51: ATP granules -- Gen 2+ pickup that pauses the shared membrane shrink.
+        // Own array, own lifecycle; see docs/tasks/T51-slow-the-calcification.md.
+        const ATP_MAX = 6;                // max live granules at once
+        const ATP_LIFETIME = 25;          // seconds before an uncollected granule expires
+        const ATP_SPAWN_CHANCE = 0.01;    // per-frame roll while under ATP_MAX
+        const ATP_RADIUS = 9;             // px
+        const ATP_ANNULUS_FRAC = 0.72;    // granules spawn between this fraction of the CURRENT
+                                           // radius and the wall itself -- the ground closest to
+                                           // being lost. (Spawning out toward baseRadiusX instead
+                                           // would place them past the already-shrunk wall, i.e.
+                                           // outside the cell -- see task Findings.)
+        const ATP_PAUSE_DURATION = 4;     // seconds the shrink halts per pickup
+        const ATP_PAUSE_MAX = 12;         // stacking cap -- the generation must still end
+        const ATP_COLOR = 0xd6ff6b;       // pale yellow-green; distinct from every vesicle colour
+
         const MITOSIS_INTERVAL = 240;        // seconds between cell-division events
         const MITOSIS_SWEEP_DURATION = 120;  // seconds for the death-ring to sweep across a cell
         const INFECTION_INTERVAL = 120;      // seconds between viral infection events
@@ -2277,6 +2298,15 @@
                 });
             });
 
+            // 3.5 Insert ATP granules (T51; Gen 2+ reward channel, same treatment as vesicles)
+            atpGranules.forEach(g => {
+                spatialGrid.insertCircle(g.x, g.y, g.radius, {
+                    type: 'atp',
+                    raw: g,
+                    _seen: -1
+                });
+            });
+
             // 4. Insert virus particles
             if (infection.particles) {
                 infection.particles.forEach(vp => {
@@ -2528,6 +2558,15 @@
                             if (hitT >= 0) {
                                 let hitDist = hitT * maxDist;
                                 if (hitDist < rewardDist) { rewardDist = hitDist; rewardRaw = v; }
+                            }
+                        } else if (item.type === 'atp') {
+                            // T51: same reward channel as vesicles -- bots must see these
+                            // or the difficulty balance shifts to the human from Gen 2 on.
+                            let g = item.raw;
+                            let hitT = raySegT(startX, startY, endX, endY, g.x, g.y, g.x, g.y, g.radius + TRACE_WIDTH + 6);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < rewardDist) { rewardDist = hitDist; rewardRaw = g; }
                             }
                         } else if (item.type === 'mass') {
                             // T14: block is axis-aligned, so test with segAabbT (same
@@ -3183,6 +3222,45 @@
                     type: type, radius: 10, color: color,
                     rotation: Math.random() * Math.PI * 2
                 });
+            }
+        }
+
+        // T51: ATP granules -- state only (§4.4a). Spawn is biased to the outer
+        // ATP_ANNULUS_FRAC band of the CURRENT radius (the ground closest to
+        // being lost, not the already-shrunk-away region toward baseRadiusX),
+        // and rejects positions inside the nucleus or the protein aggregate.
+        function updateATP(deltaSec) {
+            for (let i = atpGranules.length - 1; i >= 0; i--) {
+                atpGranules[i].life -= deltaSec;
+                if (atpGranules[i].life <= 0) atpGranules.splice(i, 1);
+            }
+
+            if (!genAtLeast(2)) return;
+            if (atpGranules.length >= ATP_MAX) return;
+            if (Math.random() >= ATP_SPAWN_CHANCE) return;
+
+            let t = Math.random() * Math.PI * 2;
+            let frac = ATP_ANNULUS_FRAC + Math.random() * (1 - ATP_ANNULUS_FRAC);
+            let gx = activeCell.x + Math.cos(t) * activeCell.radiusX * frac;
+            let gy = activeCell.y + Math.sin(t) * activeCell.radiusY * frac;
+
+            if (Math.hypot(gx - activeCell.x, gy - activeCell.y) < NUCLEUS_RADIUS + ATP_RADIUS) return;
+            for (let b of malignantMass.blocks) {
+                if (Math.hypot(gx - b.x, gy - b.y) < malignantMass.blockSize / 2 + ATP_RADIUS) return;
+            }
+
+            atpGranules.push({ x: gx, y: gy, radius: ATP_RADIUS, life: ATP_LIFETIME, phase: Math.random() * Math.PI * 2 });
+        }
+
+        // T51: draw only (§4.4a) -- reads atpGranules, never mutates it.
+        function drawATP() {
+            atpLayer.clear();
+            for (let g of atpGranules) {
+                let pulse = 0.7 + 0.3 * Math.sin(survivalTime * 4 + g.phase);
+                atpLayer.beginFill(ATP_COLOR, pulse);
+                atpLayer.lineStyle(1.5, 0xffffff, 0.5);
+                atpLayer.drawCircle(g.x, g.y, g.radius);
+                atpLayer.endFill();
             }
         }
 
@@ -4829,8 +4907,13 @@
             // ring into cellBg -- this is the only membrane boundary, ever.
             calcifyLayer.clear();
             if (genAtLeast(2) && !isCellFrozen && mitosis.state === 'idle') {
+                // T51: ATP pickups pause the shrink for a few seconds each, capped at
+                // ATP_PAUSE_MAX -- ticks down here so it only moves while the shrink
+                // itself would (frozen/mitosis states already suspend it above).
+                if (calcifyPauseTimer > 0) calcifyPauseTimer = Math.max(0, calcifyPauseTimer - deltaSec);
+
                 let floorX = activeCell.baseRadiusX * CALCIFY_FLOOR;
-                if (activeCell.radiusX > floorX) {
+                if (calcifyPauseTimer <= 0 && activeCell.radiusX > floorX) {
                     let shrunkX = Math.max(floorX, activeCell.radiusX - CALCIFY_RATE * deltaSec);
                     activeCell.radiusY *= shrunkX / activeCell.radiusX;
                     activeCell.radiusX = shrunkX;
@@ -4846,11 +4929,14 @@
                     if (malignantMass.blocks.length === 0) malignantMass.active = false;
                 }
             }
+            // T51: while a pause is live the inner ring glows the same colour as the
+            // granule that bought it, pulsing, instead of its resting cyan.
+            let atpPauseActive = calcifyPauseTimer > 0;
             calcifyLayer.lineStyle(15, 0x1e3799, 0.4);
             calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
             calcifyLayer.lineStyle(8, 0x4a69bd, 0.8);
             calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
-            calcifyLayer.lineStyle(3, 0x82ccdd, 1.0);
+            calcifyLayer.lineStyle(3, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
             calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
 
             if (!isCellFrozen) {
@@ -4863,6 +4949,7 @@
                 drawTraces();
                 updateDriftingOrganelles(delta);
                 updateVesicles(delta);
+                updateATP(deltaSec); drawATP(); // T51
 
                 // T13: Gen 2+ organelle necrosis. Every NECROSIS_INTERVAL seconds of
                 // un-frozen game time, freeze one random non-necrotic organelle into a
@@ -5291,6 +5378,19 @@
                     }
                 }
 
+                // 3.5 ATP Granule Collection (T51) -- the membrane and its shrink are
+                // shared by every player in the cell, so unlike the vesicles above this
+                // is a global effect: no boostTarget() redirect, every pickup adds to
+                // the one calcifyPauseTimer, capped at ATP_PAUSE_MAX.
+                for (let i = atpGranules.length - 1; i >= 0; i--) {
+                    let g = atpGranules[i];
+                    if (Math.hypot(nextX - g.x, nextY - g.y) < g.radius + TRACE_WIDTH + 6) {
+                        calcifyPauseTimer = Math.min(ATP_PAUSE_MAX, calcifyPauseTimer + ATP_PAUSE_DURATION);
+                        emitParticles(g.x, g.y, 10, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: ATP_COLOR }); // T17
+                        atpGranules.splice(i, 1);
+                    }
+                }
+
                 // 4. Trace Drawing & Gap Management
                 if (p.isGap) {
                     p.gapCounter -= delta;
@@ -5386,6 +5486,15 @@
                     if (caught && !godMode) { p.alive = false; addShake(0.5, 0.4); } // T16: player elimination; <-- Added !godMode
                 }
             });
+
+            // T51: global ATP-pause readout, drawn once (not per player, unlike the
+            // bars above) since the effect belongs to the one shared membrane --
+            // anchored above the nucleus, next to the thing it's protecting.
+            if (calcifyPauseTimer > 0) {
+                uiBarsLayer.beginFill(ATP_COLOR);
+                uiBarsLayer.drawRect(activeCell.x - 30, activeCell.y - NUCLEUS_RADIUS - 30, 60 * (calcifyPauseTimer / ATP_PAUSE_MAX), 6);
+                uiBarsLayer.endFill();
+            }
 
             // T17: no splash particles during frozen states (infection warning /
             // mitosis reveal) -- clear rather than leaving the last frame's burst
@@ -5679,7 +5788,10 @@
                     ${Math.round(CALCIFY_FLOOR * 100)}% of its original size), and organelles begin
                     randomly freezing solid roughly every ${NECROSIS_INTERVAL}s. Frozen ones fuse into
                     clusters (up to ${CLUSTER_MAX_MEMBERS} members) when they touch, and bigger
-                    clusters shed lethal debris faster.</li>
+                    clusters shed lethal debris faster. Small pale yellow-green
+                    <b>ATP granules</b> also start appearing near the shrinking edge -- collect one
+                    to halt the shrink for ${ATP_PAUSE_DURATION}s (stacks up to a ${ATP_PAUSE_MAX}s cap;
+                    the membrane glows while it's holding).</li>
                     <li><b>Generation 3</b> -- a protein aggregate spawns and keeps growing new blocks
                     (about every ${gen3MassInterval}s at first, faster each generation after), up to
                     ${MASS_MAX_BLOCKS} blocks.</li>
@@ -5712,6 +5824,7 @@
             // 1. Clear previous round data
             uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
+            atpGranules = []; atpLayer.clear(); calcifyPauseTimer = 0; // T51
             particleCount = 0; particleLayer.clear(); // T17
             assemblyLiveCount.fill(0); // T56
 
