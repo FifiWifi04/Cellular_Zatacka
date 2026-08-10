@@ -119,7 +119,7 @@ verifying after each:
 
 ## Progress
 
-- [ ] Step 1 — vesicles split
+- [x] Step 1 — vesicles split
 - [ ] Step 2 — infection split
 - [ ] Step 3 — organelles split (sprite mirroring moved to draw)
 - [ ] Step 4 — mitosis split (three state mutations moved out of the draw path)
@@ -129,6 +129,42 @@ verifying after each:
 
 Commit per step (`T22: <step>`), push, then decide whether there is budget for
 the next. Leave T22 `READY` until every step is ticked.
+
+---
+
+## Findings
+
+**Step 1 (vesicles split), landed 2026-08-10.** `updateVesicles(delta)` now
+contains state only: both spawn blocks, the Gen 4+ well `gen4EstablishTime`
+latch, and the per-vesicle loop (gravity pull, feed-meter consume + T57
+transform trigger, membrane/organelle bounce, fusion + splice). A new
+`drawVesicles()` does `dynamicLayer.clear()`, the Gen 4+ well rings/flash/
+establish-pulse, then draws each surviving vesicle by `v.type` — same
+reverse-index (`vesicles.length - 1` down to `0`) iteration as the old fused
+loop, so on-screen z-stacking of overlapping vesicles is unchanged. No
+`Math.random()` call was added, removed, or reordered relative to other
+`gameLoop` update calls; the call site became `updateVesicles(delta);
+drawVesicles();` in the same slot the single call used to occupy (mirroring
+T51's `updateATP(); drawATP();` pattern already next to it).
+
+Verified: static extraction of `updateVesicles`'s source shows zero
+`PIXI`/`*Layer`/`.sprite`/`.visible` references (the mechanical check this
+task exists to make possible). A non-immortal 30-game-second round (1 player +
+3 bots, harness default) ran clean — 2/4 alive at 30.3s, 1 vesicle in flight,
+console/page errors empty. A 15-game-second immortal run with
+`window.setGeneration(4)` forced confirmed the harder path: the Gen 4+ well
+rings, HUD "NUCLEUS" label and per-consume flash all rendered (screenshot),
+and `nucleusFeed.value` rose from 0 to 12 with `gen4EstablishTime`/
+`nucleusFeedFlashTime` both set, proving the consume branch (feed meter,
+particle burst, T57 transform-trigger check) still fires correctly from
+inside the split-out `updateVesicles`. `node --check` on the extracted
+`<script>` body passed. `dist/` rebuilt (`--check` passes); `sw.js`
+`CACHE_NAME` bumped v23→v24.
+
+Not yet measured (belongs to step 7, not this step): headless speedup. No
+headless stepper exists until `gameLoop` itself is restructured in step 6.
+
+Next: Step 2 — infection/virus split (`virusLayer`), same shape as this step.
 
 ---
 
