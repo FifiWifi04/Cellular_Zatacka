@@ -25,6 +25,27 @@ the round instantly. Take this before T50.
 
 P1 never touched P2. The round is over and P1 has the point.
 
+**Re-verified at HEAD after T47/T50/T51/T52/T56/T57 landed** — none of them touch
+either side of this.
+
+### It is the trim that kills, not coincidence
+
+Unsteered players do sometimes die on their own, so the above was repeated with
+instrumentation recording the frame P2's segment count changes and the frame P2
+dies, plus a control: a **mitochondria** vesicle, which in attack mode also
+redirects a boost to P2 but never touches `traceSegments`.
+
+| Vesicle | Trial | Trim at | Death at | P2 |
+|---|---|---|---|---|
+| lysosome | 1 | +0.30 s | **+0.30 s** | dead |
+| lysosome | 2 | never picked up | — | alive |
+| lysosome | 3 | never picked up | — | alive |
+| mitochondria | 1–3 | never (no trim in that branch) | — | alive ×3 |
+
+Trim and death land in the same sample. No trim, no death — including on the two
+lysosome trials where the vesicle drifted away before P1 reached it, which are as
+close to a natural control as this setup gets.
+
 ## Cause
 
 Attack mode redirects the pickup's effect to the nearest opponent
