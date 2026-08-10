@@ -693,3 +693,14 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   here instead of permanent because of the lifetime cap. Left alone to keep
   T51's diff out of the snap's already-dense rescue logic; worth folding in
   alongside the other three arrays if that block is touched again. — 2026-08-10
+
+- **`#ui` (the pause/start menu, including its `.control-splash` panel) does
+  not fully leave the viewport in short or narrow viewports even though
+  `isPlaying` correctly adds the `hidden-ui` class on `startRound()`.** At
+  390×844 the splash-card text ("= Attack...", "P1: 0 | P2: 0") stays pinned
+  across the top of the screen during play; at 844×390 it's the "? Help"
+  button and the menu's top border. Reproduced identically on the pre-T52
+  commit (`3dfc6af`) with no Gen 4/HUD code involved, so this is a
+  pre-existing `hidden-ui`/small-viewport interaction, not new. Found while
+  screenshotting T52's nucleus-feed HUD (which sits in the same top strip) at
+  the T24 breakpoints. — 2026-08-10

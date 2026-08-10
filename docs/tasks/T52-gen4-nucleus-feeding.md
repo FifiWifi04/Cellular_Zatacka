@@ -143,18 +143,151 @@ Still required, and now more so, because the bar refers to it:
 
 ## Definition of done
 
-- [ ] `freeUntil` window before the pull applies; length reported
-- [ ] Feed meter, per-type weights, rises only on consume
-- [ ] Progress bar, responsive, with the consume event visible
-- [ ] Window shrinks to zero as the meter fills — direct-feed phase reached
-- [ ] Well legible at 0.2 zoom
-- [ ] Denial proven with two measured runs
-- [ ] Bots unaffected; no leak
-- [ ] `docs/TASKS.md`: T52 → `DONE`, T57 → `READY`
+- [x] `freeUntil` window before the pull applies; length reported
+- [x] Feed meter, per-type weights, rises only on consume
+- [x] Progress bar, responsive, with the consume event visible
+- [x] Window shrinks to zero as the meter fills — direct-feed phase reached
+- [x] Well legible at 0.2 zoom
+- [x] Denial proven with two measured runs
+- [x] Bots unaffected; no leak
+- [x] `docs/TASKS.md`: T52 → `DONE`, T57 → `READY`
 
 ---
 
 ## Findings
 
-*(Window length and how it scales; per-type weights and why; the two denial runs;
-time to full meter with and without collection; zoom screenshots.)*
+**Scope note:** the nucleus core, membrane and ER/Golgi walls were already lethal
+in both `checkCollision()` and `raycast()` before this task (T15). This task adds
+no new hazard — only a meter, a HUD, a free-window field on vesicles, and
+cosmetic well/flare draws — so §4.1's two-place rule and the §7.6 collision
+regression sweep do not apply; the diff never touches `checkCollision()`,
+`checkArcCollision()`, `raycast()` or `rebuildSpatialGrid()` (confirmed via
+`git diff --stat` / hunk inspection before committing).
+
+**1. The free window.** `freeUntil = survivalTime + freeWindowDuration()`,
+stamped once per vesicle at spawn (both spawn sites). `freeWindowDuration()`
+returns `FREE_WINDOW_MAX` (3.0s) at meter = 0, linearly down to 0 once
+`nucleusFeed.value` passes `FREE_WINDOW_ZERO_FRAC` (0.85) of `NUCLEUS_FEED_MAX`
+(850) — i.e. zero from meter ≥ 722.5. Verified by direct probe: a vesicle with
+`freeUntil` still in the future is untouched by one `updateVesicles()` tick
+(`vx/vy` unchanged); an otherwise-identical vesicle with `freeUntil` already
+past picks up gravity that same tick (`vx: 1→0.8`, `vy: 0→0.008`, pulling
+toward centre). Escalation probe: `freeWindowDuration()` at meter 722.5 → `0`,
+at meter 850 → `0`, at meter 0 → `3` — matches the design exactly (item 7).
+
+**2. Per-type weights**, out of `NUCLEUS_FEED_MAX = 850`:
+`membrane: 8, mitochondria: 12, lysosome: 18`. Membrane is the most common
+existing pickup (Golgi Pass / Ghost Mode) so it's worth least to deny;
+lysosome already carries the most offensive value to the *picker* (trace
+trim, Hunter Mode), so making it also the nucleus's most-valued vesicle gives
+the stated triage decision real teeth — losing a lysosome to the well costs
+the most ground. Verified by scripted consume of one of each type at the
+nucleus: deltas were exactly 8, 12, 18 in that order, cumulative total 38.
+
+**3. Meter tuning.** First cut used `NUCLEUS_FEED_MAX = 100`, which (see
+methodology note below) filled in ~21s if left alone — far too fast next to
+Gen 2's ~128s calcification-floor time. Raised to 850, which fills in **165.7s
+if ignored entirely**, landing near that Gen 2 figure as intended.
+
+**Methodology note (why "if ignored" is a synthetic-tick measurement, not a
+real-time one):** `updateVesicles()`'s spawn roll (`Math.random() < 0.008`) is
+evaluated once **per frame call**, not scaled by `delta` — so its real spawn
+*rate* depends on how many frames actually run per game-second, which on this
+sandbox's software-rendered headless Chromium is well under 60fps (see
+`tools/verify_harness.py`'s documented ~0.11–0.38x game-time ratio). Waiting
+out 165s of real *survivalTime* here would need tens of real minutes, over the
+10-minute-per-command ceiling. Instead, timing/denial checks manually drove
+`survivalTime += 1/60` alongside `updateVesicles(1)` in a tight loop inside
+`page.evaluate()` — i.e. simulated at a true 60 ticks/game-second, matching
+what a real player's un-throttled 60fps device would actually run. This is
+instant (no wall-clock cost) and exercises the *real* `updateVesicles()`,
+`freeWindowDuration()` and consume logic — only the frame-pacing is
+synthetic. Real headless-frame-rate runs (below) additionally confirm the
+mechanism end-to-end at whatever slower rate this sandbox achieves; they are
+consistent with (slower than) the 60fps figure, not contradicting it.
+
+**4. Interception is possible and worth it (item 4).** Analytically: a fresh
+vesicle drifts at 0.8 px/frame (~48px/s) before its window expires; the
+slowest player speed setting is 1.5 px/frame (~90px/s), the fastest 3.5
+(~210px/s) — always faster than the drift, and consumption only happens at
+`GRAVITY_CONSUME_RADIUS` (150px) from centre, not the instant the window
+expires, so there is slack beyond the raw window too. Empirically, in real
+(non-synthetic) play at Gen 4 with `godMode`/`immortal`, over the same ~45s
+window: **0 bots → feed 34/850**, **3 bots active → feed only 12/850** — active
+competitors intercept the large majority of what would otherwise reach the
+nucleus, in real gameplay, not just in the synthetic model.
+
+**5. Denial proof (item 6, "the test that proves the loop exists").**
+90 simulated Gen-4-seconds (60-tick/s methodology above), two conditions from
+the same starting state:
+  - **parked** (nothing intercepts): feed reached **512/850** (60%).
+  - **collecting** (vesicles array emptied every tick before
+    `updateVesicles()` runs — the strongest possible interception case,
+    mirroring the real pickup path's `vesicles.splice()`): feed stayed at
+    **0/850** for the entire 90s.
+
+Real-gameplay corroboration for the same claim: see item 4 above (12 vs 34 vs
+a parked/no-bots-at-all baseline that would be higher still) — the ordering
+holds in actual play, not only in the idealized synthetic case.
+
+**6. The generation still ends against active collection (item 8).** The
+"collecting" condition above is a perfect, omniscient interceptor (whole array
+cleared every tick) and is not achievable by a real player — real players/bots
+occupy one place at a time and cannot cover every simultaneous spawn. More
+importantly, once the meter crosses 722.5 (85%) the free window is
+analytically 0 (item 1's escalation probe), so from that point every vesicle
+is pulled from the instant it spawns and is *structurally* impossible to
+intercept — the generation is therefore guaranteed to reach 850 in bounded
+time regardless of player skill, consistent with "the player cannot win Gen 4,
+only slow it." The real 3-bot run (item 7 below) shows the meter climbing
+even under active, continuous competition (0 → 184 over 120s), not stalling.
+
+**7. Bots unaffected; no leak (items 10–11).** Real Gen 4 run, 3 bots + 1
+immortal human, 120.1 real game-seconds: feed 184/850, **3/3 bots alive**
+(no nucleus suicides — the nucleus core was already sensed and outweighed in
+`raycast()`/`getRayWeight()` before this task, and this task adds no new
+hazard, see scope note above), `worldChildren` flat at 15 (same as the Gen-1
+baseline and every other sample taken), console/page errors empty throughout.
+Forced peak-consume burst (60 vesicles simultaneously inside the consume
+radius, quality forced to `high` so `particleBudget = MAX_PARTICLES`):
+`particleCount` capped at exactly 400 (`MAX_PARTICLES`) despite 600 particles
+requested — the existing budget/cap logic in `emitParticles()` holds under
+this task's new call site with no changes needed. `worldChildren` flatness
+over a literal 10 *game*-minutes (vs. the 120s actually run) was not directly
+measured — infeasible in one 10-minute command at this sandbox's frame rate —
+but is structurally guaranteed: like T51's ATP effects, every T52 draw goes
+through the existing `dynamicLayer`/`particleLayer` `Graphics` objects
+(cleared and redrawn each frame) or a DOM element outside `world.children`;
+no new PIXI display object is ever created per vesicle, tick, or consume
+event.
+
+**8. Gen 1–3 completely unaffected (item 2).** Ran gen 1/2/3 in turn (3
+real seconds each): `nucleusFeedBar` stayed `display: none` and
+`nucleusFeed.value` stayed `0` in all three; vesicles do carry an (unused)
+`freeUntil` field pre-Gen-4, which is harmless since the gravity/consume block
+is entirely gated on `genAtLeast(4)`. Console clean throughout.
+
+**9. Screenshots (item 9).** Bar: 390×844, 844×390, 1280×800 — legible at all
+three; the "P1: 0 | P2: 0" / "? Help" text overlapping the top of the screen
+in the 390×844 and 844×390 shots is a **pre-existing bug**, unrelated to this
+task — reproduced identically on the pre-T52 commit (`3dfc6af`) with no Gen 4
+or HUD code involved (the `#ui`/`.control-splash` panel does not fully leave
+the viewport in short/narrow viewports even though `isPlaying` correctly adds
+the `hidden-ui` class). Filed to `docs/BACKLOG.md`, not fixed here (out of
+scope). Well: screenshotted at `world.scale.x` = 0.2, 0.4, 1.0 (camera frozen
+via `paused = true` and `world.x/y/scale` set directly to hold a zoom that
+`updateCamera()` would otherwise overwrite every frame, per AGENT_CONDUCT
+§4.5) — legible at all three; the ring stroke/alpha now scales by
+`1 / world.scale.x` (uncapped, previously clamped at T47's `DIMER_LOD_ZOOM`
+floor, which would have under-scaled at the 0.2 case this item specifically
+asks for).
+
+**10. Reset.** `nucleusFeed.value`, `nucleusFeedFlashTime` and
+`gen4EstablishTime` all reset in `startRound()` alongside the rest of T51's
+per-round state. Verified: set feed to 400 at Gen 4, called `startRound()`
+again, feed read back as `0` and generation as `1` immediately after.
+
+**11. Help panel (item 12)** rebuilt from live constants
+(`${FREE_WINDOW_MAX}`, `${Math.round(FREE_WINDOW_ZERO_FRAC * 100)}`) — read
+back via `helpContent.innerHTML` to confirm the substituted values ("3s",
+"85%") actually appear.

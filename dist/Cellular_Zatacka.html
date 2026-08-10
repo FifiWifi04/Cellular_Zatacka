@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: f469a25db923cb87 -->
+<!-- standalone-build-inputs: 8815636b5de164dc -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3777,6 +3777,51 @@ void main() {
             font-weight: bold;
             margin: 0;
         }
+
+        /* T52: Gen 4+ nucleus feed meter -- fixed HUD (not world-space), so it
+           reads at any zoom/camera mode and survives the T24 mobile layouts.
+           Shown/updated from gameLoop; hidden pre-Gen4. */
+        #nucleusFeedBar {
+            display: none;
+            position: absolute;
+            top: max(8px, env(safe-area-inset-top));
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(220px, 55vw);
+            z-index: 150;
+            pointer-events: none;
+            font-family: monospace;
+            text-align: center;
+        }
+
+        #nucleusFeedLabel {
+            font-size: clamp(9px, 2.4vw, 12px);
+            color: #a29bfe;
+            text-shadow: 0 0 4px rgba(162, 155, 254, 0.8);
+            margin-bottom: 2px;
+        }
+
+        #nucleusFeedTrack {
+            width: 100%;
+            height: 8px;
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid #a29bfe;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        #nucleusFeedFill {
+            height: 100%;
+            width: 0%;
+            background: #a29bfe;
+        }
+
+        /* T52: the direct-feed phase (window shrunk to 0) -- distinct visual
+           state so the ending is felt coming, not just read off a number. */
+        #nucleusFeedFill.critical {
+            background: #ff4757;
+            box-shadow: 0 0 8px #ff4757;
+        }
     </style>
 </head>
 
@@ -3794,6 +3839,14 @@ void main() {
     <h2 id="globalWarning"
         style="display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); color: #ff4757; text-shadow: 0 0 15px rgba(255, 71, 87, 0.8); font-size: clamp(20px, 6vw, 28px); z-index: 200; pointer-events: none;">
     </h2>
+
+    <!-- T52: Gen 4+ nucleus feed meter -- see updateNucleusFeedHUD(). -->
+    <div id="nucleusFeedBar">
+        <div id="nucleusFeedLabel">NUCLEUS</div>
+        <div id="nucleusFeedTrack">
+            <div id="nucleusFeedFill"></div>
+        </div>
+    </div>
 
     <div id="ui">
         <button id="uiCloseBtn" class="ui-close-btn" onclick="togglePauseMenu()" aria-label="Close menu">&#10005;</button>
@@ -4397,6 +4450,28 @@ void main() {
         const GRAVITY_MAX_V_PER_TICK = 60 / 60; // 60 px/s terminal speed
         const GRAVITY_CONSUME_RADIUS = 150;     // px; despawns before reaching the 130px lethal nucleus core
 
+        // T52: the well above pulls; this is the race it feeds. Every vesicle the
+        // nucleus consumes (crosses GRAVITY_CONSUME_RADIUS) fills a shared meter
+        // that never falls -- full meter ends the generation (T57). A fresh
+        // vesicle drifts un-pulled for freeWindowDuration() seconds, its whole
+        // interception window, which shrinks to 0 as the meter fills (the
+        // owner's "fed directly from Golgi" direct-feed phase). See
+        // docs/tasks/T52-gen4-nucleus-feeding.md and this file's ## Findings.
+        const NUCLEUS_FEED_MAX = 850;         // meter units; generation ends at this value -- tuned so an ignored well fills in ~150-200s, near Gen 2's ~128s calcification floor time (see Findings)
+        const NUCLEUS_FEED_WEIGHTS = { membrane: 8, mitochondria: 12, lysosome: 18 }; // per-type meter gain on consume -- see Findings
+        const FREE_WINDOW_MAX = 3.0;         // seconds a fresh vesicle drifts un-pulled, at meter = 0
+        const FREE_WINDOW_ZERO_FRAC = 0.85;  // meter fraction of NUCLEUS_FEED_MAX at which the window reaches 0
+        const NUCLEUS_FLASH_DURATION = 0.4;  // seconds the per-consume flare/tick decays over
+        const GEN4_ESTABLISH_DURATION = 1.5; // seconds the one-off Gen 4 start pulse takes to expand and fade
+
+        // T52: shrinks from FREE_WINDOW_MAX at meter=0 to 0 once the meter passes
+        // FREE_WINDOW_ZERO_FRAC of NUCLEUS_FEED_MAX -- the direct-feed phase falls
+        // out of this instead of being a second special case.
+        function freeWindowDuration() {
+            let frac = Math.min(1, nucleusFeed.value / (NUCLEUS_FEED_MAX * FREE_WINDOW_ZERO_FRAC));
+            return FREE_WINDOW_MAX * (1 - frac);
+        }
+
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
@@ -4557,6 +4632,11 @@ void main() {
         let vesicles = [];
         let atpGranules = []; // T51: modeled on vesicles' lifecycle, kept separate -- see const block above
         let calcifyPauseTimer = 0; // T51: seconds remaining the shared membrane refuses to shrink
+        // T52: shared feed meter (see const block above); flash timers drive the
+        // consume flare and the one-off Gen 4 start pulse, both read-only draws.
+        let nucleusFeed = { value: 0, max: NUCLEUS_FEED_MAX };
+        let nucleusFeedFlashTime = -Infinity;
+        let gen4EstablishTime = -Infinity;
         let globalRotation = 0;
 
         // Destroy the split-screen sprites/RenderTextures and empty both arrays.
@@ -6286,12 +6366,13 @@ void main() {
                 vesicles.push({
                     x: worldX,
                     y: worldY,
-                    vx: Math.cos(spawnAngle) * 0.8, 
+                    vx: Math.cos(spawnAngle) * 0.8,
                     vy: Math.sin(spawnAngle) * 0.8,
-                    type: targetType, 
-                    radius: 12, 
+                    type: targetType,
+                    radius: 12,
                     color: vColor,
-                    rotation: Math.random() * Math.PI * 2
+                    rotation: Math.random() * Math.PI * 2,
+                    freeUntil: survivalTime + freeWindowDuration() // T52: Gen 4+ interception window; inert before then
                 });
             }
 
@@ -6323,7 +6404,8 @@ void main() {
                     type: targetType,
                     radius: 12,
                     color: vColor,
-                    rotation: Math.random() * Math.PI * 2
+                    rotation: Math.random() * Math.PI * 2,
+                    freeUntil: survivalTime + freeWindowDuration() // T52: Gen 4+ interception window; inert before then
                 });
             }
 
@@ -6332,13 +6414,39 @@ void main() {
             // T15: Gen 4+ angiogenesis well -- faint pulsing rings at each cell
             // centre, drawn into the same layer/frame this function already owns.
             if (genAtLeast(4)) {
+                if (gen4EstablishTime === -Infinity) gen4EstablishTime = survivalTime; // T52: one-off start pulse, fires once per round
+
                 let wellCenters = [activeCell];
                 if (mitosis.state !== 'idle') wellCenters.push(mitosis.cellB);
+
+                // T52: at the shared-camera zoom floor (T47's DIMER_LOD_ZOOM=0.5) a
+                // flat 1.5px world-space stroke is under a screen pixel and reads as
+                // nothing -- scale stroke/alpha up as zoom falls below 1.0 so the
+                // well stays legible at the floor, not just at zoom 1.0.
+                let zoomBoost = Math.max(1, 1 / world.scale.x);
                 for (let c of wellCenters) {
                     for (let ring = 0; ring < 3; ring++) {
                         let r = 40 + ring * 35 + Math.sin(survivalTime * 1.5 + ring) * 6;
-                        dynamicLayer.lineStyle(1.5, 0xa29bfe, 0.18 - ring * 0.03);
+                        dynamicLayer.lineStyle(1.5 * zoomBoost, 0xa29bfe, Math.min(0.6, (0.18 - ring * 0.03) * zoomBoost));
                         dynamicLayer.drawCircle(c.x, c.y, r);
+                    }
+
+                    // T52: per-consume flare -- brief bright ring at the nucleus edge.
+                    let sinceFlash = survivalTime - nucleusFeedFlashTime;
+                    if (sinceFlash < NUCLEUS_FLASH_DURATION) {
+                        let flash = 1 - sinceFlash / NUCLEUS_FLASH_DURATION;
+                        dynamicLayer.lineStyle(4 * zoomBoost, 0xd6a4ff, flash * 0.8);
+                        dynamicLayer.drawCircle(c.x, c.y, NUCLEUS_RADIUS + 6 + flash * 20);
+                    }
+
+                    // T52: one-off establishing pulse -- an expanding, fading ring the
+                    // first frame Gen 4 is reached, so cause (well appears) and effect
+                    // (vesicles start pulling in) read as connected.
+                    let sinceEstablish = survivalTime - gen4EstablishTime;
+                    if (sinceEstablish < GEN4_ESTABLISH_DURATION) {
+                        let t = sinceEstablish / GEN4_ESTABLISH_DURATION;
+                        dynamicLayer.lineStyle(6 * zoomBoost, 0xa29bfe, (1 - t) * 0.9);
+                        dynamicLayer.drawCircle(c.x, c.y, NUCLEUS_RADIUS + t * 300);
                     }
                 }
             }
@@ -6350,6 +6458,8 @@ void main() {
                 // toward whichever cell centre is nearest (mirrors the nearestCell
                 // pattern in updateDriftingOrganelles()). Vesicles consumed near the
                 // centre despawn rather than pile up inside the lethal nucleus core.
+                // T52: the pull itself is withheld until v.freeUntil -- that window is
+                // the player's whole chance to intercept before the nucleus gets it.
                 if (genAtLeast(4)) {
                     let nearestCell = activeCell;
                     if (mitosis.state !== 'idle') {
@@ -6360,17 +6470,26 @@ void main() {
                     let dx = nearestCell.x - v.x, dy = nearestCell.y - v.y;
                     let distToCenter = Math.hypot(dx, dy);
                     if (distToCenter < GRAVITY_CONSUME_RADIUS) {
+                        // T52: the nucleus just ate it -- feed meter rises by this
+                        // vesicle's type weight (never falls), plus the consume event
+                        // (inward burst, nucleus flare, HUD tick) so it reads as
+                        // mattering instead of just fading.
+                        nucleusFeed.value = Math.min(NUCLEUS_FEED_MAX, nucleusFeed.value + NUCLEUS_FEED_WEIGHTS[v.type]);
+                        nucleusFeedFlashTime = survivalTime;
+                        emitParticles(v.x, v.y, 10, { speed: 3.0, spread: 0.5, angle: Math.atan2(dy, dx), life: 0.4, size: 3, color: v.color }); // T52
                         vesicles.splice(i, 1);
                         continue;
                     }
-                    let ux = dx / distToCenter, uy = dy / distToCenter;
-                    v.vx += ux * GRAVITY_ACCEL_PER_TICK * delta;
-                    v.vy += uy * GRAVITY_ACCEL_PER_TICK * delta;
-                    let speed = Math.hypot(v.vx, v.vy);
-                    if (speed > GRAVITY_MAX_V_PER_TICK) {
-                        let scale = GRAVITY_MAX_V_PER_TICK / speed;
-                        v.vx *= scale;
-                        v.vy *= scale;
+                    if (survivalTime >= v.freeUntil) {
+                        let ux = dx / distToCenter, uy = dy / distToCenter;
+                        v.vx += ux * GRAVITY_ACCEL_PER_TICK * delta;
+                        v.vy += uy * GRAVITY_ACCEL_PER_TICK * delta;
+                        let speed = Math.hypot(v.vx, v.vy);
+                        if (speed > GRAVITY_MAX_V_PER_TICK) {
+                            let scale = GRAVITY_MAX_V_PER_TICK / speed;
+                            v.vx *= scale;
+                            v.vy *= scale;
+                        }
                     }
                 }
 
@@ -6496,6 +6615,26 @@ void main() {
                 atpLayer.drawCircle(g.x, g.y, g.radius);
                 atpLayer.endFill();
             }
+        }
+
+        // T52: DOM HUD readout for the Gen 4+ nucleus feed meter -- draw only
+        // (AGENT_CONDUCT 4.4a), reads nucleusFeed/generation and never writes
+        // them; nucleusFeed.value is mutated exclusively in updateVesicles()'s
+        // consume branch above.
+        function updateNucleusFeedHUD() {
+            let bar = document.getElementById('nucleusFeedBar');
+            if (!genAtLeast(4)) { bar.style.display = 'none'; return; }
+            bar.style.display = 'block';
+
+            let frac = nucleusFeed.value / NUCLEUS_FEED_MAX;
+            let fill = document.getElementById('nucleusFeedFill');
+            fill.style.width = `${Math.min(100, frac * 100)}%`;
+            fill.classList.toggle('critical', frac >= FREE_WINDOW_ZERO_FRAC);
+
+            let sinceFlash = survivalTime - nucleusFeedFlashTime;
+            fill.style.boxShadow = sinceFlash < NUCLEUS_FLASH_DURATION
+                ? `0 0 ${Math.round(10 * (1 - sinceFlash / NUCLEUS_FLASH_DURATION))}px #d6a4ff`
+                : '';
         }
 
         // --- THE INFECTION EVENT SYSTEM ---
@@ -8730,6 +8869,8 @@ void main() {
                 uiBarsLayer.endFill();
             }
 
+            updateNucleusFeedHUD(); // T52
+
             // T17: no splash particles during frozen states (infection warning /
             // mitosis reveal) -- clear rather than leaving the last frame's burst
             // sitting frozen on screen.
@@ -9030,8 +9171,13 @@ void main() {
                     (about every ${gen3MassInterval}s at first, faster each generation after), up to
                     ${MASS_MAX_BLOCKS} blocks.</li>
                     <li><b>Generation 4</b> -- an angiogenesis gravity well appears at the centre of
-                    each cell, pulling nearby vesicles inward; they're consumed before reaching the
-                    lethal nucleus so they don't pile up there.</li>
+                    each cell. Every fresh vesicle drifts free for up to ${FREE_WINDOW_MAX}s before
+                    the well starts pulling it in -- grab it in that window and the nucleus never
+                    gets it. Left alone, it's consumed at the nucleus and fills the NUCLEUS bar at
+                    the top of the screen (worth more for lysosome vesicles than mitochondria or
+                    membrane ones); the bar only ever rises. Past ${Math.round(FREE_WINDOW_ZERO_FRAC * 100)}%
+                    the free window shrinks to zero -- vesicles are pulled in from the moment they
+                    spawn and can no longer be intercepted.</li>
                 </ul>
             `;
             document.getElementById('helpContent').innerHTML = html;
@@ -9059,6 +9205,7 @@ void main() {
             uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
             atpGranules = []; atpLayer.clear(); calcifyPauseTimer = 0; // T51
+            nucleusFeed.value = 0; nucleusFeedFlashTime = -Infinity; gen4EstablishTime = -Infinity; // T52
             particleCount = 0; particleLayer.clear(); // T17
             assemblyLiveCount.fill(0); // T56
 

@@ -102,8 +102,33 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > channel). See `docs/tasks/T51-slow-the-calcification.md` Findings; two
 > incidental issues (mitosis snap's kill check still gated on `devMode`
 > instead of `godMode`; `atpGranules` not rescued at the snap like the other
-> hazard arrays) filed to `docs/BACKLOG.md`, both out of scope here. Next up:
-> **T52**.
+> hazard arrays) filed to `docs/BACKLOG.md`, both out of scope here.
+>
+> **T52 landed 2026-08-10** — vesicles now carry a `freeUntil` field (3.0s at
+> meter 0, shrinking to 0 past 85% of `NUCLEUS_FEED_MAX`); every vesicle the
+> Gen 4+ well actually pulls into the nucleus adds its type's weight
+> (membrane 8 / mitochondria 12 / lysosome 18, out of `NUCLEUS_FEED_MAX=850`)
+> to a new shared, monotonic feed meter shown as a responsive DOM HUD bar,
+> with a per-consume inward particle burst + nucleus flare + HUD glow, plus a
+> one-off establishing pulse the first frame Gen 4 is reached. No new hazard
+> was added (the nucleus core was already lethal in both `checkCollision()`
+> and `raycast()` via T15), so the §4.1/§7.6 collision rules don't apply here
+> — confirmed neither function appears in the diff. Denial proven two ways:
+> a 90-simulated-second synthetic run (parked 512/850 vs. omniscient
+> collecting 0/850) and real 3-bot gameplay (feed 12/850 at 45s with 3 bots
+> active vs. 34/850 with none). Meter reaches max in ~165.7s if ignored
+> (tuned near Gen 2's ~128s calcification-floor time); bots played a real
+> 120.1-game-second Gen 4 round with 3/3 alive (no nucleus suicides) and flat
+> `worldChildren`; forced peak-consume burst capped `particleCount` at
+> exactly `MAX_PARTICLES`. Well legibility fixed by scaling ring
+> stroke/alpha by `1/world.scale.x` (uncapped — the previous T47-floor clamp
+> would have under-scaled at the 0.2-zoom case this task specifically asks
+> for); screenshotted legible at 0.2/0.4/1.0 zoom and the bar at
+> 390×844/844×390/1280×800. One incidental pre-existing bug (the pause/start
+> menu not fully leaving short/narrow viewports despite `hidden-ui`,
+> reproduced on the pre-T52 commit) filed to `docs/BACKLOG.md`, out of scope.
+> See `docs/tasks/T52-gen4-nucleus-feeding.md` Findings for full numbers.
+> **T57 is next.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -270,9 +295,9 @@ sim/render split can wait behind them.
 | T41 | [How-to-play tutorial](tasks/T41-tutorial.md) | T36, T40 | `DONE` |
 | T42 | [Trace as tubulin-dimer microtubule](tasks/T42-tubulin-trace.md) | T33 | `DONE` |
 | T51 | [Give the player a way to fight the shrinking membrane (ATP)](tasks/T51-slow-the-calcification.md) | T12 | `DONE` |
-| T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `READY` |
+| T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `DONE` |
 | T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `DONE` |
-| T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `BLOCKED` |
+| T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `READY` |
 
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
