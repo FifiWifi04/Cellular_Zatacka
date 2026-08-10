@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: f61588164a2d3f09 -->
+<!-- standalone-build-inputs: 7dd3e4b7c41fe189 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4711,7 +4711,9 @@ void main() {
             x: 0, y: 0, angle: 0,
             particles: [],
             nextWarningTime: 60, // The first warning triggers at 60
-            triggerTime: 0
+            triggerTime: 0,
+            warningVisible: false // T22 step 2: drawInfection() reads this, not .state, so the
+            // hexagon glyph still renders on the exact frame the breach flips state to 'none'
         };
 
         // THE MITOSIS EVENT SYSTEM
@@ -6840,9 +6842,9 @@ void main() {
         }
 
         // --- THE INFECTION EVENT SYSTEM ---
+        // State only; see drawInfection() below for the render half of the split
+        // (T22 step 2 / §4.4a).
         function updateInfection(delta, deltaSec) {
-            virusLayer.clear();
-
             if (survivalTime >= infection.nextWarningTime && infection.state === 'none') {
                 infection.state = 'warning';
                 infection.triggerTime = survivalTime;
@@ -6856,23 +6858,7 @@ void main() {
             }
 
             if (infection.state === 'warning') {
-                virusLayer.beginFill(0xe67e22);
-                virusLayer.lineStyle(2, 0xd35400);
-                let r = 50;
-                virusLayer.drawPolygon([
-                    infection.x + r, infection.y, infection.x + r / 2, infection.y + r * 0.866,
-                    infection.x - r / 2, infection.y + r * 0.866, infection.x - r, infection.y,
-                    infection.x - r / 2, infection.y - r * 0.866, infection.x + r / 2, infection.y - r * 0.866,
-                ]);
-                virusLayer.lineStyle(4, 0xffa502);
-                for (let i = 0; i < 6; i++) {
-                    let a = i * (Math.PI / 3) + globalRotation;
-                    virusLayer.moveTo(infection.x + Math.cos(a) * r, infection.y + Math.sin(a) * r);
-                    virusLayer.lineTo(infection.x + Math.cos(a) * (r + 25), infection.y + Math.sin(a) * (r + 25));
-                    virusLayer.beginFill(0xff4757);
-                    virusLayer.drawCircle(infection.x + Math.cos(a) * (r + 25), infection.y + Math.sin(a) * (r + 25), 8);
-                    virusLayer.endFill();
-                }
+                infection.warningVisible = true;
 
                 if (survivalTime >= infection.triggerTime + INFECTION_WARNING) {
                     warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES!";
@@ -6897,6 +6883,8 @@ void main() {
                     infection.nextWarningTime = survivalTime + INFECTION_INTERVAL;
                     infection.state = 'none';
                 }
+            } else {
+                infection.warningVisible = false;
             }
 
             if (infection.textClearTime && survivalTime >= infection.textClearTime) {
@@ -6922,7 +6910,6 @@ void main() {
                 vp.x += vp.vx * delta; vp.y += vp.vy * delta;
 
                 let currSpeed = Math.hypot(vp.vx, vp.vy);
-                let moveAngle = Math.atan2(vp.vy, vp.vx);
 
                 let nearestCell = activeCell;
                 if (mitosis.state !== 'idle') {
@@ -6959,6 +6946,37 @@ void main() {
                     infection.particles.splice(i, 1);
                     continue;
                 }
+            }
+        }
+
+        // Reads infection.warningVisible/.x/.y/.particles; never mutates them.
+        // See updateInfection() above for the state half of the split (T22 step 2).
+        function drawInfection() {
+            virusLayer.clear();
+
+            if (infection.warningVisible) {
+                virusLayer.beginFill(0xe67e22);
+                virusLayer.lineStyle(2, 0xd35400);
+                let r = 50;
+                virusLayer.drawPolygon([
+                    infection.x + r, infection.y, infection.x + r / 2, infection.y + r * 0.866,
+                    infection.x - r / 2, infection.y + r * 0.866, infection.x - r, infection.y,
+                    infection.x - r / 2, infection.y - r * 0.866, infection.x + r / 2, infection.y - r * 0.866,
+                ]);
+                virusLayer.lineStyle(4, 0xffa502);
+                for (let i = 0; i < 6; i++) {
+                    let a = i * (Math.PI / 3) + globalRotation;
+                    virusLayer.moveTo(infection.x + Math.cos(a) * r, infection.y + Math.sin(a) * r);
+                    virusLayer.lineTo(infection.x + Math.cos(a) * (r + 25), infection.y + Math.sin(a) * (r + 25));
+                    virusLayer.beginFill(0xff4757);
+                    virusLayer.drawCircle(infection.x + Math.cos(a) * (r + 25), infection.y + Math.sin(a) * (r + 25), 8);
+                    virusLayer.endFill();
+                }
+            }
+
+            for (let i = 0; i < infection.particles.length; i++) {
+                let vp = infection.particles[i];
+                let moveAngle = Math.atan2(vp.vy, vp.vx);
 
                 virusLayer.beginFill(0xff4757);
                 let mouthWobble = Math.abs(Math.sin(survivalTime * 20)) * 0.6;
@@ -8593,7 +8611,7 @@ void main() {
             drawNecroticDebris();
             drawNucleusChasers(); // T57
 
-            updateInfection(delta, deltaSec);
+            updateInfection(delta, deltaSec); drawInfection(); // T22 step 2
             updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition
             updateCamera();
             updateShake(deltaSec); // T16: after updateCamera() so shakeRoot's offset is never lerped into world
@@ -9464,7 +9482,8 @@ void main() {
                 x: 0, y: 0, angle: 0,
                 particles: [],
                 nextWarningTime: 60,
-                triggerTime: 0
+                triggerTime: 0,
+                warningVisible: false
             };
             shakeRoot.filters = null; // T18: a round ending mid-warning must not leave the next round filtered
             warningFilterActive = false;

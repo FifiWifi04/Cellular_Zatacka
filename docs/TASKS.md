@@ -162,7 +162,12 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > transformation; console clean and `worldChildren` flat (15→16, the one new
 > layer) throughout. See `docs/tasks/T57-transformed-nucleus.md` Findings for
 > full numbers and the naming-collision/checkCollision-scope reasoning.
-> **T22 is next** (Track G, already unblocked since T06a).
+> **T22 (resumable) is in progress.** Step 1 (vesicles) landed 2026-08-10; Step 2
+> (infection/virus split, `updateInfection()`/`drawInfection()`, a new
+> `infection.warningVisible` field to preserve the hexagon-glyph's exact
+> on-breach-frame timing) landed 2026-08-10 too — see
+> `docs/tasks/T22-sim-render-split.md` Findings. Steps 3-7 remain; T22 stays
+> `READY` until all seven are ticked. **Next up: Step 3** (organelles split).
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.

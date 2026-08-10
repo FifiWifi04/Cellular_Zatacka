@@ -120,7 +120,7 @@ verifying after each:
 ## Progress
 
 - [x] Step 1 — vesicles split
-- [ ] Step 2 — infection split
+- [x] Step 2 — infection split
 - [ ] Step 3 — organelles split (sprite mirroring moved to draw)
 - [ ] Step 4 — mitosis split (three state mutations moved out of the draw path)
 - [ ] Step 5 — players/traces split
@@ -164,7 +164,45 @@ inside the split-out `updateVesicles`. `node --check` on the extracted
 Not yet measured (belongs to step 7, not this step): headless speedup. No
 headless stepper exists until `gameLoop` itself is restructured in step 6.
 
-Next: Step 2 — infection/virus split (`virusLayer`), same shape as this step.
+**Step 2 (infection/virus split), landed 2026-08-10.** `updateInfection(delta,
+deltaSec)` now contains state only: the `none`→`warning` trigger, the
+breach transition (particle spawn, `addShake`, `nextWarningTime`,
+`state = 'none'`), the `textClearTime` clear, and the per-particle physics/
+destroy loop. A new `drawInfection()` does `virusLayer.clear()`, the hexagon
+warning glyph, then the per-particle virus-blob draw (`moveAngle` recomputed
+from `vp.vx/vp.vy`, a pure read, instead of being stashed). One state field
+was added, `infection.warningVisible` (set in `updateInfection`, read in
+`drawInfection`) — needed because the original code drew the hexagon glyph
+*before* checking whether this frame's breach flips `infection.state` from
+`'warning'` back to `'none'`; if `drawInfection()` had instead tested
+`infection.state === 'warning'` directly, the glyph would silently vanish
+one frame early on every breach since `updateInfection()` (and its state
+flip) now runs to completion before `drawInfection()` is called at all.
+`warningVisible` is set to `true` on entry to the `'warning'` branch (mirroring
+the original's draw-then-maybe-flip order) and `false` in the `else`, then
+read as-is in `drawInfection()` — reproducing the exact old timing. Added to
+both `infection = {...}` initializers (declaration and `startRound()` reset).
+No `Math.random()` call was added, removed, or reordered. Call site is
+`updateInfection(delta, deltaSec); drawInfection();` in the same `gameLoop`
+slot, mirroring step 1's `updateVesicles(); drawVesicles();` pattern.
+
+Verified: static extraction of `updateInfection`'s source shows zero
+`PIXI`/`*Layer`/`.sprite`/`.visible` references; `drawInfection()` reviewed by
+hand to confirm it only reads `infection.*` fields and never mutates them.
+A targeted check forced `infection.nextWarningTime` to fire in ~1s (1 player +
+3 bots immortal): mid-warning state showed `{state: 'warning', warningVisible:
+true, particles: 0}` with the hexagon glyph screenshotted; 6s later, past the
+5s breach window, showed `{state: 'none', warningVisible: false, particles:
+25}` (25 of the 30 spawned particles survived contact with a lysosome —
+expected, unchanged physics) with virus particles screenshotted mid-flight.
+A separate normal (non-immortal) 30-game-second round with 1 player + 3 bots
+ran clean: bot moved, traces grew to 931 points, human died to the membrane
+as expected with nobody driving it, console/page errors empty in both checks.
+`node --check` on the extracted `<script>` body passed. `dist/` rebuilt
+(`--check` passes, confirmed clean over `file://` too); `sw.js` `CACHE_NAME`
+bumped v24→v25.
+
+Next: Step 3 — organelles split (sprite mirroring moved into `drawOrganelles()`).
 
 ---
 
