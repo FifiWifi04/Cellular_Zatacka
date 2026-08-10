@@ -32,19 +32,23 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > **Owner session 2026-08-09 reopened Track J.** T46 (Help did not pause) is
 > already fixed. Order from here:
 >
-> **T50 → T48 → T49 → T47 → T56 → T51 → T52 → T57 → T22 → Track L → Phase 7.**
+> Original order was **T50 → T48 → T49 → T47 → T56 → T51 → T52 → T57 → T22 →
+> Track L → Phase 7**; everything up to and including T57 has now landed (see the
+> notes below).
 >
-> T50 is first because it kills players who did the right thing: in red mode a
-> *lone* necrotic organelle is not breakable at all, and a second cluster contact
-> inside the 0.3s break cooldown falls through to death. Both reproduced with
-> numbers in the task file. T48/T49 are the visual defects from the owner's Gen 3
-> screenshot; T47 is T42's motif never reaching its LOD gate. T56 (owner session,
-> same day) then rebuilds the trace as an actual microtubule lattice with an
-> assembly animation at the tip — it depends on T47 because at the zooms T47
-> measured none of it is visible. T51 and T52/T57 are design work: counterplay to
-> calcification, and Gen 4 rebuilt as a race between the player and a feeding
-> nucleus. Track L is Phase 8, the first persistent state — see
-> `PHASE8-META-PROGRESSION.md`.
+> ### ⚠️ Take T58 next — it is a round-ender, filed 2026-08-10
+>
+> A red (lysosome) vesicle picked up in **attack mode** instantly kills the
+> opponent and ends the round. `isOwnNeck()` identifies a trace segment by its
+> **index in a mutable array**, and the pickup does `target.traceSegments.shift()`
+> on the opponent, so every index in the already-built spatial grid goes stale and
+> the victim's own neck stops being immune. Reproduced in both directions —
+> whoever is earlier in the player array wins. See
+> `docs/tasks/T58-red-vesicle-instakills-opponent.md`.
+>
+> After T58: **T22** (sim/render split), then **Track L** (Phase 8), then Phase 7.
+> Phase 9 (`PHASE9-LATE-GAME-ARC.md`) is scoped but deliberately has no task files
+> until T52/T57 have been played.
 >
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
@@ -305,7 +309,8 @@ sim/render split can wait behind them.
 | T47 | [Tubulin motif invisible in shared camera (zoom never reaches the LOD gate)](tasks/T47-dimer-lod-never-reached.md) | T42 | `DONE` |
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
-| T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) ⚠️ *first* | T38 | `DONE` |
+| T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) | T38 | `DONE` |
+| T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) ⚠️ *next* | T08, T36 | `READY` |
 
 ### Track K — Playtest design & features
 
