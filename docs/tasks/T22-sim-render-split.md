@@ -122,7 +122,7 @@ verifying after each:
 - [x] Step 1 — vesicles split
 - [x] Step 2 — infection split
 - [x] Step 3 — organelles split (sprite mirroring moved to draw)
-- [ ] Step 4 — mitosis split (three state mutations moved out of the draw path)
+- [x] Step 4 — mitosis split (three state mutations moved out of the draw path)
 - [ ] Step 5 — players/traces split
 - [ ] Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`
 - [ ] Step 7 — headless step loop exposed and benchmarked
@@ -242,10 +242,68 @@ the same limitation steps 1-2 hit, worked around the same way (structural/
 sanity checks instead of byte-for-byte state diff). `dist/` rebuilt (`--check`
 passes); `sw.js` `CACHE_NAME` bumped v25→v26.
 
-Next: Step 4 — mitosis split (three state mutations currently in
-`drawMitosisVisuals()` — clearing `centralHitboxes`, setting
-`mitosis.nucleusDestroyed`, calling `spawnVesicles()` — move into
-`updateMitosis()`).
+**Step 4 (mitosis split), landed 2026-08-10.** Moved exactly the three state
+mutations named by this task from `drawMitosisVisuals()` into `updateMitosis()`:
+the `crossedCenter` computation (pure function of `mitosis.direction`,
+`activeCell`, `mitosis.cellB` and `sweepProgress` — no display-object reads),
+then on the frame it first goes true, `addShake(0.7, 0.6)`, `spawnVesicles(...,
+15, 'membrane', 0x6c5ce7)`, and `centralHitboxes = []`, `mitosis.nucleusDestroyed
+= true`. `drawMitosisVisuals()` now only does `nucleusLayer.visible =
+!mitosis.nucleusDestroyed; golgiERContainer.visible = !mitosis.nucleusDestroyed;`
+— a pure read-and-mirror.
+
+The one-shot gate for the trigger used to be `if (nucleusLayer.visible)` (a
+display-object read, forbidden in `updateMitosis()`); it is now `if
+(crossedCenter && !mitosis.nucleusDestroyed)`. That required also finding
+where the old gate got re-armed: `generateMap()` unconditionally resets
+`nucleusLayer.visible = true` (line ~1833), and the mitosis snap calls
+`generateMap(true)` — so every new cell started life with `nucleusLayer.visible`
+true again, letting the *next* mitosis event destroy the *next* nucleus.
+`mitosis.nucleusDestroyed`, by contrast, was never reset anywhere. Copying only
+the three named mutations without also mirroring that implicit re-arm would
+have silently broken every mitosis event after the first (nucleus never
+destroyed again, `centralHitboxes` never cleared, no vesicle burst) — so one
+line, `mitosis.nucleusDestroyed = false;`, was added immediately after the
+`generateMap(true);` call at the snap, matching exactly where the old code's
+implicit reset happened.
+
+Verified: `awk`-extracted the new block from `updateMitosis()` — zero
+`PIXI`/`Layer`/`.sprite`/`.visible` references outside of comments. `node
+--check` on the extracted `<script>` body passed. Two scripted direct-state
+checks (matching prior steps' "direct function call" methodology, since the
+real 120s-per-event timing doesn't fit a session's wall budget): (1) parked
+mitosis mid-event just below the crossing threshold, let ~0.5 game-seconds
+elapse — `mitosis.nucleusDestroyed` flipped true, `nucleusLayer.visible`/
+`golgiERContainer.visible` both went false, a sentinel `centralHitboxes` was
+cleared to `[]`, 15 new `0x6c5ce7` vesicles appeared, and `shakeDecayTime` rose
+from 0 to 0.6 (confirming `addShake` fired) — all matching the pre-split
+behaviour exactly. (2) Forced the SNAP directly (`devMode` set so the
+snap's pre-existing devMode-gated, not godMode-gated, player-kill check didn't
+wipe the roster — a known unrelated bug already in `docs/BACKLOG.md`):
+`mitosis.nucleusDestroyed` correctly reset to `false` post-snap
+(`nucleusVisible`/`golgiVisible` back to `true`, generation incremented 1→2),
+then a second forced crossing on the new cell re-triggered the destruction
+(`nucleusDestroyed` → `true` again, `centralHitboxesLen` → `0`) — proving the
+reset fix reproduces the old multi-event behaviour, not just the first event.
+Screenshots confirm visual parity: nucleus/Golgi/ER fully rendered before the
+forced crossing, gone immediately after. A real (non-immortal) 30.2-game-second
+round with 1 player + 3 bots played normally (966 trace points, 3/4 alive,
+console clean, screenshot looks normal). An 8.2-game-second `file://` load
+(offline, source file with `vendor/` alongside it) also ran clean. `dist/`
+rebuilt (`--check` passes); `sw.js` `CACHE_NAME` bumped v26→v27.
+
+Not moved (out of scope for this step, matches the task's own three-item
+list): `mitosis.currentWidth`, still computed inside `drawMitosisVisuals()`
+even though it's read by `checkArcCollision`-adjacent physics code
+(`isCellFrozen`/gap checks around line 2172/5645) — a pre-existing §4.4
+violation that predates this task and wasn't part of the three named
+mutations; noted in `docs/BACKLOG.md`. Also unmoved: the large PIXI-heavy
+block in `updateMitosis()`'s own event-trigger section (Cell B background,
+cytosol particles, organelle sprites) — this already existed in
+`updateMitosis()` before this task and is not part of the "three state
+mutations" this step was scoped to.
+
+Next: Step 5 — players/traces split.
 
 ---
 

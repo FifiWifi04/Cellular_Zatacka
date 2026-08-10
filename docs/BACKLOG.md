@@ -705,6 +705,23 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   screenshotting T52's nucleus-feed HUD (which sits in the same top strip) at
   the T24 breakpoints. — 2026-08-10
 
+## Found while doing T22 step 4 (mitosis sim/render split) — 2026-08-10
+
+- **`mitosis.currentWidth` is computed inside `drawMitosisVisuals()` (the
+  narrowing-ramp `Math.max(0, ...)` assignment) but read by physics/sensor
+  code elsewhere** — the bridge-gap containment check (~line 2172,
+  `isCellFrozen`/gap logic) and the bridge-wall lethality check in `gameLoop`
+  (~line 5645, `mitosis.currentWidth > 350`). This is a pre-existing §4.4
+  violation (a render function owning a value physics depends on) that
+  predates this task. Out of scope for T22 step 4, which the task file scopes
+  to exactly three named mutations (`centralHitboxes`, `mitosis.nucleusDestroyed`,
+  the `spawnVesicles()` call) — `currentWidth` isn't one of them, and moving it
+  would require also verifying the draw-order dependency between `updateMitosis()`
+  and whatever currently reads `currentWidth` earlier in the same frame's
+  player-movement pass, which is a separate, larger change. Worth folding into
+  a later T22 step (or its own task) since it's exactly the kind of
+  entanglement this task exists to remove. — 2026-08-10
+
 ## Found while doing T57 (transformed nucleus / chasers) — 2026-08-10
 
 - **`warningElement` (the one shared banner DOM element) has no arbitration

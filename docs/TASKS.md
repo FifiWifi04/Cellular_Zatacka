@@ -172,8 +172,22 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > new `drawOrganelles()` mirrors `sprite.x/y/rotation` and the necrotic
 > freeze-flicker alpha; a 30s immortal round found 0/25 sprite-mirror
 > mismatches, forced-Gen-2 necrosis flicker still verified correct, and a real
-> non-immortal round played normally. Steps 4-7 remain; T22 stays `READY`
-> until all seven are ticked. **Next up: Step 4** (mitosis split).
+> non-immortal round played normally. **Step 4 (mitosis split) landed
+> 2026-08-10** — the three named state mutations (`centralHitboxes = []`,
+> `mitosis.nucleusDestroyed = true`, the `spawnVesicles()` burst) moved from
+> `drawMitosisVisuals()` into `updateMitosis()`, gated by a state-only
+> `crossedCenter && !mitosis.nucleusDestroyed` check (replacing the old
+> `nucleusLayer.visible` display-object read); `mitosis.nucleusDestroyed` is
+> now reset at the snap (mirroring `generateMap()`'s pre-existing implicit
+> reset of `nucleusLayer.visible`) so a second mitosis event can still destroy
+> its own nucleus, which a naive move would have silently broken.
+> `drawMitosisVisuals()` now just mirrors `nucleusLayer.visible =
+> !mitosis.nucleusDestroyed`. Verified via direct-state forcing (both the
+> single-event trigger and a forced snap + second event), screenshots before/
+> after the forced crossing, a real 30.2s round, and a `file://` load — see
+> `docs/tasks/T22-sim-render-split.md` Findings. Steps 5-7 remain; T22 stays
+> `READY` until all seven are ticked. **Next up: Step 5** (players/traces
+> split).
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.

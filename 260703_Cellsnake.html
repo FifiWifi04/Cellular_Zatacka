@@ -3988,7 +3988,46 @@
                     }
                 }
 
-                // Progenitor state updates only (laser hit is handled in the main shatter logic loop)
+                // T22 step 4: nucleus-destruction trigger, moved here from
+                // drawMitosisVisuals() -- clearing centralHitboxes, setting
+                // mitosis.nucleusDestroyed and the spawnVesicles() call are all
+                // simulation, not rendering (AGENT_CONDUCT.md §4.4a).
+                // mitosis.nucleusDestroyed is the one-shot latch that used to be
+                // nucleusLayer.visible; it is reset to false at the snap below
+                // (mirroring the old generateMap()-driven reset of
+                // nucleusLayer.visible) so the next mitosis event's nucleus can be
+                // destroyed again.
+                let sweepProgress = timeInEvent / MITOSIS_SWEEP_DURATION;
+                let crossedCenter = false;
+                if (mitosis.direction === 0) {
+                    let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                    crossedCenter = (ringX >= activeCell.x);
+                } else if (mitosis.direction === 1) {
+                    let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                    crossedCenter = (ringY >= activeCell.y);
+                } else if (mitosis.direction === 2) {
+                    let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                    crossedCenter = (ringX <= activeCell.x);
+                } else {
+                    let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                    crossedCenter = (ringY <= activeCell.y);
+                }
+
+                if (crossedCenter && !mitosis.nucleusDestroyed) {
+                    addShake(0.7, 0.6); // T16: nucleus destruction
+                    // Spawn a massive burst of nuclear/membrane vesicles on destruction!
+                    spawnVesicles(activeCell.x, activeCell.y, 15, 'membrane', 0x6c5ce7);
+                    // sweepProgress (and thus crossedCenter) is monotonic within one
+                    // mitosis event, so this can only fire once per event -- safe to
+                    // drop the sensor/physics hitboxes here too.
+                    centralHitboxes = [];
+                    // The per-arc "Shatter Golgi Arcs" pass in gameLoop calls
+                    // drawArcs() whenever it catches an unshattered arc, which
+                    // repopulates centralHitboxes from whatever's left in
+                    // activeArcs -- undoing this clear. This flag tells that call
+                    // site to re-clear immediately after, every time.
+                    mitosis.nucleusDestroyed = true;
+                }
 
                 // 60 seconds of a fully open bridge before it starts to close
                 if (timeInEvent >= 60 && mitosis.state === 'forming') {
@@ -4050,6 +4089,9 @@
 
                     // 6. Rebuild the world! (This draws the Nucleus for the new activeCell)
                     generateMap(true);
+                    // generateMap() resets nucleusLayer.visible for the new cell;
+                    // mirror that on the state-side latch too (T22 step 4).
+                    mitosis.nucleusDestroyed = false;
 
                     // 7. Inject the rescued organelles into the new cell
                     // Re-parent, not a teardown: survivingOrganelles keeps these sprites
@@ -4112,6 +4154,12 @@
                 }
                 window.bgMask.endFill();
             }
+
+            // T22 step 4: crossedCenter/nucleusDestroyed trigger moved to
+            // updateMitosis(); this only mirrors the resulting state onto the
+            // two display objects.
+            nucleusLayer.visible = !mitosis.nucleusDestroyed;
+            golgiERContainer.visible = !mitosis.nucleusDestroyed;
 
             let timeInEvent = survivalTime - mitosis.eventStartTime;
 
@@ -4185,45 +4233,6 @@
 
             // FIX: Set a bright red line style so the laser is actually visible!
             mitosisLayer.lineStyle(8, 0xff4757, 0.8);
-
-            // Toggle visibility of Cell A's nucleus and Golgi/ER based on whether the laser crossed their center
-            let crossedCenter = false;
-            if (mitosis.direction === 0) {
-                let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
-                crossedCenter = (ringX >= activeCell.x);
-            } else if (mitosis.direction === 1) {
-                let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
-                crossedCenter = (ringY >= activeCell.y);
-            } else if (mitosis.direction === 2) {
-                let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
-                crossedCenter = (ringX <= activeCell.x);
-            } else {
-                let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
-                crossedCenter = (ringY <= activeCell.y);
-            }
-
-            if (crossedCenter) {
-                if (nucleusLayer.visible) {
-                    nucleusLayer.visible = false;
-                    golgiERContainer.visible = false;
-                    addShake(0.7, 0.6); // T16: nucleus destruction
-                    // Spawn a massive burst of nuclear/membrane vesicles on destruction!
-                    spawnVesicles(activeCell.x, activeCell.y, 15, 'membrane', 0x6c5ce7);
-                    // sweepProgress (and thus crossedCenter) is monotonic within one
-                    // mitosis event, so the `else` below never restores visibility
-                    // after this — safe to drop the sensor/physics hitboxes here too.
-                    centralHitboxes = [];
-                    // The per-arc "Shatter Golgi Arcs" pass in gameLoop calls
-                    // drawArcs() whenever it catches an unshattered arc, which
-                    // repopulates centralHitboxes from whatever's left in
-                    // activeArcs — undoing this clear. This flag tells that call
-                    // site to re-clear immediately after, every time.
-                    mitosis.nucleusDestroyed = true;
-                }
-            } else {
-                nucleusLayer.visible = true;
-                golgiERContainer.visible = true;
-            }
 
             if (mitosis.direction === 0) { // Cell B is Right, laser moves Left to Right
                 let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
@@ -5528,7 +5537,7 @@
                     drawArcs();
                     // drawArcs() rebuilds centralHitboxes from whatever remains in
                     // activeArcs; once the nucleus is destroyed those hitboxes must
-                    // stay gone regardless (see drawMitosisVisuals()).
+                    // stay gone regardless (see updateMitosis(), T22 step 4).
                     if (mitosis.nucleusDestroyed) centralHitboxes = [];
                 }
             }
