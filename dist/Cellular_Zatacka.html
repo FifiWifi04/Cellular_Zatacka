@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: a856035b76de88ff -->
+<!-- standalone-build-inputs: 5766123698ad03df -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -5587,12 +5587,26 @@ void main() {
 
         // Shared by checkCollision() and raycast() so physics and the bot's sensor
         // can never disagree about the self-immunity neck (T08). `item` is a
-        // spatial-grid trace item (needs .playerId, .s, .d); `owner` is the caster
-        // whose trace it might be (needs .id, .traceSegments, .traceDist).
+        // spatial-grid trace item (needs .playerId, .segId, .d); `owner` is the
+        // caster whose trace it might be (needs .id, .traceSegments, .traceDist).
+        //
+        // T58: segId is a stable id stamped on the segment array at creation
+        // (see newTraceSegment()), not its index in traceSegments. shift()/splice()
+        // elsewhere (deleteOldestTrace, trimTraceToCap/removeFrontPoints) renumber
+        // indices every time they fire; comparing ids instead means the currently-
+        // growing segment is still recognised as "own neck" no matter how many
+        // older segments got dropped from the front this frame.
         function isOwnNeck(item, owner) {
             return item.playerId === owner.id
-                && item.s === owner.traceSegments.length - 1
+                && item.segId === owner.traceSegments[owner.traceSegments.length - 1].id
                 && (owner.traceDist - item.d) < NECK_LENGTH;
+        }
+
+        // T58: fresh trace segment with a stable, per-player-monotonic id.
+        function newTraceSegment(player) {
+            let seg = [];
+            seg.id = player.nextSegId++;
+            return seg;
         }
 
         function rebuildSpatialGrid() {
@@ -5600,16 +5614,14 @@ void main() {
 
             // 1. Insert player traces
             players.forEach(p => {
-                p.traceSegments.forEach((seg, s) => {
+                p.traceSegments.forEach(seg => {
                     for (let i = 0; i < seg.length - 1; i++) {
                         spatialGrid.insertSegment(seg[i].x, seg[i].y, seg[i + 1].x, seg[i + 1].y, {
                             type: 'trace',
                             x1: seg[i].x, y1: seg[i].y,
                             x2: seg[i + 1].x, y2: seg[i + 1].y,
                             playerId: p.id,
-                            s: s,
-                            i: i,
-                            segLength: seg.length,
+                            segId: seg.id,
                             d: seg[i].d,
                             _seen: -1
                         });
@@ -8975,7 +8987,7 @@ void main() {
                     p.gapCounter -= delta;
                     if (p.gapCounter <= 0) {
                         p.isGap = false;
-                        p.traceSegments.push([]);
+                        p.traceSegments.push(newTraceSegment(p));
                     }
                 } else if (Math.random() < GAP_CHANCE && !isGhost) {
                     p.isGap = true;
@@ -8986,7 +8998,7 @@ void main() {
                     if (!p.wasGhost) p.wasGhost = true;
                 } else if (p.wasGhost) {
                     p.wasGhost = false;
-                    p.traceSegments.push([]); // Start a fresh line after Ghost Mode ends
+                    p.traceSegments.push(newTraceSegment(p)); // Start a fresh line after Ghost Mode ends
                 }
 
                 // 5. Apply Final Movement
@@ -9483,6 +9495,7 @@ void main() {
                     controls: config.controls, isBot: isBot,
                     alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
                     assemblyTick: 0, // T56
+                    nextSegId: 1, // T58: stable per-segment id counter for isOwnNeck()
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
@@ -9491,6 +9504,7 @@ void main() {
                         lastChaserHit: -10 // T57
                     }
                 });
+                players[players.length - 1].traceSegments[0].id = 0; // T58: id 0 for the starting segment
             }
 
             // T25: (re)allocate the trace accumulation buffers around the
@@ -9516,13 +9530,16 @@ void main() {
         world.x = SCREEN_WIDTH / 2 - activeCell.x * 0.3;
         world.y = SCREEN_HEIGHT / 2 - activeCell.y * 0.3;
 
-        function removeFrontPoints(traceSegments, pointsToRemove) {
+        function removeFrontPoints(traceSegments, pointsToRemove, player) {
             while (pointsToRemove > 0 && traceSegments.length > 0) {
                 let firstSeg = traceSegments[0];
                 if (firstSeg.length <= pointsToRemove) {
                     pointsToRemove -= firstSeg.length;
                     traceSegments.shift(); // Remove entire segment
-                    if (traceSegments.length === 0) traceSegments.push([]);
+                    // T58: the replacement placeholder still needs its own stable
+                    // id -- it becomes the actively-growing segment isOwnNeck()
+                    // checks against as soon as movement resumes.
+                    if (traceSegments.length === 0) traceSegments.push(newTraceSegment(player));
                 } else {
                     firstSeg.splice(0, pointsToRemove); // Remove partial segment
                     pointsToRemove = 0;
@@ -9552,7 +9569,7 @@ void main() {
         function deleteOldestTrace(player, percentage) {
             let totalPoints = 0;
             player.traceSegments.forEach(seg => totalPoints += seg.length);
-            removeFrontPoints(player.traceSegments, Math.floor(totalPoints * percentage));
+            removeFrontPoints(player.traceSegments, Math.floor(totalPoints * percentage), player);
             traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
         }
 
@@ -9573,7 +9590,7 @@ void main() {
             let toRemove = Math.min(excess, totalPoints - protectedTail);
             if (toRemove <= 0) return;
 
-            removeFrontPoints(segs, toRemove);
+            removeFrontPoints(segs, toRemove, player);
             while (segs.length > 1 && segs[0].length < 2) segs.shift();
             traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
         }

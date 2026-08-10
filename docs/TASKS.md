@@ -36,19 +36,28 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > Track L → Phase 7**; everything up to and including T57 has now landed (see the
 > notes below).
 >
-> ### ⚠️ Take T58 next — it is a round-ender, filed 2026-08-10
+> **T58 landed 2026-08-10** — `isOwnNeck()` now compares a stable per-segment id
+> (`newTraceSegment()` stamps `player.nextSegId++` at every segment-creation
+> site, including `removeFrontPoints()`'s empty-array placeholder) instead of
+> the segment's index in the mutable `traceSegments` array, so `shift()`/`splice()`
+> from a redirected lysosome pickup or the 50% wipe can no longer desync the
+> spatial grid's self-immunity check. The two prior commits on this branch had
+> only filed the task and re-confirmed the repro, not implemented the fix.
+> Verified: the exact repro (P1 attack, lysosome onto P1's head, redirected to
+> P2) no longer kills — P2's segments still drop 2→1 but P2 stays alive, and the
+> mirror direction (P2→P1) is unaffected too; the 50% wipe still cuts a
+> real 24-point trace to 13 without killing the owner; self-immunity holds at
+> all 3 speeds (no false deaths, dies at ~1.1s exactly when a tight loop closes
+> on itself); a real 3-bot round ran 73.1s clean, and a 330-wall-second fuzzer
+> burst (godMode off, so collision stayed live) completed 140 full round
+> cycles with 0 errors. `i`/`segLength` (write-only, unread) were deleted
+> rather than made stable. `sw.js` `CACHE_NAME` bumped v22→v23; `dist/` rebuilt.
+> See `docs/tasks/T58-red-vesicle-instakills-opponent.md` Findings.
 >
-> A red (lysosome) vesicle picked up in **attack mode** instantly kills the
-> opponent and ends the round. `isOwnNeck()` identifies a trace segment by its
-> **index in a mutable array**, and the pickup does `target.traceSegments.shift()`
-> on the opponent, so every index in the already-built spatial grid goes stale and
-> the victim's own neck stops being immune. Reproduced in both directions —
-> whoever is earlier in the player array wins. See
-> `docs/tasks/T58-red-vesicle-instakills-opponent.md`.
->
-> After T58: **T22** (sim/render split), then **Track L** (Phase 8), then Phase 7.
-> Phase 9 (`PHASE9-LATE-GAME-ARC.md`) is scoped but deliberately has no task files
-> until T52/T57 have been played.
+> **T22 is next** (sim/render split, already `READY`, depends only on T06a).
+> After T22: **Track L** (Phase 8), then Phase 7. Phase 9
+> (`PHASE9-LATE-GAME-ARC.md`) is scoped but deliberately has no task files until
+> T52/T57 have been played.
 >
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
@@ -310,7 +319,7 @@ sim/render split can wait behind them.
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) | T38 | `DONE` |
-| T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) ⚠️ *next* | T08, T36 | `READY` |
+| T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) | T08, T36 | `DONE` |
 
 ### Track K — Playtest design & features
 
