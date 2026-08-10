@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 8815636b5de164dc -->
+<!-- standalone-build-inputs: a856035b76de88ff -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4056,6 +4056,8 @@ void main() {
         atpLayer.blendMode = GLOW_BLEND;
         const virusLayer = new PIXI.Graphics();   // New layer for the Infection event
         virusLayer.blendMode = GLOW_BLEND;
+        const chaserLayer = new PIXI.Graphics(); // T57: nucleus-spawned homing enemies, cleared+redrawn every frame
+        chaserLayer.blendMode = GLOW_BLEND;
         const uiBarsLayer = new PIXI.Graphics();
 
         world.addChild(backgroundLayer);
@@ -4073,6 +4075,7 @@ void main() {
         world.addChild(atpLayer);
         world.addChild(virusLayer);
         world.addChild(necroticDebrisLayer);
+        world.addChild(chaserLayer);
         world.addChild(uiBarsLayer);
 
         // Detach and fully release every child of a container (T05).
@@ -4472,6 +4475,23 @@ void main() {
             return FREE_WINDOW_MAX * (1 - frac);
         }
 
+        // T57: when the feed meter above maxes, the cell "turns" -- freeze/
+        // reveal, then after a grace period the nucleus starts spawning homing
+        // enemies. Called "chaser" internally, not "hunter", to avoid colliding
+        // with the pre-existing player power-up field `effects.hunterTimer`
+        // ("Hunter Mode", granted by 5 lysosome vesicles). See this file's
+        // ## Findings for T57 for the numbers and the survivability-model choice.
+        const NUCLEUS_TRANSFORM_FREEZE = 3.0;  // seconds the sim freezes for the reveal
+        const NUCLEUS_TRANSFORM_GRACE = 4.0;   // seconds after unfreeze before the first chaser spawns
+        const CHASER_MAX = 5;                  // hard cap on live chasers
+        const CHASER_SPAWN_INTERVAL = 8.0;     // seconds between spawns while under the cap
+        const CHASER_LIFETIME = 20.0;          // seconds before a chaser expires on its own
+        const CHASER_RADIUS = 14;
+        const CHASER_SPEED = 1.0;              // px/tick -- below every player speed setting (1.5/2.5/3.5), see Findings
+        const CHASER_TURN_RATE = 0.03;         // rad/tick turn-rate cap -- keeps it steerable-around, not instant-homing
+        const CHASER_HIT_COOLDOWN = 0.3;       // mirrors CLUSTER_HIT_COOLDOWN / MASS_HIT_COOLDOWN
+        const CHASER_SURVIVAL_TARGET = 90.0;   // seconds of active chasing before spawning stops (survivability model (b))
+
         const GAP_CHANCE = 0.008;
         const GAP_LENGTH = 12;
         const EFFECT_DURATION = 10.0;
@@ -4637,6 +4657,11 @@ void main() {
         let nucleusFeed = { value: 0, max: NUCLEUS_FEED_MAX };
         let nucleusFeedFlashTime = -Infinity;
         let gen4EstablishTime = -Infinity;
+        // T57: -Infinity = not yet transformed; set once when nucleusFeed maxes.
+        let nucleusTransformTime = -Infinity;
+        let nucleusChaserNextSpawn = Infinity;
+        let nucleusSiegeEnded = false; // survivability model (b): true once CHASER_SURVIVAL_TARGET is reached
+        let nucleusChasers = []; // { x, y, angle, spawnTime, radius, dead }
         let globalRotation = 0;
 
         // Destroy the split-screen sprites/RenderTextures and empty both arrays.
@@ -5655,6 +5680,18 @@ void main() {
                     _seen: -1
                 });
             });
+
+            // 7. Insert nucleus chasers (T57; Gen4+ post-transformation homing
+            // enemies). Sensor-path only -- the physics path is gameLoop's own
+            // inline sweep (section 1.7), the same shape as 'mass' below it,
+            // not read through this grid.
+            nucleusChasers.forEach(h => {
+                spatialGrid.insertCircle(h.x, h.y, h.radius, {
+                    type: 'chaser',
+                    raw: h,
+                    _seen: -1
+                });
+            });
         }
 
         function raycast(startX, startY, angle, maxDist, casterId = null) {
@@ -5898,6 +5935,15 @@ void main() {
                             if (hitT >= 0) {
                                 let hitDist = hitT * maxDist;
                                 if (hitDist < bestDist) { bestDist = hitDist; bestType = 'debris'; bestRaw = undefined; }
+                            }
+                        } else if (item.type === 'chaser') {
+                            // T57: homing nucleus enemy -- same point+radius test as debris/virus.
+                            let h = item.raw;
+                            if (h.dead) continue; // stale grid entry, broken this frame (trap 4.1)
+                            let hitT = raySegT(startX, startY, endX, endY, h.x, h.y, h.x, h.y, h.radius + TRACE_HITBOX);
+                            if (hitT >= 0) {
+                                let hitDist = hitT * maxDist;
+                                if (hitDist < bestDist) { bestDist = hitDist; bestType = 'chaser'; bestRaw = undefined; }
                             }
                         }
                     }
@@ -6476,6 +6522,20 @@ void main() {
                         // mattering instead of just fading.
                         nucleusFeed.value = Math.min(NUCLEUS_FEED_MAX, nucleusFeed.value + NUCLEUS_FEED_WEIGHTS[v.type]);
                         nucleusFeedFlashTime = survivalTime;
+                        // T57: meter maxed -- one-shot transformation trigger. The
+                        // freeze/reveal itself is driven by nucleusTransformTime
+                        // through isCellFrozen (gameLoop, alongside isMitosisReveal);
+                        // this only ever fires once per round.
+                        if (nucleusFeed.value >= NUCLEUS_FEED_MAX && nucleusTransformTime === -Infinity) {
+                            nucleusTransformTime = survivalTime;
+                            nucleusChaserNextSpawn = survivalTime + NUCLEUS_TRANSFORM_FREEZE + NUCLEUS_TRANSFORM_GRACE;
+                            addShake(1.0, 1.0); // T16
+                            emitParticles(nearestCell.x, nearestCell.y, 30, { speed: 4.0, spread: Math.PI * 2, life: 1.0, size: 4, color: 0xff4757 }); // T17
+                            warningElement.innerText = "THE CELL HAS TURNED -- THE NUCLEUS IS HUNTING";
+                            warningElement.style.color = "#ff4757";
+                            warningElement.style.display = 'block';
+                            setTimeout(() => warningElement.style.display = 'none', NUCLEUS_TRANSFORM_FREEZE * 1000 + 500);
+                        }
                         emitParticles(v.x, v.y, 10, { speed: 3.0, spread: 0.5, angle: Math.atan2(dy, dx), life: 0.4, size: 3, color: v.color }); // T52
                         vesicles.splice(i, 1);
                         continue;
@@ -6635,6 +6695,118 @@ void main() {
             fill.style.boxShadow = sinceFlash < NUCLEUS_FLASH_DURATION
                 ? `0 0 ${Math.round(10 * (1 - sinceFlash / NUCLEUS_FLASH_DURATION))}px #d6a4ff`
                 : '';
+        }
+
+        // T57: spawns from the origin nucleus (activeCell) regardless of
+        // mitosis state -- homing itself (below) tracks raw player x/y, which
+        // is correct whether or not a player has crossed into mitosis.cellB,
+        // so no cellB-aware spawn point is needed.
+        function spawnNucleusChaser() {
+            let ang = Math.random() * Math.PI * 2;
+            nucleusChasers.push({
+                x: activeCell.x + Math.cos(ang) * (NUCLEUS_RADIUS + CHASER_RADIUS + 10),
+                y: activeCell.y + Math.sin(ang) * (NUCLEUS_RADIUS + CHASER_RADIUS + 10),
+                angle: ang,
+                spawnTime: survivalTime,
+                radius: CHASER_RADIUS,
+                dead: false
+            });
+        }
+
+        // T57: shared teardown, mirroring destroyNecroticOrganelle() -- marks
+        // `dead` first so this frame's already-built spatialGrid entry (trap
+        // 4.1) is skipped by raycast(), then drops it from the live array.
+        function destroyNucleusChaser(i) {
+            let h = nucleusChasers[i];
+            h.dead = true;
+            nucleusChasers.splice(i, 1);
+            emitParticles(h.x, h.y, 14, { speed: 2.6, spread: Math.PI * 2, life: 0.5, size: 3, color: 0xff6b81 }); // T17
+        }
+
+        // T57: state only (§4.4a) -- see drawNucleusChasers() for the render half.
+        function updateNucleusChasers(delta, deltaSec) {
+            if (nucleusTransformTime === -Infinity) return;
+
+            // Survivability model (b, see docs/tasks/T57 Findings): once players
+            // have weathered CHASER_SURVIVAL_TARGET seconds of the active state,
+            // the siege ends -- no more spawns; existing chasers still run out
+            // their own CHASER_LIFETIME rather than vanishing instantly.
+            let activeSince = nucleusTransformTime + NUCLEUS_TRANSFORM_FREEZE + NUCLEUS_TRANSFORM_GRACE;
+            if (!nucleusSiegeEnded && survivalTime - activeSince >= CHASER_SURVIVAL_TARGET) {
+                nucleusSiegeEnded = true;
+                addShake(0.6, 0.6); // T16
+                warningElement.innerText = "THE CELL QUIETS -- THE NUCLEUS STOPS HUNTING";
+                warningElement.style.color = "#7bed9f";
+                warningElement.style.display = 'block';
+                setTimeout(() => warningElement.style.display = 'none', 4000);
+            }
+
+            if (!nucleusSiegeEnded && nucleusChasers.length < CHASER_MAX && survivalTime >= nucleusChaserNextSpawn) {
+                spawnNucleusChaser();
+                nucleusChaserNextSpawn = survivalTime + CHASER_SPAWN_INTERVAL;
+            }
+
+            for (let i = nucleusChasers.length - 1; i >= 0; i--) {
+                let h = nucleusChasers[i];
+                if (survivalTime - h.spawnTime > CHASER_LIFETIME) {
+                    nucleusChasers.splice(i, 1);
+                    continue;
+                }
+
+                // Home toward the nearest living player at a turn-rate-limited
+                // pace (not instant), so it stays outrunnable and steerable
+                // around rather than an inescapable magnet -- see Findings.
+                let target = null, bestDist = Infinity;
+                for (let p of players) {
+                    if (!p.alive) continue;
+                    let d = Math.hypot(p.x - h.x, p.y - h.y);
+                    if (d < bestDist) { bestDist = d; target = p; }
+                }
+                if (target) {
+                    let targetAngle = Math.atan2(target.y - h.y, target.x - h.x);
+                    let diff = Math.atan2(Math.sin(targetAngle - h.angle), Math.cos(targetAngle - h.angle));
+                    let maxTurn = CHASER_TURN_RATE * delta;
+                    h.angle += Math.max(-maxTurn, Math.min(maxTurn, diff));
+                }
+                h.x += Math.cos(h.angle) * CHASER_SPEED * delta;
+                h.y += Math.sin(h.angle) * CHASER_SPEED * delta;
+
+                // Containment: clamp back toward the origin nucleus if it ever
+                // drifts outside all valid geometry (cell A, cell B, bridge).
+                // Anchoring on activeCell rather than the nearer cell avoids
+                // reading mitosis.cellB.radiusX/Y, which is never set (see
+                // docs/BACKLOG.md's existing note on that field).
+                if (isOutsideCell(h.x, h.y, CHASER_RADIUS)) {
+                    let ang = Math.atan2(h.y - activeCell.y, h.x - activeCell.x);
+                    h.x = activeCell.x + Math.cos(ang) * (activeCell.radiusX - CHASER_RADIUS - 6);
+                    h.y = activeCell.y + Math.sin(ang) * (activeCell.radiusY - CHASER_RADIUS - 6);
+                }
+            }
+        }
+
+        // T57: draw only (§4.4a) -- one persistent Graphics, cleared+redrawn
+        // from state every frame, never one Graphics per chaser.
+        function drawNucleusChasers() {
+            chaserLayer.clear();
+            for (let h of nucleusChasers) {
+                // Oriented, pulsing body so motion reads as "alive and directed"
+                // at a glance -- must stay distinct from T38's grey crystalline
+                // clusters and T39's soft amber aggregate (see Findings).
+                let pulse = 1 + 0.15 * Math.sin(survivalTime * 8 + h.x);
+                chaserLayer.beginFill(0xff4757, 0.85);
+                chaserLayer.drawCircle(h.x, h.y, h.radius * pulse);
+                chaserLayer.endFill();
+
+                let tipX = h.x + Math.cos(h.angle) * h.radius * 1.8;
+                let tipY = h.y + Math.sin(h.angle) * h.radius * 1.8;
+                let baseA = h.angle + Math.PI * 0.6, baseB = h.angle - Math.PI * 0.6;
+                chaserLayer.beginFill(0xff6b81, 0.9);
+                chaserLayer.moveTo(tipX, tipY);
+                chaserLayer.lineTo(h.x + Math.cos(baseA) * h.radius * 0.7, h.y + Math.sin(baseA) * h.radius * 0.7);
+                chaserLayer.lineTo(h.x + Math.cos(baseB) * h.radius * 0.7, h.y + Math.sin(baseB) * h.radius * 0.7);
+                chaserLayer.closePath();
+                chaserLayer.endFill();
+            }
         }
 
         // --- THE INFECTION EVENT SYSTEM ---
@@ -8270,7 +8442,10 @@ void main() {
                 }
             }
             let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
-            let isCellFrozen = (infection.state === 'warning') || isMitosisReveal;
+            // T57: the transformation cutscene reuses this same freeze path
+            // rather than adding a third mechanism.
+            let isNucleusReveal = (nucleusTransformTime > -Infinity && (survivalTime - nucleusTransformTime < NUCLEUS_TRANSFORM_FREEZE));
+            let isCellFrozen = (infection.state === 'warning') || isMitosisReveal || isNucleusReveal;
 
             // T12: Gen 2+ membrane calcification. Shrinks activeCell.radiusX/radiusY
             // frame by frame (paused while frozen or mid-mitosis, since the bridge and
@@ -8376,12 +8551,17 @@ void main() {
                 // T38: Gen 2+ necrotic cluster debris shedding + drift. State only;
                 // see drawNecroticClusters()/drawNecroticDebris() below (§4.4a).
                 updateNecroticClusters(delta, deltaSec);
+
+                // T57: post-transformation homing enemies. State only; see
+                // drawNucleusChasers() below (§4.4a).
+                updateNucleusChasers(delta, deltaSec);
             }
             updateMitosis(deltaSec);
             drawMitosisVisuals();
             drawMalignantMass();
             drawNecroticClusters();
             drawNecroticDebris();
+            drawNucleusChasers(); // T57
 
             updateInfection(delta, deltaSec);
             updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition
@@ -8664,6 +8844,32 @@ void main() {
                         } else {
                             p.alive = false;
                             addShake(0.5, 0.4); // T16: player elimination
+                            return;
+                        }
+                        break;
+                    }
+                }
+
+                // 1.7 Nucleus Chaser Collision (T57, swept against the player's
+                // step; Gen4+ post-transformation homing enemies). Modelled on
+                // 1.6 above: in 'attack' targetMode the hit chaser is destroyed
+                // instead of killing the player, gated by CHASER_HIT_COOLDOWN so
+                // one pass cannot clear the whole spawn cap in a frame. Not
+                // routed through checkCollision()/spatialGrid, same as 1.6's
+                // malignant mass -- see docs/tasks/T57 Findings.
+                if (nucleusChasers.length > 0 && !p.isGap && !isGhost && !godMode) {
+                    for (let i = 0; i < nucleusChasers.length; i++) {
+                        let h = nucleusChasers[i];
+                        let rSq = (h.radius + TRACE_HITBOX) * (h.radius + TRACE_HITBOX);
+                        if (ptSegDistSq(h.x, h.y, p.x, p.y, nextX, nextY) >= rSq) continue;
+                        if (p.targetMode === 'attack') {
+                            if (survivalTime - p.effects.lastChaserHit > CHASER_HIT_COOLDOWN) {
+                                destroyNucleusChaser(i);
+                                p.effects.lastChaserHit = survivalTime;
+                            }
+                        } else {
+                            p.alive = false;
+                            addShake(0.6, 0.5); // T16: player elimination by chaser
                             return;
                         }
                         break;
@@ -9117,6 +9323,11 @@ void main() {
                 <div class="help-swatch-row"><span class="help-swatch" style="background:#8a6d2f"></span>
                     <span><b>Protein aggregate</b> -- a growing amber clump that appears from
                     Generation 3 onward (see Generations).</span></div>
+                <div class="help-swatch-row"><span class="help-swatch round" style="background:#ff4757"></span>
+                    <span><b>Nucleus chasers</b> -- once the NUCLEUS bar (Generation 4) fills
+                    completely, the cell turns and starts spawning these from its core. They home
+                    in on you, slower than you are, and are breakable in Attack mode (see Target
+                    mode).</span></div>
 
                 <h3>Vesicles</h3>
                 <div class="help-swatch-row"><span class="help-swatch round" style="background:${membColor}"></span>
@@ -9141,6 +9352,7 @@ void main() {
                     <tr><td>Living organelle</td><td>yes</td><td>drifts</td><td>no</td></tr>
                     <tr><td>Necrotic organelle or cluster (Gen 2+)</td><td>yes</td><td>static</td><td>yes -- one organelle per hit</td></tr>
                     <tr><td>Protein aggregate (Gen 3+)</td><td>yes</td><td>static</td><td>yes -- one block per hit</td></tr>
+                    <tr><td>Nucleus chaser (post-transformation)</td><td>yes</td><td>homes toward you</td><td>yes -- one per hit</td></tr>
                 </table>
 
                 <h3>Events</h3>
@@ -9177,7 +9389,12 @@ void main() {
                     the top of the screen (worth more for lysosome vesicles than mitochondria or
                     membrane ones); the bar only ever rises. Past ${Math.round(FREE_WINDOW_ZERO_FRAC * 100)}%
                     the free window shrinks to zero -- vesicles are pulled in from the moment they
-                    spawn and can no longer be intercepted.</li>
+                    spawn and can no longer be intercepted. Once the bar fills completely, the cell
+                    turns: the sim freezes for ${NUCLEUS_TRANSFORM_FREEZE}s while the nucleus reveals
+                    itself, then after a ${NUCLEUS_TRANSFORM_GRACE}s grace period it starts spawning
+                    homing chasers (capped at ${CHASER_MAX} at once) from its core. They're slower
+                    than you and breakable in Attack mode; survive ${Math.round(CHASER_SURVIVAL_TARGET)}s
+                    of it and the nucleus stops hunting.</li>
                 </ul>
             `;
             document.getElementById('helpContent').innerHTML = html;
@@ -9206,6 +9423,8 @@ void main() {
             vesicles = []; dynamicLayer.clear();
             atpGranules = []; atpLayer.clear(); calcifyPauseTimer = 0; // T51
             nucleusFeed.value = 0; nucleusFeedFlashTime = -Infinity; gen4EstablishTime = -Infinity; // T52
+            nucleusChasers = []; chaserLayer.clear(); nucleusTransformTime = -Infinity; // T57
+            nucleusChaserNextSpawn = Infinity; nucleusSiegeEnded = false; // T57
             particleCount = 0; particleLayer.clear(); // T17
             assemblyLiveCount.fill(0); // T56
 
@@ -9268,7 +9487,8 @@ void main() {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
                         redCount: 0, redWindow: 0, hunterTimer: 0, lastMassHit: -10, // T14
-                        lastClusterHit: -10 // T38
+                        lastClusterHit: -10, // T38
+                        lastChaserHit: -10 // T57
                     }
                 });
             }

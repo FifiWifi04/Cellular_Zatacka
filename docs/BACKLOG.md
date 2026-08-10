@@ -704,3 +704,17 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   pre-existing `hidden-ui`/small-viewport interaction, not new. Found while
   screenshotting T52's nucleus-feed HUD (which sits in the same top strip) at
   the T24 breakpoints. — 2026-08-10
+
+## Found while doing T57 (transformed nucleus / chasers) — 2026-08-10
+
+- **`warningElement` (the one shared banner DOM element) has no arbitration
+  between simultaneous events.** Mitosis ("CELL DIVISION INITIATED..."),
+  the infection warning, and now T57's transformation/siege-end banners all
+  write `warningElement.innerText` directly with no queue or priority — if two
+  land within the same few seconds (possible in a long round, since
+  `MITOSIS_INTERVAL` fires every 240s regardless of generation, independent of
+  when the Gen 4 nucleus meter maxes), whichever runs last simply overwrites
+  the other's text with no indication anything was lost. Pre-existing pattern
+  (mitosis and infection already shared this with no arbitration before T57
+  added a third and fourth writer); worth a small queue/priority system if a
+  future task adds a fifth. — 2026-08-10

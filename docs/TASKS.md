@@ -128,7 +128,28 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > menu not fully leaving short/narrow viewports despite `hidden-ui`,
 > reproduced on the pre-T52 commit) filed to `docs/BACKLOG.md`, out of scope.
 > See `docs/tasks/T52-gen4-nucleus-feeding.md` Findings for full numbers.
-> **T57 is next.**
+>
+> **T57 landed 2026-08-10** — when the Gen 4 nucleus-feed meter (T52) maxes,
+> the cell "turns": a 3s freeze/reveal (reusing the existing `isCellFrozen`
+> path, screenshake, a particle burst, a banner), then after a 4s grace period
+> the nucleus spawns homing "chasers" (called that, not "hunters", to avoid
+> colliding with the pre-existing player Hunter Mode power-up) capped at 5,
+> lifetime 20s, speed 60px/s — slower than the player at every actual speed
+> setting (90/150/210px/s) — with a turn-rate cap so they're steerable around,
+> not a perfect tracker. Lethal via a new inline swept block in `gameLoop`
+> (mirroring T14's malignant-mass pattern, not `checkCollision()` itself) and
+> sensed via `raycast()`/`spatialGrid`; breakable in attack mode with a
+> cooldown that declines the break without killing (T50's exact rule, applied
+> from the start). Survivability model (b): after 90s of the active state,
+> spawning stops for the rest of the round. Verified: freeze holds a parked
+> player's position exactly; grace period keeps the arena chaser-free for a
+> full 7s after the meter maxes; self/attack-mode/cooldown-decline behaviour
+> confirmed via direct `gameLoop()` calls; caps/lifetime held under stress
+> probes; 3 real 3-bot trials measured 26.8-57.6s (mean 45.3s) survival after
+> transformation; console clean and `worldChildren` flat (15→16, the one new
+> layer) throughout. See `docs/tasks/T57-transformed-nucleus.md` Findings for
+> full numbers and the naming-collision/checkCollision-scope reasoning.
+> **T22 is next** (Track G, already unblocked since T06a).
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -297,7 +318,7 @@ sim/render split can wait behind them.
 | T51 | [Give the player a way to fight the shrinking membrane (ATP)](tasks/T51-slow-the-calcification.md) | T12 | `DONE` |
 | T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `DONE` |
 | T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `DONE` |
-| T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `READY` |
+| T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `DONE` |
 
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
