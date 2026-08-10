@@ -166,8 +166,14 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > (infection/virus split, `updateInfection()`/`drawInfection()`, a new
 > `infection.warningVisible` field to preserve the hexagon-glyph's exact
 > on-breach-frame timing) landed 2026-08-10 too — see
-> `docs/tasks/T22-sim-render-split.md` Findings. Steps 3-7 remain; T22 stays
-> `READY` until all seven are ticked. **Next up: Step 3** (organelles split).
+> `docs/tasks/T22-sim-render-split.md` Findings. **Step 3 (organelles split)
+> landed 2026-08-10** — `updateDriftingOrganelles()` is now state-only (the
+> `o.rotation` advance is unconditional, no longer gated on `o.sprite`) and a
+> new `drawOrganelles()` mirrors `sprite.x/y/rotation` and the necrotic
+> freeze-flicker alpha; a 30s immortal round found 0/25 sprite-mirror
+> mismatches, forced-Gen-2 necrosis flicker still verified correct, and a real
+> non-immortal round played normally. Steps 4-7 remain; T22 stays `READY`
+> until all seven are ticked. **Next up: Step 4** (mitosis split).
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.

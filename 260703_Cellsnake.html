@@ -3151,11 +3151,24 @@
                     }
                 }
 
+                if (!o.necrotic) {
+                    o.rotation += o.rotSpeed * delta;   // advance the value the hitbox reads
+                }
+            }
+        }
+
+        // T22 step 3: drawOrganelles() -- pure reads of organelles[]. Mirrors
+        // o.x/o.y/o.rotation onto o.sprite exactly as the old fused tail of
+        // updateDriftingOrganelles() did, plus the necrotic freeze-flicker
+        // alpha (itself a pure function of survivalTime/o.freezeTime, not
+        // state). Never mutates an organelle's plain-object fields (§4.4).
+        function drawOrganelles() {
+            for (let i = 0; i < organelles.length; i++) {
+                let o = organelles[i];
                 if (o.sprite) {
                     o.sprite.x = o.x;
                     o.sprite.y = o.y;
                     if (!o.necrotic) {
-                        o.rotation += o.rotSpeed * delta;   // advance the value the hitbox reads
                         o.sprite.rotation = o.rotation;     // sprite mirrors it exactly
                     }
 
@@ -5309,7 +5322,7 @@
                 // on the existing container -- no redraw, no allocation.
                 rotatingContainer.alpha = players.some(p => p.alive && !p.isBot && p.effects.golgiTimer > 0) ? 0.35 : 1.0;
                 drawTraces();
-                updateDriftingOrganelles(delta);
+                updateDriftingOrganelles(delta); drawOrganelles(); // T22 step 3
                 updateVesicles(delta); drawVesicles(); // T22 step 1
                 updateATP(deltaSec); drawATP(); // T51
 

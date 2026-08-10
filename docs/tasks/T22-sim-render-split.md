@@ -121,7 +121,7 @@ verifying after each:
 
 - [x] Step 1 — vesicles split
 - [x] Step 2 — infection split
-- [ ] Step 3 — organelles split (sprite mirroring moved to draw)
+- [x] Step 3 — organelles split (sprite mirroring moved to draw)
 - [ ] Step 4 — mitosis split (three state mutations moved out of the draw path)
 - [ ] Step 5 — players/traces split
 - [ ] Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`
@@ -203,6 +203,49 @@ as expected with nobody driving it, console/page errors empty in both checks.
 bumped v24→v25.
 
 Next: Step 3 — organelles split (sprite mirroring moved into `drawOrganelles()`).
+
+**Step 3 (organelles split), landed 2026-08-10.** `updateDriftingOrganelles(delta)`
+now contains state only: drift/velocity, the outside-cell and failsafe clamps,
+the pair-resolution/fusion loop, and `o.rotation += o.rotSpeed * delta`
+(unconditional now, not gated on `o.sprite` -- gating a state mutation on a
+display-object reference would itself violate the "zero display-object
+references" rule this task exists to enforce; `o.sprite` is set atomically
+with every `organelles.push()` and cleared only via `destroyNecroticOrganelle()`,
+which splices the organelle out of `organelles` in the same call, so no
+organelle ever sits in the array with a missing sprite -- the guard was always
+true in practice and removing it changes nothing observable). A new
+`drawOrganelles()` does the exact old tail unchanged: `sprite.x/y` mirror,
+`sprite.rotation` mirror for non-necrotic organelles, and the necrotic
+freeze-flicker alpha formula (a pure function of `survivalTime`/`o.freezeTime`).
+Call site became `updateDriftingOrganelles(delta); drawOrganelles();` in the
+same `gameLoop` slot, mirroring steps 1-2's pattern. No `Math.random()` call
+was added, removed, or reordered.
+
+Verified: `awk` extraction of `updateDriftingOrganelles`'s source shows zero
+`PIXI`/`Layer`/`.sprite`/`.visible` references (the only hit is a comment in
+the following function). A 30-game-second immortal round (1 player + 3 bots)
+found `spriteMismatches: 0` across all 25 organelles (an exact per-frame
+`sprite.x === o.x`, `sprite.y === o.y`, and for non-necrotic ones
+`sprite.rotation === o.rotation` check) -- proving the split didn't desync the
+mirror even by a frame. Forcing Gen 2 and running 13.6s produced one necrotic
+organelle whose sprite alpha had settled at the resting `NECROSIS_ALPHA`
+(0.75) with x/y still exactly mirrored, confirming the freeze-flicker path
+still fires correctly from `drawOrganelles()`. A real (non-immortal)
+30.5-game-second round with 1 player + 3 bots played normally (662 trace
+points, 2/4 alive, the unpiloted human died to the membrane as expected,
+2 bots survived) with console clean. `file://` load (offline, in `dist/`)
+ran 10.5 game-seconds clean too. `node --check` on the extracted `<script>`
+body passed. Exact-position parity against a pre-change baseline was not
+attempted: `Math.random()` is unseeded, so two separate browser process runs
+of *even identical code* never produce identical organelle trajectories --
+the same limitation steps 1-2 hit, worked around the same way (structural/
+sanity checks instead of byte-for-byte state diff). `dist/` rebuilt (`--check`
+passes); `sw.js` `CACHE_NAME` bumped v25→v26.
+
+Next: Step 4 — mitosis split (three state mutations currently in
+`drawMitosisVisuals()` — clearing `centralHitboxes`, setting
+`mitosis.nucleusDestroyed`, calling `spawnVesicles()` — move into
+`updateMitosis()`).
 
 ---
 
