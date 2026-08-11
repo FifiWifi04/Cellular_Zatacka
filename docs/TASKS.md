@@ -185,9 +185,31 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > !mitosis.nucleusDestroyed`. Verified via direct-state forcing (both the
 > single-event trigger and a forced snap + second event), screenshots before/
 > after the forced crossing, a real 30.2s round, and a `file://` load — see
-> `docs/tasks/T22-sim-render-split.md` Findings. Steps 5-7 remain; T22 stays
-> `READY` until all seven are ticked. **Next up: Step 5** (players/traces
-> split).
+> `docs/tasks/T22-sim-render-split.md` Findings.
+>
+> **Step 5 (players/traces split) landed 2026-08-11** — the old fused
+> `gameLoop` `players.forEach` (bot AI, every swept collision check, vesicle/
+> ATP pickup, trace append/gap management, the mitosis death-ring sweep) moved
+> verbatim into a new `updatePlayers(delta, deltaSec, isCellFrozen)`; only the
+> uiBarsLayer status bars were pulled out, into a new `drawPlayerBars()`. The
+> four per-player bars needed a value snapshot (`p.barX/barY/barGhostTimer/
+> HunterTimer/GolgiTimer/SpeedTimer/SpeedLevel`), not just a cut-and-paste,
+> since the old code drew them mid-iteration using pre-pickup values — reading
+> `p.effects.*` fresh after `updatePlayers()` finishes would have shown
+> post-pickup values a frame early. The global ATP bar needed no snapshot (the
+> original already drew it once, after every player had been processed).
+> Verified: brace-matched extraction of `updatePlayers()` shows zero
+> `PIXI`/`Layer`/`.sprite`/`.visible` references; a real 30.2s round (1 player
+> + 3 bots) played normally; membrane/self-trace/organelle deaths and vesicle/
+> ATP pickup all confirmed via direct state-forcing, including proof the bar
+> snapshot ordering fix works (pickup-frame bar still shows the pre-pickup
+> value, next frame shows post-pickup); 15s real rounds at all three speeds
+> clean. One pre-existing violation noted to `docs/BACKLOG.md`:
+> `updatePlayers()` isn't fully PIXI-free (`destroyNecroticOrganelle()` inside
+> it touches `organellesLayer`/`.sprite`, a T13/T38/T50-era coupling predating
+> this split). See `docs/tasks/T22-sim-render-split.md` Findings. Steps 6-7
+> remain; T22 stays `READY` until all seven are ticked. **Next up: Step 6**
+> (`gameLoop` restructured into `stepSimulation` + `renderFrame`).
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.

@@ -123,7 +123,7 @@ verifying after each:
 - [x] Step 2 — infection split
 - [x] Step 3 — organelles split (sprite mirroring moved to draw)
 - [x] Step 4 — mitosis split (three state mutations moved out of the draw path)
-- [ ] Step 5 — players/traces split
+- [x] Step 5 — players/traces split
 - [ ] Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`
 - [ ] Step 7 — headless step loop exposed and benchmarked
 
@@ -303,7 +303,85 @@ cytosol particles, organelle sprites) — this already existed in
 `updateMitosis()` before this task and is not part of the "three state
 mutations" this step was scoped to.
 
-Next: Step 5 — players/traces split.
+**Step 5 (players/traces split), landed 2026-08-11.** The old fused
+`gameLoop`, `players.forEach((p, pi) => {...})` — bot AI/input, all seven
+swept collision checks (trace/organelle, microtubule, malignant mass, nucleus
+chaser, viral swarm), vesicle and ATP granule pickup, gap/ghost trace
+management, the trace-point append, and the mitosis death-ring sweep — moved
+verbatim into a new `updatePlayers(delta, deltaSec, isCellFrozen)`. The only
+thing pulled *out* of that body (not just relocated) was the four per-player
+uiBarsLayer status bars (ghost/hunter/golgi/speed) and the standalone
+`uiBarsLayer.clear()` call that used to precede the loop, plus the T51 global
+ATP-pause bar that used to follow it — all three now live in a new
+`drawPlayerBars()`.
+
+The per-player bars needed more than a cut-and-paste: in the original, each
+bar was drawn *mid-iteration*, using that player's `p.effects.*`/`p.x`/`p.y`
+values from immediately after that frame's countdown decrement but *before*
+that same frame's collision/pickup logic could still change them (a blue/red/
+mitochondria vesicle pickup mutates `p.effects.*`, movement mutates `p.x/y`,
+both later in the same original iteration). Splitting into two full passes
+(`updatePlayers()` for every player, then `drawPlayerBars()` for every player)
+would have made every bar reflect *this* frame's post-pickup values instead —
+a real, observable behaviour change, not just a code move. Fixed by
+snapshotting the values the bars need (`p.barX/barY`,
+`p.barGhostTimer/HunterTimer/GolgiTimer/SpeedTimer/SpeedLevel`) onto the
+player object at the exact point in `updatePlayers()` the old bar-draw block
+used to run (right after the decrement, before the `isCellFrozen` early
+return) — plain property writes on the existing player object, not a
+per-frame allocation. `drawPlayerBars()` reads only those snapshot fields.
+The global ATP bar needed no such snapshot: the original drew it once, after
+the *entire* forEach had finished for every player, so it always reflected
+the full frame's pickups already — reading `calcifyPauseTimer` in
+`drawPlayerBars()` (called after `updatePlayers()` returns) is the same value
+at the same point in the frame, unchanged. New fields
+(`barX`/`barY`/`barGhostTimer`/`barHunterTimer`/`barGolgiTimer`/
+`barSpeedTimer`/`barSpeedLevel`) were added to the player object's own
+initializer next to the other per-round-reset fields (`particleTick`,
+`assemblyTick`) for consistency, though nothing depends on their defaults —
+`updatePlayers()` always runs before `drawPlayerBars()` within the same
+`gameLoop` tick. Call site is `updatePlayers(delta, deltaSec, isCellFrozen);
+drawPlayerBars();` in the exact slot the old forEach + bar code occupied. No
+`Math.random()` call was added, removed, or reordered relative to other
+`gameLoop` calls.
+
+Not PIXI-free: `updatePlayers()` still calls `destroyNecroticOrganelle()`/
+`breakClusterMember()` from section 0.9 (attack-mode necrotic-organelle
+break), which touch `organellesLayer`/`.sprite` internally. That coupling
+predates this split (T13/T38/T50, same spot in the old fused loop) and
+untangling it is a separate, larger change — filed to `docs/BACKLOG.md` for
+whoever audits `stepSimulation()`'s zero-display-object-references invariant
+in step 6/7.
+
+Verified: brace-matched extraction of `updatePlayers()`'s source (4550-4883)
+shows zero `PIXI`/`Layer`/`.sprite`/`.visible` references; `drawPlayerBars()`
+(4892-4946) reviewed by hand and confirmed to only read `p.bar*`,
+`calcifyPauseTimer`, `activeCell`, `survivalTime` and never mutate them.
+`node --check` on the extracted `<script>` body passed. A real 30.2-game-second
+round (1 player + 3 bots, harness default) played normally — 3/4 alive (the
+unpiloted human died to the membrane as expected), 942 trace points, console
+clean, screenshot looks normal. A regression sweep confirmed all three swept
+death paths still fire via direct state-forcing at Normal speed (membrane,
+self-trace via a manually-placed neck segment past `isOwnNeck`'s distance
+immunity, and organelle), plus 15-game-second real rounds at all three speed
+settings (Normal/Fast/Very Fast) with 3/4 alive and console clean at each.
+Vesicle pickup verified end-to-end with a real `spawnVesicles()`-created
+mitochondria vesicle: `vesicles.length` 1→0 and `p.effects.speedTimer` 0→9.9
+on contact, with `p.barSpeedTimer` correctly still 0 on the pickup frame's own
+bar (matching the old pre-pickup timing) and mirroring 9.9 the *next* frame —
+proving the snapshot ordering fix actually works, not just that it compiles.
+ATP granule pickup verified the same way (`calcifyPauseTimer` 0→3.9 on
+contact). Forced every effects timer nonzero on a parked player and
+screenshotted the resulting stacked bars and the separately-forced ATP bar —
+both render at the expected position. `dist/` rebuilt (`--check` passes);
+`sw.js` `CACHE_NAME` bumped v27→v28.
+
+Not moved (pre-existing, out of scope): the "DEATH RING SHATTER LOGIC" block
+immediately before where the old `players.forEach` started (organelle/Golgi-
+arc destruction during a mitosis sweep, including a `drawArcs()` call) is
+about organelles/arcs, not players, and was left untouched in `gameLoop`.
+
+Next: Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`.
 
 ---
 

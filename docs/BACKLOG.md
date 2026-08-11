@@ -735,3 +735,17 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   (mitosis and infection already shared this with no arbitration before T57
   added a third and fourth writer); worth a small queue/priority system if a
   future task adds a fifth. — 2026-08-10
+
+## Found while doing T22 step 5 (players/traces sim/render split) — 2026-08-11
+
+- **`updatePlayers()` is not actually PIXI-free** — section 0.9 (necrotic
+  organelle break, on an attack-mode hit) calls `destroyNecroticOrganelle()`/
+  `breakClusterMember()`, which both touch `organellesLayer`/`.sprite`
+  internally (removing and destroying the display object). This coupling
+  predates the split (it lived in the exact same spot in the old fused
+  `gameLoop` forEach, added by T13/T38/T50) and moving it out is a separate,
+  larger change than this step's scope (rewriting necrotic-organelle teardown
+  to defer sprite cleanup into a future `drawOrganelles()`-adjacent pass).
+  Noted so a later T22 step (or its own task) doesn't rediscover it from
+  scratch when auditing `stepSimulation()` for the mechanical
+  zero-display-object-references check in step 6/7. — 2026-08-11

@@ -4537,6 +4537,414 @@
             });
         }
 
+        // T22 step 5: state half of the players/traces split. Moved verbatim out
+        // of gameLoop's old fused `players.forEach` (bot AI, movement, every
+        // swept collision check, vesicle/ATP pickup, trace append and gap
+        // management, the mitosis death-ring sweep) -- only the uiBarsLayer bar
+        // drawing was pulled out, into drawPlayerBars() below.
+        //
+        // Not PIXI-free: section 0.9's destroyNecroticOrganelle()/
+        // breakClusterMember() calls touch organellesLayer/sprite internally.
+        // That coupling predates this split (T13/T38/T50) and touching it is
+        // out of scope here -- noted in docs/BACKLOG.md.
+        function updatePlayers(delta, deltaSec, isCellFrozen) {
+            players.forEach((p, pi) => {
+                if (!p.alive) return;
+
+                if (!isCellFrozen) {
+                    if (p.effects.speedTimer > 0) p.effects.speedTimer -= deltaSec;
+                    else p.effects.speedLevel = 1;
+
+                    if (p.effects.golgiTimer > 0) p.effects.golgiTimer -= deltaSec;
+
+                    // NEW: Ghost Mode Timer countdown!
+                    if (p.effects.ghostTimer > 0) p.effects.ghostTimer -= deltaSec;
+
+                    if (p.effects.hunterTimer > 0) p.effects.hunterTimer -= deltaSec;
+                }
+
+                // T22 step 5: snapshot the values drawPlayerBars() needs right
+                // here -- before the collision/pickup logic below can change them
+                // (a blue/red/mitochondria vesicle pickup mutates p.effects.*,
+                // movement mutates p.x/p.y) -- so the bars keep reflecting this
+                // frame's post-decrement, pre-pickup value exactly as the old
+                // fused loop drew them (bar draw ran before any of that logic).
+                p.barX = p.x; p.barY = p.y;
+                p.barGhostTimer = p.effects.ghostTimer;
+                p.barHunterTimer = p.effects.hunterTimer;
+                p.barGolgiTimer = p.effects.golgiTimer;
+                p.barSpeedTimer = p.effects.speedTimer;
+                p.barSpeedLevel = p.effects.speedLevel;
+
+                if (isCellFrozen) return;
+
+                if (p.isBot) {
+                    updateBotAI(p, delta);
+                } else {
+                    if (keys[p.controls.left] || keys[p.controls.leftAlt]) p.angle -= 0.08 * delta;
+                    if (keys[p.controls.right] || keys[p.controls.rightAlt]) p.angle += 0.08 * delta;
+                }
+
+                let effectSpeedBonus = p.effects.speedTimer > 0 ? (p.effects.speedLevel === 2 ? 2.0 : 1.0) : 0;
+                let actualSpeed = currentSpeed + effectSpeedBonus;
+
+                let nextX = p.x + Math.cos(p.angle) * actualSpeed * delta;
+                let nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
+                let isGhost = p.effects.ghostTimer > 0;
+
+                // 0.9 Necrotic Organelle Break (T38, extended by T50 to lone
+                // necrotic organelles, not just cluster members). Runs BEFORE the
+                // generic organelle check in section 1, which itself never kills
+                // for a necrotic organelle touched in attack mode (see the
+                // `org.necrotic` skip in checkCollision) -- so this loop's only
+                // job is the cooldown-gated break/anti-strip bookkeeping. When the
+                // cooldown has not elapsed, or the player is not in attack mode,
+                // it does nothing and the player simply passes through unharmed
+                // (attack mode) or dies normally in section 1 (self mode, same as
+                // any other organelle).
+                if (genAtLeast(2) && !p.isGap && !isGhost && !godMode) {
+                    for (let o of organelles) {
+                        if (!o.necrotic) continue;
+                        if (!clusterMemberHit(o, p.x, p.y, nextX, nextY)) continue;
+                        if (p.targetMode === 'attack' && survivalTime - p.effects.lastClusterHit > CLUSTER_HIT_COOLDOWN) {
+                            if (o.clusterId != null) {
+                                let cluster = necroticClusters.get(o.clusterId);
+                                breakClusterMember(o.clusterId, cluster.members.indexOf(o));
+                            } else {
+                                destroyNecroticOrganelle(o);
+                            }
+                            p.effects.lastClusterHit = survivalTime;
+                        }
+                        break;
+                    }
+                }
+
+                // 1. Trace and Organelle Collisions
+                if (!p.isGap && !isGhost && !godMode && checkCollision(nextX, nextY, p)) { // <-- Added !godMode
+                    if (isOutsideCell(nextX, nextY)) { // T17: membrane splash, distinct from trace/organelle deaths
+                        emitParticles(nextX, nextY, 20, { speed: 3.0, spread: Math.PI * 2, life: 0.9, size: 3, color: C_MEMB });
+                    }
+                    p.alive = false;
+                    addShake(0.5, 0.4); // T16: player elimination
+                    return;
+                }
+
+                // 1.5 Microtubule Scaffolding Collision (swept: p.x,p.y -> nextX,nextY)
+                if (mitosis.state !== 'idle' && !p.isGap && !isGhost && !godMode && mitosis.currentWidth > 350) { // <-- Added !godMode
+                    for (let tube of mitosis.microtubules) {
+                        if (segAabbT(p.x, p.y, nextX, nextY, tube.x, tube.y, tube.w, tube.h, TRACE_HITBOX) >= 0) {
+                            p.alive = false;
+                            addShake(0.5, 0.4); // T16: player elimination
+                            return;
+                        }
+                    }
+                }
+
+                // 1.6 Malignant Mass Collision (swept; Gen 3+, T14). In 'attack'
+                // targetMode the hit block shatters instead of killing, gated by
+                // MASS_HIT_COOLDOWN so one pass can't clear a corridor in a frame.
+                // Removing a block can disconnect the mass -- floating fragments
+                // are accepted rather than flood-filling orphans (documented in
+                // docs/tasks/T14-gen3-malignant-mass.md).
+                if (malignantMass.blocks.length > 0 && !p.isGap && !isGhost && !godMode) {
+                    let half = malignantMass.blockSize / 2;
+                    for (let i = 0; i < malignantMass.blocks.length; i++) {
+                        let block = malignantMass.blocks[i];
+                        if (segAabbT(p.x, p.y, nextX, nextY, block.x - half, block.y - half, malignantMass.blockSize, malignantMass.blockSize, TRACE_HITBOX) < 0) continue;
+                        if (p.targetMode === 'attack') {
+                            if (survivalTime - p.effects.lastMassHit > MASS_HIT_COOLDOWN) {
+                                malignantMass.blocks.splice(i, 1);
+                                p.effects.lastMassHit = survivalTime;
+                            }
+                        } else {
+                            p.alive = false;
+                            addShake(0.5, 0.4); // T16: player elimination
+                            return;
+                        }
+                        break;
+                    }
+                }
+
+                // 1.7 Nucleus Chaser Collision (T57, swept against the player's
+                // step; Gen4+ post-transformation homing enemies). Modelled on
+                // 1.6 above: in 'attack' targetMode the hit chaser is destroyed
+                // instead of killing the player, gated by CHASER_HIT_COOLDOWN so
+                // one pass cannot clear the whole spawn cap in a frame. Not
+                // routed through checkCollision()/spatialGrid, same as 1.6's
+                // malignant mass -- see docs/tasks/T57 Findings.
+                if (nucleusChasers.length > 0 && !p.isGap && !isGhost && !godMode) {
+                    for (let i = 0; i < nucleusChasers.length; i++) {
+                        let h = nucleusChasers[i];
+                        let rSq = (h.radius + TRACE_HITBOX) * (h.radius + TRACE_HITBOX);
+                        if (ptSegDistSq(h.x, h.y, p.x, p.y, nextX, nextY) >= rSq) continue;
+                        if (p.targetMode === 'attack') {
+                            if (survivalTime - p.effects.lastChaserHit > CHASER_HIT_COOLDOWN) {
+                                destroyNucleusChaser(i);
+                                p.effects.lastChaserHit = survivalTime;
+                            }
+                        } else {
+                            p.alive = false;
+                            addShake(0.6, 0.5); // T16: player elimination by chaser
+                            return;
+                        }
+                        break;
+                    }
+                }
+
+                // 2. Viral Swarm Collisions (Added Ghost & Dev Immunity)
+                if (infection.particles.length > 0 && !isGhost && !godMode) { // <-- Added !godMode
+                    for (let i = infection.particles.length - 1; i >= 0; i--) {
+                        let vp = infection.particles[i];
+                        if (Math.hypot(nextX - vp.x, nextY - vp.y) < (vp.radius * 1.4) + TRACE_HITBOX) {
+                            if (p.effects.hunterTimer > 0) {
+                                infection.particles.splice(i, 1);
+                            } else {
+                                p.alive = false;
+                                addShake(0.5, 0.4); // T16: player elimination
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Vesicle Collection Logic
+                for (let i = vesicles.length - 1; i >= 0; i--) {
+                    let v = vesicles[i];
+                    if (Math.hypot(nextX - v.x, nextY - v.y) < v.radius + TRACE_WIDTH + 6) {
+
+                        // T36: 'attack' (red) sends the beneficial effect below to
+                        // an opponent instead of the picker; see boostTarget().
+                        let target = boostTarget(p);
+
+                        if (v.type === 'membrane') {
+                            if (target.effects.ghostTimer > 0) {
+                                target.effects.ghostTimer = Math.min(10.0, target.effects.ghostTimer + 3.0);
+                            } else {
+                                if (survivalTime > target.effects.blueWindow) target.effects.blueCount = 0;
+                                target.effects.blueCount++;
+                                target.effects.blueWindow = survivalTime + 10.0;
+
+                                if (target.effects.blueCount >= 3) {
+                                    target.effects.ghostTimer = 10.0;
+                                    target.effects.blueCount = 0;
+                                }
+                                target.effects.golgiTimer = Math.min(15.0, target.effects.golgiTimer + EFFECT_DURATION);
+                            }
+                        }
+                        else if (v.type === 'lysosome') {
+                            if (survivalTime > target.effects.redWindow) target.effects.redCount = 0;
+                            target.effects.redCount++;
+                            target.effects.redWindow = survivalTime + 10.0;
+
+                            if (target.effects.redCount >= 5) {
+                                target.effects.hunterTimer = 10.0;
+                                target.effects.redCount = 0;
+                            } else if (target.effects.redCount === 3) {
+                                deleteOldestTrace(target, 0.5); // 50% wipe
+                            }
+                            if (target.traceSegments.length > 1) {
+                                // T42: depolymerisation burst -- sample the segment
+                                // before it's shifted away and scatter loose dimers
+                                // from it, reusing T17's pool (no second particle system).
+                                let removed = target.traceSegments[0];
+                                let sampleStep = Math.max(1, Math.floor(removed.length / 6));
+                                for (let ri = 0; ri < removed.length; ri += sampleStep) {
+                                    let rp = removed[ri];
+                                    emitParticles(rp.x, rp.y, 2, { speed: 3.5, spread: Math.PI * 2, life: 0.5, size: 2, color: (ri & 1) ? target.color : target.coreColor });
+                                }
+                                target.traceSegments.shift(); traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
+                            }
+                        }
+                        else if (v.type === 'mitochondria') {
+                            if (target.effects.speedLevel === 2) {
+                                target.effects.speedTimer = Math.min(10.0, target.effects.speedTimer + 3.0);
+                                target.effects.lastMitoHit = survivalTime;
+                            } else {
+                                if (target.effects.lastMitoHit && (survivalTime - target.effects.lastMitoHit) < 3.0) target.effects.speedLevel = 2;
+                                else target.effects.speedLevel = 1;
+
+                                target.effects.speedTimer = Math.min(15.0, target.effects.speedTimer + EFFECT_DURATION);
+                                target.effects.lastMitoHit = survivalTime;
+                            }
+                        }
+                        emitParticles(v.x, v.y, 12, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: v.color }); // T17
+                        vesicles.splice(i, 1);
+                    }
+                }
+
+                // 3.5 ATP Granule Collection (T51) -- the membrane and its shrink are
+                // shared by every player in the cell, so unlike the vesicles above this
+                // is a global effect: no boostTarget() redirect, every pickup adds to
+                // the one calcifyPauseTimer, capped at ATP_PAUSE_MAX.
+                for (let i = atpGranules.length - 1; i >= 0; i--) {
+                    let g = atpGranules[i];
+                    if (Math.hypot(nextX - g.x, nextY - g.y) < g.radius + TRACE_WIDTH + 6) {
+                        calcifyPauseTimer = Math.min(ATP_PAUSE_MAX, calcifyPauseTimer + ATP_PAUSE_DURATION);
+                        emitParticles(g.x, g.y, 10, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: ATP_COLOR }); // T17
+                        atpGranules.splice(i, 1);
+                    }
+                }
+
+                // 4. Trace Drawing & Gap Management
+                if (p.isGap) {
+                    p.gapCounter -= delta;
+                    if (p.gapCounter <= 0) {
+                        p.isGap = false;
+                        p.traceSegments.push(newTraceSegment(p));
+                    }
+                } else if (Math.random() < GAP_CHANCE && !isGhost) {
+                    p.isGap = true;
+                    p.gapCounter = GAP_LENGTH;
+                }
+
+                if (isGhost) {
+                    if (!p.wasGhost) p.wasGhost = true;
+                } else if (p.wasGhost) {
+                    p.wasGhost = false;
+                    p.traceSegments.push(newTraceSegment(p)); // Start a fresh line after Ghost Mode ends
+                }
+
+                // 5. Apply Final Movement
+                if (!p.isGap && !isGhost) {
+                    let seg = p.traceSegments[p.traceSegments.length - 1];
+                    // prevD falls back to p.traceDist (not 0) for a freshly-started
+                    // segment, so the neck-immunity distance stays continuous across
+                    // a gap or ghost-mode break instead of resetting at the seam.
+                    let prevD = seg.length > 0 ? seg[seg.length - 1].d : p.traceDist;
+                    p.traceDist = prevD + Math.hypot(nextX - p.x, nextY - p.y);
+                    seg.push({ x: nextX, y: nextY, d: p.traceDist });
+                }
+                trimTraceToCap(p, MAX_TRACE_POINTS);
+
+                p.x = nextX;
+                p.y = nextY;
+
+                // T17: locomotion splash, throttled to one particle every
+                // LOCOMOTION_PARTICLE_INTERVAL frames per player (see the pool-load
+                // comment at its declaration).
+                if (!p.isGap && !isGhost) {
+                    p.particleTick = (p.particleTick + 1) % LOCOMOTION_PARTICLE_INTERVAL;
+                    if (p.particleTick === 0) {
+                        // T42: alternate alpha/beta tubulin colour, keyed off the same
+                        // .d-based parity as stampDimer() -- reads as dimers assembling
+                        // onto the trace as it forms.
+                        let dimerColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.color : p.coreColor;
+                        emitParticles(p.x, p.y, 1, { speed: 1.0, spread: 0.6, angle: p.angle + Math.PI, life: 0.4, size: 2, color: dimerColor });
+                    }
+
+                    // T56: incoming tubulin dimers -- free subunits spawn just off
+                    // the tip and drift inward, "docking" as they fade, the mirror
+                    // of the depolymerisation burst above (lysosome pickup, same
+                    // sampled-outward-from-a-point-and-scattered shape, opposite
+                    // direction). Same pooled emitParticles() as everything else in
+                    // this file -- no second particle system. Gated on useDimerLOD
+                    // (the lattice motif itself being visible) so nothing spawns
+                    // toward a tip nobody can see, and hard-capped per player via
+                    // assemblyLiveCount regardless of spawn cadence.
+                    if (world.scale.x >= DIMER_LOD_ZOOM) {
+                        p.assemblyTick = (p.assemblyTick + 1) % assemblyDimerInterval;
+                        if (p.assemblyTick === 0 && assemblyLiveCount[pi] < ASSEMBLY_DIMERS_MAX) {
+                            let side = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? 1 : -1;
+                            let spawnAngle = p.angle + side * (0.5 + Math.random() * 0.4);
+                            let sx = p.x + Math.cos(spawnAngle) * ASSEMBLY_SPAWN_DIST;
+                            let sy = p.y + Math.sin(spawnAngle) * ASSEMBLY_SPAWN_DIST;
+                            let toTipAngle = Math.atan2(p.y - sy, p.x - sx);
+                            let dockColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.coreColor : p.color;
+                            emitParticles(sx, sy, 1, {
+                                speed: ASSEMBLY_SPEED, spread: 0.15, angle: toTipAngle,
+                                life: ASSEMBLY_LIFE, size: 2.2, color: dockColor, assemblyOwner: pi
+                            });
+                        }
+                    }
+                }
+
+                // --- DEATH RING COLLISION ---
+                if (mitosis.state !== 'idle' && p.alive && !isGhost) {
+                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / MITOSIS_SWEEP_DURATION;
+                    let caught = false;
+
+                    if (mitosis.direction === 0) {
+                        let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
+                        if (p.x < ringX) caught = true;
+                    } else if (mitosis.direction === 1) {
+                        let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
+                        if (p.y < ringY) caught = true;
+                    } else if (mitosis.direction === 2) {
+                        let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
+                        if (p.x > ringX) caught = true;
+                    } else {
+                        let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
+                        if (p.y > ringY) caught = true;
+                    }
+
+                    if (caught && !godMode) { p.alive = false; addShake(0.5, 0.4); } // T16: player elimination; <-- Added !godMode
+                }
+            });
+        }
+
+        // T22 step 5: draw half of the split -- pure reads of the barX/barY/
+        // barGhostTimer/etc. snapshot updatePlayers() just wrote, plus the
+        // shared ATP-pause readout (which needs no snapshot: the original fused
+        // loop drew it once, after every player had already been processed, so
+        // it always reflected the full frame's pickups -- reading
+        // calcifyPauseTimer here, after updatePlayers() has returned, is the
+        // same value at the same point in the frame).
+        function drawPlayerBars() {
+            uiBarsLayer.clear();
+            players.forEach(p => {
+                if (!p.alive) return;
+
+                let barOffset = 20;
+
+                // 1. Ghost Mode Bar (Highest Priority - Flashes White/Purple!)
+                if (p.barGhostTimer > 0) {
+                    let ghostColor = Math.floor(survivalTime * 10) % 2 === 0 ? 0xffffff : 0xa29bfe;
+                    uiBarsLayer.beginFill(ghostColor);
+                    // Ghost mode maxes at 10 seconds, so we divide by 10.0 to get the percentage
+                    uiBarsLayer.drawRect(p.barX - 15, p.barY - barOffset, 30 * (p.barGhostTimer / 10.0), 5);
+                    uiBarsLayer.endFill();
+                    barOffset += 8; // Push the next bar up
+                }
+
+                // 1.5 Hunter Mode Bar (High Priority - Flashes Yellow/Orange)
+                if (p.barHunterTimer > 0) {
+                    let hunterColor = Math.floor(survivalTime * 10) % 2 === 0 ? 0xf1c40f : 0xe67e22;
+                    uiBarsLayer.beginFill(hunterColor);
+                    // Hunter mode maxes at 10 seconds, so we divide by 10.0 to get the percentage
+                    uiBarsLayer.drawRect(p.barX - 15, p.barY - barOffset, 30 * (p.barHunterTimer / 10.0), 5);
+                    uiBarsLayer.endFill();
+                    barOffset += 8;
+                }
+
+                // 2. Golgi Timer Bar (Membrane crossing)
+                if (p.barGolgiTimer > 0) {
+                    uiBarsLayer.beginFill(0x00cec9);
+                    // Golgi mode maxes at 15 seconds
+                    uiBarsLayer.drawRect(p.barX - 15, p.barY - barOffset, 30 * (p.barGolgiTimer / 15.0), 5);
+                    uiBarsLayer.endFill();
+                    barOffset += 8; // Push the next bar up
+                }
+
+                // 3. Speed Timer Bar
+                if (p.barSpeedTimer > 0) {
+                    if (p.barSpeedLevel === 2 && Math.floor(survivalTime * 10) % 2 === 0) uiBarsLayer.beginFill(0xf1c40f);
+                    else uiBarsLayer.beginFill(0xe17055);
+                    // Speed maxes at 15 seconds
+                    uiBarsLayer.drawRect(p.barX - 15, p.barY - barOffset, 30 * (p.barSpeedTimer / 15.0), 5);
+                    uiBarsLayer.endFill();
+                }
+            });
+
+            // T51: global ATP-pause readout, drawn once (not per player, unlike the
+            // bars above) since the effect belongs to the one shared membrane --
+            // anchored above the nucleus, next to the thing it's protecting.
+            if (calcifyPauseTimer > 0) {
+                uiBarsLayer.beginFill(ATP_COLOR);
+                uiBarsLayer.drawRect(activeCell.x - 30, activeCell.y - NUCLEUS_RADIUS - 30, 60 * (calcifyPauseTimer / ATP_PAUSE_MAX), 6);
+                uiBarsLayer.endFill();
+            }
+        }
+
         // --- Dynamic Camera Overrides ---
         function updateCamera() {
             let alivePlayers = players.filter(p => p.alive);
@@ -5454,8 +5862,6 @@
                 return;
             }
 
-            uiBarsLayer.clear();
-
             // --- DEATH RING SHATTER LOGIC (Organelles & Golgi) ---
             if (mitosis.state !== 'idle') {
                 let sweepProgress = (survivalTime - mitosis.eventStartTime) / MITOSIS_SWEEP_DURATION;
@@ -5542,374 +5948,8 @@
                 }
             }
 
-            players.forEach((p, pi) => {
-                if (!p.alive) return;
-
-                if (!isCellFrozen) {
-                    if (p.effects.speedTimer > 0) p.effects.speedTimer -= deltaSec;
-                    else p.effects.speedLevel = 1;
-
-                    if (p.effects.golgiTimer > 0) p.effects.golgiTimer -= deltaSec;
-
-                    // NEW: Ghost Mode Timer countdown!
-                    if (p.effects.ghostTimer > 0) p.effects.ghostTimer -= deltaSec;
-
-                    if (p.effects.hunterTimer > 0) p.effects.hunterTimer -= deltaSec;
-                }
-
-                let barOffset = 20;
-
-                // 1. Ghost Mode Bar (Highest Priority - Flashes White/Purple!)
-                if (p.effects.ghostTimer > 0) {
-                    let ghostColor = Math.floor(survivalTime * 10) % 2 === 0 ? 0xffffff : 0xa29bfe;
-                    uiBarsLayer.beginFill(ghostColor);
-                    // Ghost mode maxes at 10 seconds, so we divide by 10.0 to get the percentage
-                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.ghostTimer / 10.0), 5);
-                    uiBarsLayer.endFill();
-                    barOffset += 8; // Push the next bar up
-                }
-
-                // 1.5 Hunter Mode Bar (High Priority - Flashes Yellow/Orange)
-                if (p.effects.hunterTimer > 0) {
-                    let hunterColor = Math.floor(survivalTime * 10) % 2 === 0 ? 0xf1c40f : 0xe67e22;
-                    uiBarsLayer.beginFill(hunterColor);
-                    // Hunter mode maxes at 10 seconds, so we divide by 10.0 to get the percentage
-                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.hunterTimer / 10.0), 5);
-                    uiBarsLayer.endFill();
-                    barOffset += 8;
-                }
-
-                // 2. Golgi Timer Bar (Membrane crossing)
-                if (p.effects.golgiTimer > 0) {
-                    uiBarsLayer.beginFill(0x00cec9);
-                    // Golgi mode maxes at 15 seconds
-                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.golgiTimer / 15.0), 5);
-                    uiBarsLayer.endFill();
-                    barOffset += 8; // Push the next bar up
-                }
-
-                // 3. Speed Timer Bar
-                if (p.effects.speedTimer > 0) {
-                    if (p.effects.speedLevel === 2 && Math.floor(survivalTime * 10) % 2 === 0) uiBarsLayer.beginFill(0xf1c40f);
-                    else uiBarsLayer.beginFill(0xe17055);
-                    // Speed maxes at 15 seconds
-                    uiBarsLayer.drawRect(p.x - 15, p.y - barOffset, 30 * (p.effects.speedTimer / 15.0), 5);
-                    uiBarsLayer.endFill();
-                }
-
-                if (isCellFrozen) return;
-
-                if (p.isBot) {
-                    updateBotAI(p, delta);
-                } else {
-                    if (keys[p.controls.left] || keys[p.controls.leftAlt]) p.angle -= 0.08 * delta;
-                    if (keys[p.controls.right] || keys[p.controls.rightAlt]) p.angle += 0.08 * delta;
-                }
-
-                let effectSpeedBonus = p.effects.speedTimer > 0 ? (p.effects.speedLevel === 2 ? 2.0 : 1.0) : 0;
-                let actualSpeed = currentSpeed + effectSpeedBonus;
-
-                let nextX = p.x + Math.cos(p.angle) * actualSpeed * delta;
-                let nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
-                let isGhost = p.effects.ghostTimer > 0;
-
-                // 0.9 Necrotic Organelle Break (T38, extended by T50 to lone
-                // necrotic organelles, not just cluster members). Runs BEFORE the
-                // generic organelle check in section 1, which itself never kills
-                // for a necrotic organelle touched in attack mode (see the
-                // `org.necrotic` skip in checkCollision) -- so this loop's only
-                // job is the cooldown-gated break/anti-strip bookkeeping. When the
-                // cooldown has not elapsed, or the player is not in attack mode,
-                // it does nothing and the player simply passes through unharmed
-                // (attack mode) or dies normally in section 1 (self mode, same as
-                // any other organelle).
-                if (genAtLeast(2) && !p.isGap && !isGhost && !godMode) {
-                    for (let o of organelles) {
-                        if (!o.necrotic) continue;
-                        if (!clusterMemberHit(o, p.x, p.y, nextX, nextY)) continue;
-                        if (p.targetMode === 'attack' && survivalTime - p.effects.lastClusterHit > CLUSTER_HIT_COOLDOWN) {
-                            if (o.clusterId != null) {
-                                let cluster = necroticClusters.get(o.clusterId);
-                                breakClusterMember(o.clusterId, cluster.members.indexOf(o));
-                            } else {
-                                destroyNecroticOrganelle(o);
-                            }
-                            p.effects.lastClusterHit = survivalTime;
-                        }
-                        break;
-                    }
-                }
-
-                // 1. Trace and Organelle Collisions
-                if (!p.isGap && !isGhost && !godMode && checkCollision(nextX, nextY, p)) { // <-- Added !godMode
-                    if (isOutsideCell(nextX, nextY)) { // T17: membrane splash, distinct from trace/organelle deaths
-                        emitParticles(nextX, nextY, 20, { speed: 3.0, spread: Math.PI * 2, life: 0.9, size: 3, color: C_MEMB });
-                    }
-                    p.alive = false;
-                    addShake(0.5, 0.4); // T16: player elimination
-                    return;
-                }
-
-                // 1.5 Microtubule Scaffolding Collision (swept: p.x,p.y -> nextX,nextY)
-                if (mitosis.state !== 'idle' && !p.isGap && !isGhost && !godMode && mitosis.currentWidth > 350) { // <-- Added !godMode
-                    for (let tube of mitosis.microtubules) {
-                        if (segAabbT(p.x, p.y, nextX, nextY, tube.x, tube.y, tube.w, tube.h, TRACE_HITBOX) >= 0) {
-                            p.alive = false;
-                            addShake(0.5, 0.4); // T16: player elimination
-                            return;
-                        }
-                    }
-                }
-
-                // 1.6 Malignant Mass Collision (swept; Gen 3+, T14). In 'attack'
-                // targetMode the hit block shatters instead of killing, gated by
-                // MASS_HIT_COOLDOWN so one pass can't clear a corridor in a frame.
-                // Removing a block can disconnect the mass -- floating fragments
-                // are accepted rather than flood-filling orphans (documented in
-                // docs/tasks/T14-gen3-malignant-mass.md).
-                if (malignantMass.blocks.length > 0 && !p.isGap && !isGhost && !godMode) {
-                    let half = malignantMass.blockSize / 2;
-                    for (let i = 0; i < malignantMass.blocks.length; i++) {
-                        let block = malignantMass.blocks[i];
-                        if (segAabbT(p.x, p.y, nextX, nextY, block.x - half, block.y - half, malignantMass.blockSize, malignantMass.blockSize, TRACE_HITBOX) < 0) continue;
-                        if (p.targetMode === 'attack') {
-                            if (survivalTime - p.effects.lastMassHit > MASS_HIT_COOLDOWN) {
-                                malignantMass.blocks.splice(i, 1);
-                                p.effects.lastMassHit = survivalTime;
-                            }
-                        } else {
-                            p.alive = false;
-                            addShake(0.5, 0.4); // T16: player elimination
-                            return;
-                        }
-                        break;
-                    }
-                }
-
-                // 1.7 Nucleus Chaser Collision (T57, swept against the player's
-                // step; Gen4+ post-transformation homing enemies). Modelled on
-                // 1.6 above: in 'attack' targetMode the hit chaser is destroyed
-                // instead of killing the player, gated by CHASER_HIT_COOLDOWN so
-                // one pass cannot clear the whole spawn cap in a frame. Not
-                // routed through checkCollision()/spatialGrid, same as 1.6's
-                // malignant mass -- see docs/tasks/T57 Findings.
-                if (nucleusChasers.length > 0 && !p.isGap && !isGhost && !godMode) {
-                    for (let i = 0; i < nucleusChasers.length; i++) {
-                        let h = nucleusChasers[i];
-                        let rSq = (h.radius + TRACE_HITBOX) * (h.radius + TRACE_HITBOX);
-                        if (ptSegDistSq(h.x, h.y, p.x, p.y, nextX, nextY) >= rSq) continue;
-                        if (p.targetMode === 'attack') {
-                            if (survivalTime - p.effects.lastChaserHit > CHASER_HIT_COOLDOWN) {
-                                destroyNucleusChaser(i);
-                                p.effects.lastChaserHit = survivalTime;
-                            }
-                        } else {
-                            p.alive = false;
-                            addShake(0.6, 0.5); // T16: player elimination by chaser
-                            return;
-                        }
-                        break;
-                    }
-                }
-
-                // 2. Viral Swarm Collisions (Added Ghost & Dev Immunity)
-                if (infection.particles.length > 0 && !isGhost && !godMode) { // <-- Added !godMode
-                    for (let i = infection.particles.length - 1; i >= 0; i--) {
-                        let vp = infection.particles[i];
-                        if (Math.hypot(nextX - vp.x, nextY - vp.y) < (vp.radius * 1.4) + TRACE_HITBOX) {
-                            if (p.effects.hunterTimer > 0) {
-                                infection.particles.splice(i, 1);
-                            } else {
-                                p.alive = false;
-                                addShake(0.5, 0.4); // T16: player elimination
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                // 3. Vesicle Collection Logic
-                for (let i = vesicles.length - 1; i >= 0; i--) {
-                    let v = vesicles[i];
-                    if (Math.hypot(nextX - v.x, nextY - v.y) < v.radius + TRACE_WIDTH + 6) {
-
-                        // T36: 'attack' (red) sends the beneficial effect below to
-                        // an opponent instead of the picker; see boostTarget().
-                        let target = boostTarget(p);
-
-                        if (v.type === 'membrane') {
-                            if (target.effects.ghostTimer > 0) {
-                                target.effects.ghostTimer = Math.min(10.0, target.effects.ghostTimer + 3.0);
-                            } else {
-                                if (survivalTime > target.effects.blueWindow) target.effects.blueCount = 0;
-                                target.effects.blueCount++;
-                                target.effects.blueWindow = survivalTime + 10.0;
-
-                                if (target.effects.blueCount >= 3) {
-                                    target.effects.ghostTimer = 10.0;
-                                    target.effects.blueCount = 0;
-                                }
-                                target.effects.golgiTimer = Math.min(15.0, target.effects.golgiTimer + EFFECT_DURATION);
-                            }
-                        }
-                        else if (v.type === 'lysosome') {
-                            if (survivalTime > target.effects.redWindow) target.effects.redCount = 0;
-                            target.effects.redCount++;
-                            target.effects.redWindow = survivalTime + 10.0;
-
-                            if (target.effects.redCount >= 5) {
-                                target.effects.hunterTimer = 10.0;
-                                target.effects.redCount = 0;
-                            } else if (target.effects.redCount === 3) {
-                                deleteOldestTrace(target, 0.5); // 50% wipe
-                            }
-                            if (target.traceSegments.length > 1) {
-                                // T42: depolymerisation burst -- sample the segment
-                                // before it's shifted away and scatter loose dimers
-                                // from it, reusing T17's pool (no second particle system).
-                                let removed = target.traceSegments[0];
-                                let sampleStep = Math.max(1, Math.floor(removed.length / 6));
-                                for (let ri = 0; ri < removed.length; ri += sampleStep) {
-                                    let rp = removed[ri];
-                                    emitParticles(rp.x, rp.y, 2, { speed: 3.5, spread: Math.PI * 2, life: 0.5, size: 2, color: (ri & 1) ? target.color : target.coreColor });
-                                }
-                                target.traceSegments.shift(); traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
-                            }
-                        }
-                        else if (v.type === 'mitochondria') {
-                            if (target.effects.speedLevel === 2) {
-                                target.effects.speedTimer = Math.min(10.0, target.effects.speedTimer + 3.0);
-                                target.effects.lastMitoHit = survivalTime;
-                            } else {
-                                if (target.effects.lastMitoHit && (survivalTime - target.effects.lastMitoHit) < 3.0) target.effects.speedLevel = 2;
-                                else target.effects.speedLevel = 1;
-
-                                target.effects.speedTimer = Math.min(15.0, target.effects.speedTimer + EFFECT_DURATION);
-                                target.effects.lastMitoHit = survivalTime;
-                            }
-                        }
-                        emitParticles(v.x, v.y, 12, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: v.color }); // T17
-                        vesicles.splice(i, 1);
-                    }
-                }
-
-                // 3.5 ATP Granule Collection (T51) -- the membrane and its shrink are
-                // shared by every player in the cell, so unlike the vesicles above this
-                // is a global effect: no boostTarget() redirect, every pickup adds to
-                // the one calcifyPauseTimer, capped at ATP_PAUSE_MAX.
-                for (let i = atpGranules.length - 1; i >= 0; i--) {
-                    let g = atpGranules[i];
-                    if (Math.hypot(nextX - g.x, nextY - g.y) < g.radius + TRACE_WIDTH + 6) {
-                        calcifyPauseTimer = Math.min(ATP_PAUSE_MAX, calcifyPauseTimer + ATP_PAUSE_DURATION);
-                        emitParticles(g.x, g.y, 10, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: ATP_COLOR }); // T17
-                        atpGranules.splice(i, 1);
-                    }
-                }
-
-                // 4. Trace Drawing & Gap Management
-                if (p.isGap) {
-                    p.gapCounter -= delta;
-                    if (p.gapCounter <= 0) {
-                        p.isGap = false;
-                        p.traceSegments.push(newTraceSegment(p));
-                    }
-                } else if (Math.random() < GAP_CHANCE && !isGhost) {
-                    p.isGap = true;
-                    p.gapCounter = GAP_LENGTH;
-                }
-
-                if (isGhost) {
-                    if (!p.wasGhost) p.wasGhost = true;
-                } else if (p.wasGhost) {
-                    p.wasGhost = false;
-                    p.traceSegments.push(newTraceSegment(p)); // Start a fresh line after Ghost Mode ends
-                }
-
-                // 5. Apply Final Movement
-                if (!p.isGap && !isGhost) {
-                    let seg = p.traceSegments[p.traceSegments.length - 1];
-                    // prevD falls back to p.traceDist (not 0) for a freshly-started
-                    // segment, so the neck-immunity distance stays continuous across
-                    // a gap or ghost-mode break instead of resetting at the seam.
-                    let prevD = seg.length > 0 ? seg[seg.length - 1].d : p.traceDist;
-                    p.traceDist = prevD + Math.hypot(nextX - p.x, nextY - p.y);
-                    seg.push({ x: nextX, y: nextY, d: p.traceDist });
-                }
-                trimTraceToCap(p, MAX_TRACE_POINTS);
-
-                p.x = nextX;
-                p.y = nextY;
-
-                // T17: locomotion splash, throttled to one particle every
-                // LOCOMOTION_PARTICLE_INTERVAL frames per player (see the pool-load
-                // comment at its declaration).
-                if (!p.isGap && !isGhost) {
-                    p.particleTick = (p.particleTick + 1) % LOCOMOTION_PARTICLE_INTERVAL;
-                    if (p.particleTick === 0) {
-                        // T42: alternate alpha/beta tubulin colour, keyed off the same
-                        // .d-based parity as stampDimer() -- reads as dimers assembling
-                        // onto the trace as it forms.
-                        let dimerColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.color : p.coreColor;
-                        emitParticles(p.x, p.y, 1, { speed: 1.0, spread: 0.6, angle: p.angle + Math.PI, life: 0.4, size: 2, color: dimerColor });
-                    }
-
-                    // T56: incoming tubulin dimers -- free subunits spawn just off
-                    // the tip and drift inward, "docking" as they fade, the mirror
-                    // of the depolymerisation burst above (lysosome pickup, same
-                    // sampled-outward-from-a-point-and-scattered shape, opposite
-                    // direction). Same pooled emitParticles() as everything else in
-                    // this file -- no second particle system. Gated on useDimerLOD
-                    // (the lattice motif itself being visible) so nothing spawns
-                    // toward a tip nobody can see, and hard-capped per player via
-                    // assemblyLiveCount regardless of spawn cadence.
-                    if (world.scale.x >= DIMER_LOD_ZOOM) {
-                        p.assemblyTick = (p.assemblyTick + 1) % assemblyDimerInterval;
-                        if (p.assemblyTick === 0 && assemblyLiveCount[pi] < ASSEMBLY_DIMERS_MAX) {
-                            let side = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? 1 : -1;
-                            let spawnAngle = p.angle + side * (0.5 + Math.random() * 0.4);
-                            let sx = p.x + Math.cos(spawnAngle) * ASSEMBLY_SPAWN_DIST;
-                            let sy = p.y + Math.sin(spawnAngle) * ASSEMBLY_SPAWN_DIST;
-                            let toTipAngle = Math.atan2(p.y - sy, p.x - sx);
-                            let dockColor = (Math.floor(p.traceDist / DIMER_SPACING) & 1) ? p.coreColor : p.color;
-                            emitParticles(sx, sy, 1, {
-                                speed: ASSEMBLY_SPEED, spread: 0.15, angle: toTipAngle,
-                                life: ASSEMBLY_LIFE, size: 2.2, color: dockColor, assemblyOwner: pi
-                            });
-                        }
-                    }
-                }
-
-                // --- DEATH RING COLLISION ---
-                if (mitosis.state !== 'idle' && p.alive && !isGhost) {
-                    let sweepProgress = (survivalTime - mitosis.eventStartTime) / MITOSIS_SWEEP_DURATION;
-                    let caught = false;
-
-                    if (mitosis.direction === 0) {
-                        let ringX = activeCell.x - activeCell.radiusX + (activeCell.radiusX * 2 * sweepProgress);
-                        if (p.x < ringX) caught = true;
-                    } else if (mitosis.direction === 1) {
-                        let ringY = activeCell.y - activeCell.radiusY + (activeCell.radiusY * 2 * sweepProgress);
-                        if (p.y < ringY) caught = true;
-                    } else if (mitosis.direction === 2) {
-                        let ringX = activeCell.x + activeCell.radiusX - (activeCell.radiusX * 2 * sweepProgress);
-                        if (p.x > ringX) caught = true;
-                    } else {
-                        let ringY = activeCell.y + activeCell.radiusY - (activeCell.radiusY * 2 * sweepProgress);
-                        if (p.y > ringY) caught = true;
-                    }
-
-                    if (caught && !godMode) { p.alive = false; addShake(0.5, 0.4); } // T16: player elimination; <-- Added !godMode
-                }
-            });
-
-            // T51: global ATP-pause readout, drawn once (not per player, unlike the
-            // bars above) since the effect belongs to the one shared membrane --
-            // anchored above the nucleus, next to the thing it's protecting.
-            if (calcifyPauseTimer > 0) {
-                uiBarsLayer.beginFill(ATP_COLOR);
-                uiBarsLayer.drawRect(activeCell.x - 30, activeCell.y - NUCLEUS_RADIUS - 30, 60 * (calcifyPauseTimer / ATP_PAUSE_MAX), 6);
-                uiBarsLayer.endFill();
-            }
+            updatePlayers(delta, deltaSec, isCellFrozen); // T22 step 5
+            drawPlayerBars(); // T22 step 5
 
             updateNucleusFeedHUD(); // T52
 
@@ -6321,6 +6361,7 @@
                     alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
                     assemblyTick: 0, // T56
                     nextSegId: 1, // T58: stable per-segment id counter for isOwnNeck()
+                    barX: 0, barY: 0, barGhostTimer: 0, barHunterTimer: 0, barGolgiTimer: 0, barSpeedTimer: 0, barSpeedLevel: 1, // T22 step 5: drawPlayerBars() snapshot
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
