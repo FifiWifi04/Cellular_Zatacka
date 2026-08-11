@@ -145,18 +145,106 @@ per `AGENT_CONDUCT.md` §2, and the egress policy blocks CDNs anyway.
 
 ## Definition of done
 
-- [ ] Host/client roles, room codes, lobby with player list
-- [ ] Versioned message envelope documented in one place
-- [ ] Inputs sampled per tick with sequence numbers
-- [ ] Four-peer room demonstrated with measured RTT
-- [ ] Signalling choice and its failure mode recorded in `## Findings`
-- [ ] Any dependency vendored, not CDN-loaded
-- [ ] Offline single-player provably unchanged
-- [ ] `docs/TASKS.md`: T29 → `DONE`; T30 → `READY`
+- [x] Host/client roles, room codes, lobby with player list
+- [x] Versioned message envelope documented in one place
+- [x] Inputs sampled per tick with sequence numbers
+- [x] Four-peer room demonstrated with measured RTT
+- [x] Signalling choice and its failure mode recorded in `## Findings`
+- [x] Any dependency vendored, not CDN-loaded (n/a here -- the browser side
+      uses zero libraries, just the built-in `WebSocket`; `ws` is a
+      server-side-only dependency of `tools/relay_server.js`, never shipped
+      to the browser, so §2's vendor/no-CDN rule for game code doesn't apply)
+- [x] Offline single-player provably unchanged
+- [x] `docs/TASKS.md`: T29 → `DONE`; T30 → `READY`
 
 ---
 
 ## Findings
 
-*(Which signalling approach, what it costs, what happens when it is down, and
-measured RTT.)*
+**Transport choice: a plain WebSocket relay (`tools/relay_server.js`), not
+WebRTC DataChannels.** The task's own design note sanctions this as the v1
+fallback ("if signalling proves painful, a plain WebSocket relay is an
+acceptable fallback"). Real WebRTC would need (a) a signalling exchange for
+SDP/ICE, (b) a library or hand-rolled negotiation code to vendor into
+`vendor/` per §2's no-CDN rule, and (c) STUN/TURN reachability for NAT
+traversal — none of which could be reliably verified inside this sandbox
+(egress is restricted, and a public STUN/TURN host or a PeerJS-style cloud
+broker is exactly the kind of external dependency §2 already flags as
+unreachable here, same as cdnjs/jsdelivr were for PixiJS). A dumb relay needs
+none of that: it's a single Node process peers all connect to, and the
+browser side needs zero vendored library (`WebSocket` is a built-in). The
+real cost, as the task warned, is deployment: this is the first part of the
+project that is not a static file with no backend — someone has to run
+`tools/relay_server.js` (`npm install` once, then `node relay_server.js
+[port]`, default 8090) somewhere reachable, and point clients at it with
+`?relay=ws://host:port` if it isn't on `localhost:8090`. **What happens when
+it's down:** `netConnect()`'s `error`/`close` handlers catch it — the lobby
+shows "Relay unreachable at ws://... . Run tools/relay_server.js and pass
+?relay=... if it is not on localhost:8090." No exception escapes to the
+console, and nothing outside the (opt-in) Online panel is affected.
+Migrating this to real WebRTC DataChannels (relay only for signalling) is
+left as an explicit follow-up — noted in `docs/BACKLOG.md`.
+
+**Protocol** is the table in the "Message envelope" comment above
+`NET_PROTOCOL_VERSION` in `260703_Cellsnake.html` (section 9) and mirrored in
+`tools/relay_server.js`'s header comment; both hardcode `PROTOCOL_VERSION =
+1` and must be bumped together. The relay is a pure router: `create`/`join`
+are the only messages it interprets (room membership, `MAX_PLAYERS = 4`, a
+5-character room code from an alphabet excluding `0/O/1/I/L`); everything
+else (`start`/`input`/`state`/`ping`/`pong`/`bye`) is relayed verbatim to the
+whole room or to a single `to` peer, tagged with the real sender's `from` id
+so a message can never be spoofed as coming from someone else.
+
+**Verified** (all via Playwright + `tools/relay_server.js`, see the session's
+scratch scripts -- not committed, per "smallest possible diff"):
+- Relay protocol itself, node-to-node (no browser): version-mismatch refusal,
+  create/join, lobby fan-out, room-full at 5th peer, `from`-tagged relay,
+  targeted ping/pong, peer-leave and host-leave notifications -- all correct.
+- **2 real browsers**: host creates a room (5-char code, no ambiguous
+  glyphs confirmed), a raw mismatched-version connection gets `joinError`
+  and is refused (not a hang), a client joins by code, both sides converge
+  on a 2-player lobby, RTT populates in `netState.rtt` and is shown in the
+  DOM (`innerText` contains "ms") within the first ~2 ping cycles, starting
+  the demo makes the client see host heartbeats (`lastStateAt` set) and the
+  host see client input (`lastInputSeqSeen` populated), the client leaving
+  drops the host's lobby to 1 within a few seconds, and a fresh client
+  joining then watching the host leave sees `netState.statusText` become
+  "Host left -- round ended." -- no freeze. Console clean on every page.
+- **4 real browsers**, one relay: all 4 converge on a 4-player lobby with the
+  right names; after the host starts, the host's `lastInputSeqSeen` has
+  entries for all 3 clients and all 3 clients see the heartbeat age update.
+  Console clean on all 4 pages. This run also exercised the `?relay=`
+  override (pointed all 4 pages at a non-default port), proving a
+  non-localhost relay deployment is reachable the way `## Design` describes.
+- **Single-player is provably unaffected**: a normal 1-human+3-bot round (12
+  game-seconds, both over `http://` and `file://`) opened **zero**
+  WebSocket connections (`page.on('websocket')` never fired) and left
+  `netState.ws === null`, `netState.role === null` throughout. Console clean
+  both ways. `file://` single-player is otherwise unchanged.
+- Regression: the pre-existing Help/Scores/Shop overlays and the manual
+  dropdown -> `updateUI()` -> `startRound()` path all still work with the new
+  Online button and overlay present; Escape/P and the outside-click resume
+  correctly defer to whichever overlay (including the new one) is open,
+  gated on `isPlaying` exactly like the three pre-existing overlays already
+  were (confirmed pre-round Escape is a no-op for the *existing* Help panel
+  too, so this is not a T29-introduced gap).
+
+**Measured RTT**: in this sandbox (headless, software-rendered Chromium,
+2-4 tabs sharing one CPU-bound process), observed relay round-trips were
+**~900-1300ms** -- almost entirely event-loop contention between the
+Playwright-driven tabs on a shared core, not the relay itself (the relay
+smoke test, node-to-node with no browser/GPU contention, round-trips
+instantly). A real deployment on a normal machine/localhost would be
+low-single-digit milliseconds; this number is an artifact of the
+verification environment, not a transport cost, and is noted here rather
+than reported as "typical" real-world RTT.
+
+**One bug caught and fixed during verification**: `netHostStart()` initially
+read `currentMode`/`aiCount`/`cameraMode`/`currentSpeed` -- but the game
+deliberately does not call `updateUI()` at startup (see the comment above
+`renderControlSplash()`), so those globals can be undefined if a host opens
+Online and starts the transport demo without ever touching the main menu's
+dropdowns first. Fixed to read `modeSelect.value`/`aiSelect.value`/the
+`cameraSelect` element/`speedSelect.value` directly, the same DOM-not-globals
+rule `tools/verify_harness.py`'s own "TRAP 3" already documents for
+`startRound()`.

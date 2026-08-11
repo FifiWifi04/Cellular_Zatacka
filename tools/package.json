@@ -1,0 +1,13 @@
+{
+  "name": "cellular-zatacka-relay",
+  "private": true,
+  "version": "1.0.0",
+  "description": "T29: minimal WebSocket relay server for the game's online lobby (relay_server.js). Server-side tool only -- never loaded into the browser, so it is exempt from AGENT_CONDUCT.md's vendor/no-CDN rule for game code.",
+  "main": "relay_server.js",
+  "scripts": {
+    "start": "node relay_server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -819,3 +819,15 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   something T55 introduced. Small sample (10 rounds); worth a dedicated
   measurement before trusting the exact numbers, but the direction is
   suspicious. — 2026-08-11
+
+- **T29's transport is a plain WebSocket relay, not WebRTC DataChannels.**
+  The task's own design note names WebRTC as the preferred transport and the
+  relay as an explicitly-sanctioned v1 fallback "if signalling proves
+  painful" — it did, inside this sandbox (no reachable STUN/TURN or
+  signalling broker to verify against, and no library to vendor without a
+  CDN). Migrating the relay from "carries all game traffic" to "signalling
+  only, then peers talk directly over a DataChannel" would cut ongoing
+  relay bandwidth to near zero and remove it as a single point of failure,
+  at the cost of NAT-traversal reliability. Not attempted here — see
+  `docs/tasks/T29-net-transport-lobby.md` Findings for the full reasoning.
+  — 2026-08-11

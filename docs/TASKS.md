@@ -353,6 +353,37 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **T29 (network transport and lobby) is now `READY`** — its only dependency,
 > T28, is done.
+>
+> **T29 landed 2026-08-11** — an Online (beta) panel (mirrors T41/T54/T55's
+> overlay structure) lets a host create a 4-6-character room code (no
+> `0/O/1/I/L`) and up to 3 clients join it over a small WebSocket relay
+> (`tools/relay_server.js`, new -- `npm install` once, `node relay_server.js
+> [port]`), not WebRTC DataChannels -- the task's own "if signalling proves
+> painful" fallback, chosen because this sandbox has no reachable STUN/TURN
+> or signalling broker to verify against and no library to vendor without a
+> CDN (see Findings for the full reasoning). A one-place versioned message
+> envelope (`NET_PROTOCOL_VERSION`, mirrored in both files) covers
+> create/join/lobby/start/input/state/ping/pong/bye; clients sample the
+> existing `keys` object at 30Hz with sequence numbers once the host starts
+> the (still gameplay-free) transport demo, the host sends a 10Hz stub state
+> heartbeat, and both sides ping at 1Hz for a displayed RTT. Nothing in
+> `startRound()`/`stepSimulation()`/`gameLoop()`/`checkCollision()`/
+> `raycast()` was touched -- confirmed by grepping the diff. Verified with
+> real Playwright-driven browsers: 2 peers (room code, version-mismatch
+> refusal, RTT display, client-leave and host-leave detection, all console
+> clean) and 4 peers in one room (all listed, all exchanging input, `?relay=`
+> override proven) against `tools/relay_server.js`; single-player proven completely unaffected (zero
+> WebSocket connections opened, `netState` untouched, console clean) over
+> both `http://` and `file://`; one real bug caught in verification
+> (`netHostStart()` read config globals that are undefined before
+> `updateUI()` has ever run -- fixed to read the DOM selects directly, same
+> rule `tools/verify_harness.py`'s own "TRAP 3" already documents). `sw.js`
+> `CACHE_NAME` bumped v34→v35; `dist/` rebuilt. WebRTC migration noted to
+> `docs/BACKLOG.md` as explicit follow-up work, out of scope here. See
+> `docs/tasks/T29-net-transport-lobby.md` Findings for full numbers.
+>
+> **T30 (host-authoritative state sync) is now `READY`** — its only
+> dependency, T29, is done.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -483,8 +514,8 @@ later returns FAIL, revisit anything that landed in that window.
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
 | T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `DONE` |
-| T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `READY` |
-| T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `BLOCKED` |
+| T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `DONE` |
+| T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `READY` |
 | T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `BLOCKED` |
 | T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `BLOCKED` |
 

@@ -570,6 +570,46 @@
             font-size: 12px;
         }
 
+        /* T29: the online lobby's name/room-code fields -- no <input> existed
+           in the UI before this task, so give them a dark-theme look matching
+           the existing select/button styling instead of the browser default. */
+        .net-field {
+            display: block;
+            text-align: left;
+            font-size: 13px;
+            color: #b2bec3;
+            margin: 10px 0;
+        }
+
+        .net-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin: 10px 0;
+        }
+
+        .net-field input,
+        .net-row input {
+            background: #2d3436;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            padding: 8px 10px;
+            font-size: 15px;
+            box-sizing: border-box;
+        }
+
+        .net-field input {
+            display: block;
+            width: 100%;
+            margin-top: 4px;
+        }
+
+        .net-row input {
+            flex: 1;
+            min-width: 0;
+        }
+
         .help-panel h2 {
             text-align: center;
             margin-top: 0;
@@ -769,6 +809,9 @@
             <!-- T55: reachable from here both before a round (main menu) and
                  during one (pause menu), mirrors T41/T54's buttons above. -->
             <button class="help-btn" onclick="toggleShopPanel(true)">Shop</button>
+            <!-- T29: reachable from here both before a round (main menu) and
+                 during one (pause menu), mirrors T41/T54/T55's buttons above. -->
+            <button class="help-btn" onclick="toggleNetPanel(true)">Online</button>
         </div>
         <div id="controlSplash" class="control-splash">
             <div id="splashCards" class="splash-cards"></div>
@@ -810,6 +853,17 @@
             <button class="ui-close-btn help-close-btn" onclick="toggleShopPanel(false)" aria-label="Close shop">&#10005;</button>
             <h2>Microtubule Upgrades</h2>
             <div id="shopContent"></div>
+        </div>
+    </div>
+
+    <!-- T29: online lobby -- WebSocket-relay transport, mirrors T41/T54/T55's
+         overlay structure exactly (same close button, outside-click close,
+         pause interaction). No gameplay crosses the wire yet -- T30. -->
+    <div id="netOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleNetPanel(false)">
+        <div class="help-panel">
+            <button class="ui-close-btn help-close-btn" onclick="toggleNetPanel(false)" aria-label="Close online menu">&#10005;</button>
+            <h2>Online (beta)</h2>
+            <div id="netContent"></div>
         </div>
     </div>
 
@@ -5399,6 +5453,8 @@
                     toggleHighScorePanel(false);
                 } else if (shopIsOpen()) {
                     toggleShopPanel(false);
+                } else if (netIsOpen()) {
+                    toggleNetPanel(false);
                 } else {
                     togglePauseMenu();
                 }
@@ -5562,9 +5618,9 @@
         document.addEventListener('pointerdown', e => {
             if (!paused) return;
             if (uiElement.contains(e.target) || e.target === pauseMenuBtn) return;
-            // T41/T54/T55: each overlay owns its own outside-click close (and
-            // its own resume-on-close logic) while it's open -- don't race it here.
-            if (helpIsOpen() || highScoreIsOpen() || shopIsOpen()) return;
+            // T41/T54/T55/T29: each overlay owns its own outside-click close
+            // (and its own resume-on-close logic) while it's open -- don't race it here.
+            if (helpIsOpen() || highScoreIsOpen() || shopIsOpen() || netIsOpen()) return;
             uiElement.classList.add('hidden-ui');
             paused = false;
         });
@@ -7164,6 +7220,351 @@
             while (segs.length > 1 && segs[0].length < 2) segs.shift();
             traceRTNeedsFullRedraw = true; // T25: front geometry removed, RT must be redrawn
         }
+
+        // --- 9. Network transport and lobby (T29) ---
+        // Host-authoritative transport for future multiplayer. T30 will carry
+        // real game state over this channel; this task only proves peers can
+        // find each other, agree on a protocol version, and exchange input /
+        // heartbeat / RTT messages. Nothing here touches startRound(),
+        // stepSimulation(), or gameLoop() -- see docs/tasks/T29-net-transport-lobby.md.
+        //
+        // Transport: a plain WebSocket relay (tools/relay_server.js), not
+        // WebRTC DataChannels. The task's own design note sanctions this as
+        // the v1 fallback "if signalling proves painful" -- see that task's
+        // Findings for why real WebRTC (STUN/ICE negotiation, a signalling
+        // library to vendor) was judged too risky to reliably verify inside
+        // this sandbox and was deferred. Using a plain WebSocket also means
+        // zero client-side library to vendor: `WebSocket` is a browser built-in.
+        //
+        // Message envelope (versioned in the handshake; one place, this table):
+        //   { t:'create', v, name }                     client -> relay: host a new room
+        //   { t:'join',   v, name, room }                client -> relay: join by code
+        //   { t:'created', room, id }                    relay -> client: you are host
+        //   { t:'joined',  room, id, host }               relay -> client: joined ok
+        //   { t:'joinError', reason }                     relay -> client: refused (bad code/full/version)
+        //   { t:'lobby',  players:[{id,name,isHost}] }    relay -> room: membership snapshot
+        //   { t:'peerLeft', id }                          relay -> room: a non-host left
+        //   { t:'hostLeft' }                              relay -> room: host left, round over
+        //   { t:'start',  config, seed }                  host -> room (relayed)
+        //   { t:'input',  seq, left, right, toggle }       client -> host (relayed)
+        //   { t:'state',  tick, ts }                       host -> room (relayed; stub heartbeat for T30)
+        //   { t:'ping', ts, to } / { t:'pong', ts, to }    either -> a specific peer (relayed, RTT probe)
+        //   { t:'bye' }                                    either -> relay: clean leave
+        // Every relayed message is tagged with `from` (the sender's peer id)
+        // by the relay before delivery.
+        const NET_PROTOCOL_VERSION = 1;
+        const NET_INPUT_HZ = 30;  // matches the task's own ~1.5KB/s-at-4-players bandwidth note
+        const NET_STATE_HZ = 10;
+        const NET_PING_HZ = 1;
+
+        let netState = null; // null only transiently inside resetNetState() itself
+
+        // Fresh, disconnected state. Called on load and every time a room is
+        // left/re-hosted/re-joined -- never partially reused, so a stale RTT
+        // or player-list entry from a previous room can't leak into a new one.
+        function resetNetState() {
+            if (netState) {
+                clearInterval(netState.inputTimer);
+                clearInterval(netState.stateTimer);
+                clearInterval(netState.pingTimer);
+                if (netState.ws) { try { netState.ws.close(); } catch (e) { } }
+            }
+            netState = {
+                ws: null, role: null, room: null, id: null, hostId: null,
+                players: [], started: false,
+                statusText: '', statusIsFinal: false, // statusIsFinal: the close handler must not overwrite it with a generic message
+                rtt: {}, lastInputSeqSeen: {}, lastStateAt: null, mySeq: 0,
+                inputTimer: null, stateTimer: null, pingTimer: null
+            };
+        }
+        resetNetState();
+
+        function netDefaultName() {
+            return localStorage.getItem('cz_netName') || 'Player';
+        }
+
+        // ?relay=ws://host:port overrides the default so a real deployment
+        // (the relay hosted somewhere other than this page's own origin) is
+        // reachable without a code change. Falls back to localhost for
+        // file:// -- there is no meaningful location.hostname there.
+        function defaultRelayUrl() {
+            let override = new URLSearchParams(location.search).get('relay');
+            if (override) return override;
+            let host = (location.protocol !== 'file:' && location.hostname) ? location.hostname : 'localhost';
+            return 'ws://' + host + ':8090';
+        }
+
+        function netSend(obj) {
+            if (netState.ws && netState.ws.readyState === WebSocket.OPEN) netState.ws.send(JSON.stringify(obj));
+        }
+
+        function netStopTimers() {
+            clearInterval(netState.inputTimer);
+            clearInterval(netState.stateTimer);
+            clearInterval(netState.pingTimer);
+            netState.inputTimer = netState.stateTimer = netState.pingTimer = null;
+        }
+
+        // Opens the socket and wires the message/close/error handlers, then
+        // calls onOpen (which sends the actual create/join). Never called on
+        // page load -- only from netHostRoom()/netJoinRoomClick() -- so the
+        // entire networking path is inert until a player explicitly opts in.
+        function netConnect(onOpen) {
+            resetNetState();
+            let url = defaultRelayUrl();
+            netState.statusText = 'Connecting to ' + url + ' ...';
+            renderNetPanel();
+            let ws;
+            try {
+                ws = new WebSocket(url);
+            } catch (e) {
+                netState.statusText = 'Could not connect: ' + e.message;
+                netState.statusIsFinal = true;
+                renderNetPanel();
+                return;
+            }
+            netState.ws = ws;
+            ws.addEventListener('open', () => { onOpen(); });
+            ws.addEventListener('message', e => {
+                let msg;
+                try { msg = JSON.parse(e.data); } catch (err) { return; }
+                netHandleMessage(msg);
+            });
+            ws.addEventListener('close', () => {
+                netStopTimers();
+                if (!netState.statusIsFinal) netState.statusText = 'Disconnected from the relay.';
+                netState.role = null;
+                renderNetPanel();
+            });
+            ws.addEventListener('error', () => {
+                netState.statusText = 'Relay unreachable at ' + url + '. Run tools/relay_server.js and pass ?relay=ws://host:port if it is not on localhost:8090.';
+                netState.statusIsFinal = true;
+                renderNetPanel();
+            });
+        }
+
+        function netHandleMessage(msg) {
+            switch (msg.t) {
+                case 'created':
+                    netState.role = 'host'; netState.room = msg.room; netState.id = msg.id; netState.hostId = msg.id;
+                    netState.statusText = 'Hosting.'; netState.statusIsFinal = false;
+                    netStartPingTimer();
+                    break;
+                case 'joined':
+                    netState.role = 'client'; netState.room = msg.room; netState.id = msg.id; netState.hostId = msg.host;
+                    netState.statusText = 'Joined.'; netState.statusIsFinal = false;
+                    netStartPingTimer();
+                    break;
+                case 'joinError':
+                    netState.statusText = msg.reason; netState.statusIsFinal = true;
+                    break;
+                case 'lobby':
+                    netState.players = msg.players;
+                    break;
+                case 'peerLeft':
+                    delete netState.rtt[msg.id]; delete netState.lastInputSeqSeen[msg.id];
+                    break;
+                case 'hostLeft':
+                    netState.started = false; netStopTimers();
+                    netState.statusText = 'Host left -- round ended.'; netState.statusIsFinal = true;
+                    break;
+                case 'start':
+                    netStarted();
+                    break;
+                case 'input':
+                    if (netState.role === 'host') netState.lastInputSeqSeen[msg.from] = msg.seq;
+                    break;
+                case 'state':
+                    if (netState.role === 'client') netState.lastStateAt = performance.now();
+                    break;
+                case 'ping':
+                    netSend({ t: 'pong', ts: msg.ts, to: msg.from });
+                    return; // no render needed for a bounced ping
+                case 'pong':
+                    netState.rtt[msg.from] = Math.round(performance.now() - msg.ts);
+                    break;
+                default:
+                    return;
+            }
+            renderNetPanel();
+        }
+
+        // Enters the (still gameplay-free, T30's job) "started" state on both
+        // sides: host and every client independently start their own timers
+        // once they know about it -- the host does not wait for an echo of
+        // its own broadcast.
+        function netStarted() {
+            netState.started = true;
+            netStartTimers();
+            renderNetPanel();
+        }
+
+        // Runs from the moment a room is created/joined (not gated on
+        // "started") so RTT is visible in the plain lobby list too.
+        function netStartPingTimer() {
+            clearInterval(netState.pingTimer);
+            netState.pingTimer = setInterval(() => {
+                if (netState.role === 'client') {
+                    netSend({ t: 'ping', ts: performance.now(), to: netState.hostId });
+                } else {
+                    for (const p of netState.players) {
+                        if (p.id !== netState.id) netSend({ t: 'ping', ts: performance.now(), to: p.id });
+                    }
+                }
+            }, 1000 / NET_PING_HZ);
+        }
+
+        // Only runs once the host clicks "Start transport demo" -- input/state
+        // are the messages T30 will eventually carry real gameplay over.
+        function netStartTimers() {
+            clearInterval(netState.inputTimer);
+            clearInterval(netState.stateTimer);
+            if (netState.role === 'client') {
+                // T30 will read real steering here; for now this only proves
+                // the channel carries sampled `keys` state with sequence
+                // numbers, per the task's "input intent, not positions" design.
+                netState.inputTimer = setInterval(() => {
+                    netState.mySeq++;
+                    netSend({
+                        t: 'input', seq: netState.mySeq,
+                        left: !!keys['ArrowLeft'], right: !!keys['ArrowRight'], toggle: !!keys['ArrowDown']
+                    });
+                }, 1000 / NET_INPUT_HZ);
+            }
+            if (netState.role === 'host') {
+                netState.stateTimer = setInterval(() => {
+                    netState.mySeq++;
+                    netSend({ t: 'state', tick: netState.mySeq, ts: performance.now() });
+                }, 1000 / NET_STATE_HZ);
+            }
+        }
+
+        window.netHostRoom = function () {
+            let name = (document.getElementById('netNameInput').value || 'Player').slice(0, 16);
+            localStorage.setItem('cz_netName', name);
+            netConnect(() => netSend({ t: 'create', v: NET_PROTOCOL_VERSION, name }));
+        };
+
+        window.netJoinRoomClick = function () {
+            let name = (document.getElementById('netNameInput').value || 'Player').slice(0, 16);
+            let room = (document.getElementById('netRoomInput').value || '').toUpperCase().trim();
+            localStorage.setItem('cz_netName', name);
+            if (!room) {
+                netState.statusText = 'Enter a room code.'; netState.statusIsFinal = true;
+                renderNetPanel();
+                return;
+            }
+            netConnect(() => netSend({ t: 'join', v: NET_PROTOCOL_VERSION, name, room }));
+        };
+
+        window.netLeaveRoom = function () {
+            netSend({ t: 'bye' });
+            resetNetState();
+            renderNetPanel();
+        };
+
+        // T29: is the online panel currently up? Mirrors helpIsOpen()/
+        // highScoreIsOpen()/shopIsOpen() -- Escape/P and the outside-click
+        // resume both have to defer to it while it's open.
+        function netIsOpen() {
+            return !document.getElementById('netOverlay').classList.contains('hidden-help');
+        }
+
+        // Same pause/resume contract as toggleHelpPanel/toggleHighScorePanel/toggleShopPanel.
+        window.toggleNetPanel = function (show) {
+            let overlay = document.getElementById('netOverlay');
+            if (show) {
+                renderNetPanel();
+                uiElement.classList.add('hidden-ui');
+                overlay.classList.remove('hidden-help');
+                if (isPlaying) paused = true;
+            } else {
+                overlay.classList.add('hidden-help');
+                if (isPlaying) paused = false;
+                else uiElement.classList.remove('hidden-ui');
+            }
+        };
+
+        function renderNetPanel() {
+            let el = document.getElementById('netContent');
+            if (!el) return; // overlay not open yet this session -- nothing to draw into
+
+            if (!netState.ws) {
+                el.innerHTML = `
+                    <p class="shop-note">Play with others in different browsers over a small WebSocket relay
+                    (<code>tools/relay_server.js</code>) -- transport only, no gameplay syncs yet.</p>
+                    <label class="net-field">Name<input id="netNameInput" maxlength="16" value="${netDefaultName()}"></label>
+                    <div class="net-row">
+                        <button onclick="netHostRoom()">Host a room</button>
+                    </div>
+                    <div class="net-row">
+                        <input id="netRoomInput" maxlength="6" placeholder="ROOM CODE" style="text-transform:uppercase">
+                        <button onclick="netJoinRoomClick()">Join</button>
+                    </div>
+                    ${netState.statusText ? `<p class="shop-note">${netState.statusText}</p>` : ''}
+                `;
+                return;
+            }
+
+            if (!netState.role) {
+                el.innerHTML = `<p class="shop-note">${netState.statusText}</p><button onclick="netLeaveRoom()">Cancel</button>`;
+                return;
+            }
+
+            let rows = netState.players.map(p => {
+                let you = p.id === netState.id;
+                let label = p.name + (p.isHost ? ' (Host)' : '') + (you ? ' -- you' : '');
+                let extra;
+                if (you) {
+                    extra = '';
+                } else if (netState.role === 'host') {
+                    extra = netState.started ? `input seq ${netState.lastInputSeqSeen[p.id] ?? '-'}` : (netState.rtt[p.id] != null ? netState.rtt[p.id] + 'ms' : '...');
+                } else {
+                    extra = netState.rtt[p.id] != null ? netState.rtt[p.id] + 'ms' : '...';
+                }
+                return `<div class="shop-row"><div class="shop-row-info"><b>${label}</b></div><span class="shop-owned">${extra}</span></div>`;
+            }).join('');
+
+            let demoLine = '';
+            if (netState.started) {
+                if (netState.role === 'host') {
+                    demoLine = 'Transport demo running -- receiving timestamped input from clients above.';
+                } else {
+                    let age = netState.lastStateAt != null ? ((performance.now() - netState.lastStateAt) / 1000).toFixed(1) + 's ago' : 'none yet';
+                    demoLine = 'Transport demo running -- last host heartbeat: ' + age + '.';
+                }
+            }
+
+            el.innerHTML = `
+                <p><b>Room ${netState.room}</b> -- ${netState.statusText}</p>
+                ${rows}
+                ${netState.started
+                    ? `<p class="shop-note">${demoLine} No gameplay is synced yet (T30).</p>`
+                    : (netState.role === 'host' ? `<button onclick="netHostStart()">Start transport demo</button>` : `<p class="shop-note">Waiting for the host to start.</p>`)}
+                <button onclick="netLeaveRoom()">Leave</button>
+            `;
+        }
+
+        window.netHostStart = function () {
+            if (netState.role !== 'host') return;
+            let seed = Math.floor(Math.random() * 0xffffffff);
+            // Read the DOM selects directly, not the currentMode/aiCount/
+            // cameraMode/currentSpeed globals -- those are only set once
+            // updateUI() has run at least once, which is not guaranteed here
+            // (a host can open Online and start the demo without ever
+            // touching the main menu; see the "updateUI() is not called at
+            // startup" comment above renderControlSplash()).
+            netSend({
+                t: 'start',
+                config: {
+                    mode: parseInt(modeSelect.value), ai: parseInt(aiSelect.value),
+                    camera: document.getElementById('cameraSelect').value,
+                    speed: parseFloat(speedSelect.value)
+                },
+                seed
+            });
+            netStarted();
+        };
 
     </script>
 </body>
