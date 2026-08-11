@@ -273,7 +273,26 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > scripted restarts; regression sweep (§7.6) passed at all 3 speeds via direct
 > `checkCollision()` calls. `sw.js` `CACHE_NAME` bumped v30→v31; `dist/` rebuilt.
 > See `docs/tasks/T53-run-stats-and-score.md` Findings for full numbers.
-> **T54 (persistent high-score table) is now `READY`.**
+>
+> **T54 landed 2026-08-11** — human runs (bots excluded) now persist to a
+> versioned, capped (`HISTORY_MAX=50`) `localStorage` key, with lifetime
+> totals tracked independently of the capped run list so they stay true
+> lifetime figures; a new "Scores" panel (reusing T41's help-overlay
+> structure and pause/outside-click/Escape-P wiring exactly) shows the top 10
+> runs by score (mode-labelled, e.g. `1h3ai`) plus the totals, with a
+> confirm-gated Clear History button. The end-of-round card now calls out
+> "New Best!" when a run beats the mode's prior best. All three storage
+> failure modes (`setItem` throwing, corrupt JSON, wrong schema version) proven
+> survivable by direct fault injection; the new-best callout proven to fire
+> only on an actual new best (not on a lower score, and correctly on a mode's
+> first-ever run); `HISTORY_MAX` proven to hold at exactly 50 runs (9,252
+> bytes stored at the cap); persistence proven across a real page reload and
+> under `file://` (offline); panel screenshotted legible at 390x844, 844x390
+> and 1280x800. No hazard was added and `checkCollision()`/`checkArcCollision()`/
+> `raycast()`/`rebuildSpatialGrid()` are untouched, so §7.6's regression sweep
+> doesn't apply here. `sw.js` `CACHE_NAME` bumped v31→v32; `dist/` rebuilt. See
+> `docs/tasks/T54-high-score-table.md` Findings for full numbers.
+> **T55 (microtubule upgrades) is now `READY`.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -463,8 +482,8 @@ after T22 — build and play each layer before adding the next.
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
 | T53 | [Run stats and a score](tasks/T53-run-stats-and-score.md) | — | `DONE` |
-| T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `READY` |
-| T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `BLOCKED` |
+| T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `DONE` |
+| T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `READY` |
 
 ### Parked
 

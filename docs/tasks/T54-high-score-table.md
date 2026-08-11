@@ -74,16 +74,94 @@ their data on their device; do not make it unclearable.
 
 ## Definition of done
 
-- [ ] Versioned, capped, wrapped `localStorage` persistence
-- [ ] Per-run table **and** lifetime totals, mode-aware
-- [ ] Reuses the T41 overlay structure
-- [ ] All three failure modes (throw, corrupt, wrong version) proven survivable
-- [ ] Clear-history with confirmation
-- [ ] `docs/TASKS.md`: T54 → `DONE`, T55 → `READY`
+- [x] Versioned, capped, wrapped `localStorage` persistence
+- [x] Per-run table **and** lifetime totals, mode-aware
+- [x] Reuses the T41 overlay structure
+- [x] All three failure modes (throw, corrupt, wrong version) proven survivable
+- [x] Clear-history with confirmation
+- [x] `docs/TASKS.md`: T54 → `DONE`, T55 → `READY`
 
 ---
 
 ## Findings
 
-*(Stored schema, byte size at the cap, and how each failure mode was induced and
-verified.)*
+**Schema** (`localStorage['cellularZatackaHighScores']`, versioned):
+```json
+{ "v": 1,
+  "runs": [ { "score": 810, "time": 3.6, "gen": 2,
+              "stats": { "vesicles": {"membrane":3,"lysosome":0,"mitochondria":0},
+                         "clusterBreaks":0, "massBreaks":0, "mitosisEvents":0, "distance":797 },
+              "mode": "1h3ai", "at": 1786452777205 } ],
+  "totals": { "rounds": 1, "bestGeneration": 2, "vesicles": 3, "breaks": 0, "longestSurvival": 3.6 } }
+```
+`mode` is human/bot composition (`"1h3ai"` = 1 human + 3 AI), not just player
+count, per the task's "not comparable" note. `totals` is accumulated
+independently of the capped `runs` array (incremented in `recordRun()` before
+the cap is applied), so lifetime figures stay true lifetime even once old runs
+age out of the 50-run history -- a design deliberately more literal than
+"derive totals from the stored runs," which would have silently truncated
+lifetime stats to whatever's left after `HISTORY_MAX`.
+
+**Only human players are recorded** (`recordRunsForRoundEnd()` skips
+`p.isBot`) -- it's the human's high-score table, not a leaderboard of the AI,
+matching T53's "bots get the same stats object" without extending that to
+persistence, which has no equivalent meaning for a bot. Recording happens once
+per round end, at the same two `stepSimulation()` sites that already call
+`renderStatsCard()`. Both sit behind the existing `fuzzActive` early-return
+(`setTimeout(startRound, 0); return { ended: true };`), which returns before
+the new `recordRunsForRoundEnd()` call is reached -- so fuzzer bursts, which
+restart hundreds of rounds a minute, never write to the real history. This is
+by inspection of the existing early-return, not a fuzzer run -- this task adds
+no hazard, so §7.6's own fuzzer-adjacent sweep is out of scope (see below).
+
+**Failure modes, each induced directly and confirmed survivable:**
+- Corrupt JSON (`localStorage.setItem(KEY, 'not json{{{')`) -> `loadHighScores()`
+  returns fresh data, no throw.
+- Wrong version (`{v:99, runs:[...], totals:{}}`) -> same, ignored and fresh.
+- `localStorage.setItem` stubbed to throw `QuotaExceededError` -> a full round
+  still completes, `isPlaying` goes false, the stats card still renders, and
+  the console stayed clean (the catch path uses `console.warn`, which the
+  harness's error-only listener doesn't count, and it only fires once per
+  round end since `saveHighScores()` is called nowhere in the per-frame path
+  -- not spammed).
+
+**`HISTORY_MAX` (50) holds**: pushed 60 synthetic runs, cap left exactly the
+newest 50 (oldest kept run was `score: 10`, i.e. entries `0..9` dropped).
+Stored payload size at the cap: **9,252 bytes** for 50 runs with realistic
+per-run stats.
+
+**New-high-score callout** (`p.isNewHighScore`, set by `recordRunsForRoundEnd()`
+and read once by `renderStatsCard()`) fires exactly on a new best and not
+otherwise: a run scoring 4 against a seeded prior best of 100 for the same
+mode did **not** show "New Best!"; a subsequent run scoring 4005 against that
+same prior best **did**. A mode's first-ever run also counts as a new best
+(`priorBest` starts at -1), confirmed separately (first recorded run, score
+810, showed the callout).
+
+**Panel** reuses T41's help-overlay structure exactly (same `.help-overlay`/
+`.help-panel`/`.help-close-btn` CSS, same outside-click-close, same
+pause-on-open/resume-on-close via `highScoreIsOpen()` wired into the same
+three call sites `helpIsOpen()` already was: the Escape/P handler, the `#ui`
+mouseleave peek, and the outside-`pointerdown` resume). Screenshotted legible
+at 390x844, 844x390 and 1280x800 (`/tmp/verify/t54_panel_*.png`) -- all three
+scroll within the existing `.help-panel` `max-height: 90dvh` clamp, matching
+how the Help panel already behaves at those sizes. Top-10-by-score table
+confirmed rendering exactly 10 rows against a 12-run synthetic dataset.
+
+**Clearing** asks first via `confirm()`: declining (`window.confirm` stubbed to
+return `false`) left a 50-run history untouched; accepting (`true`) wiped it
+to fresh `{runs:[], totals:{...zeroed}}`.
+
+**Persistence across reload** confirmed on the same page (`page.reload()`,
+`http://` origin): a recorded run and its totals were byte-identical before
+and after.
+
+**Offline (`file://`) load** confirmed clean: a full round played, ended, and
+recorded a run under `file://`, with console and page-error listeners both
+empty throughout.
+
+**§7.6 regression sweep**: not applicable -- this task never touches
+`checkCollision()`, `checkArcCollision()`, `raycast()` or
+`rebuildSpatialGrid()` (confirmed via `git diff` grep), and adds no hazard.
+
+`sw.js` `CACHE_NAME` bumped v31->v32; `dist/` rebuilt (`--check` passes).

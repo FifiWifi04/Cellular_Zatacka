@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 3ef42d0acdcf5d4e -->
+<!-- standalone-build-inputs: 3a45fe5b00897a37 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3522,6 +3522,12 @@ void main() {
             gap: 8px;
         }
 
+        /* T54: new-best callout on the end-of-round card. */
+        .hs-new-best {
+            color: #fdcb6e;
+            font-weight: bold;
+        }
+
         /* When full screen is active, strip away the borders and fill the monitor */
         :fullscreen #game-container {
             width: 100vw;
@@ -3732,6 +3738,19 @@ void main() {
             left: auto;
         }
 
+        /* T54: destructive action inside the high-score panel -- red like the
+           existing attack-mode accent (.touch-toggle-btn.attack-mode) so it
+           reads as dangerous without inventing a new palette entry. */
+        .hs-clear-btn {
+            display: block;
+            margin: 16px auto 0;
+            background: #e74c3c;
+        }
+
+        .hs-clear-btn:hover {
+            background: #ff7675;
+        }
+
         .help-panel h2 {
             text-align: center;
             margin-top: 0;
@@ -3925,6 +3944,9 @@ void main() {
             <!-- T41: reachable from here both before a round (main menu) and
                  during one (this same #ui doubles as the pause menu, T24). -->
             <button class="help-btn" onclick="toggleHelpPanel(true)">? Help</button>
+            <!-- T54: reachable from here both before a round (main menu) and
+                 during one (pause menu), mirrors T41's Help button above. -->
+            <button class="help-btn" onclick="toggleHighScorePanel(true)">Scores</button>
         </div>
         <div id="controlSplash" class="control-splash">
             <div id="splashCards" class="splash-cards"></div>
@@ -3941,6 +3963,18 @@ void main() {
             <button class="ui-close-btn help-close-btn" onclick="toggleHelpPanel(false)" aria-label="Close help">&#10005;</button>
             <h2>How to Play</h2>
             <div id="helpContent"></div>
+        </div>
+    </div>
+
+    <!-- T54: per-run history + lifetime totals, mirrors T41's help overlay
+         structure exactly (task design §3) -- same close button, outside-click
+         close, and pause interaction, rebuilt into highScoreContent on open. -->
+    <div id="highScoreOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleHighScorePanel(false)">
+        <div class="help-panel">
+            <button class="ui-close-btn help-close-btn" onclick="toggleHighScorePanel(false)" aria-label="Close high scores">&#10005;</button>
+            <h2>High Scores</h2>
+            <div id="highScoreContent"></div>
+            <button class="hs-clear-btn" onclick="confirmClearHighScores()">Clear History</button>
         </div>
     </div>
 
@@ -8481,10 +8515,12 @@ void main() {
             // T40: Escape/P are free of every playerConfigs binding (checked against
             // all four) -- primary pause/resume shortcut, mirrors pauseMenuBtn.
             if (isPlaying && (e.key === 'Escape' || e.key === 'p' || e.key === 'P')) {
-                // T41: Escape/P closes the help overlay first if it's open,
+                // T41/T54: Escape/P closes whichever overlay is open first,
                 // rather than also toggling the pause menu underneath it.
                 if (helpIsOpen()) {
                     toggleHelpPanel(false);
+                } else if (highScoreIsOpen()) {
+                    toggleHighScorePanel(false);
                 } else {
                     togglePauseMenu();
                 }
@@ -8590,11 +8626,12 @@ void main() {
         if (!isTouchDevice) {
             uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
             uiElement.addEventListener('mouseleave', () => {
-                // T46: toggleHelpPanel(true) hides #ui, which slides the panel out
-                // from under the cursor and fires this handler -- which then
-                // resumed the very round the overlay had just paused. The overlay
-                // owns pause for as long as it is open.
-                if (helpIsOpen()) return;
+                // T46/T54: toggleHelpPanel(true)/toggleHighScorePanel(true) hide
+                // #ui, which slides the panel out from under the cursor and fires
+                // this handler -- which then resumed the very round the overlay
+                // had just paused. Whichever overlay is open owns pause for as
+                // long as it stays open.
+                if (helpIsOpen() || highScoreIsOpen()) return;
                 if (isPlaying) {
                     // Also clears any pause opened via pauseMenuBtn -- otherwise the
                     // mouse leaving would hide the menu but leave the round paused
@@ -8634,9 +8671,9 @@ void main() {
         document.addEventListener('pointerdown', e => {
             if (!paused) return;
             if (uiElement.contains(e.target) || e.target === pauseMenuBtn) return;
-            // T41: the help overlay owns its own outside-click close (and its
+            // T41/T54: each overlay owns its own outside-click close (and its
             // own resume-on-close logic) while it's open -- don't race it here.
-            if (helpIsOpen()) return;
+            if (helpIsOpen() || highScoreIsOpen()) return;
             uiElement.classList.add('hidden-ui');
             paused = false;
         });
@@ -9219,6 +9256,7 @@ void main() {
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
                 scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s · Gen ${activeCell.generation}`;
+                recordRunsForRoundEnd(); // T54
                 renderStatsCard(); // T53
                 return { ended: true };
             } else if (totalPlayers > 1 && activePlayers.length <= 1) {
@@ -9238,6 +9276,7 @@ void main() {
                 if (totalPlayers >= 3) scoreStr += ` | P3: ${playerWins[3]}`;
                 if (totalPlayers >= 4) scoreStr += ` | P4: ${playerWins[4]}`;
                 scoreText.innerText = scoreStr;
+                recordRunsForRoundEnd(); // T54
                 renderStatsCard(); // T53
                 return { ended: true };
             }
@@ -9689,6 +9728,160 @@ void main() {
             );
         }
 
+        // T54: persistent run history, one localStorage key, versioned so a
+        // future schema change can detect and discard an incompatible save
+        // instead of misreading it. Every localStorage access is wrapped --
+        // private browsing, a disabled-storage policy and a full quota all
+        // throw on read *or* write, and a failure here must not stop the
+        // player from finishing their round (see docs/tasks/T54-high-score-table.md).
+        const HS_KEY = 'cellularZatackaHighScores';
+        const HS_VERSION = 1;
+        const HISTORY_MAX = 50; // oldest runs drop first once exceeded
+        const HS_TABLE_TOP_N = 10;
+
+        function freshHighScoreData() {
+            return { v: HS_VERSION, runs: [], totals: { rounds: 0, bestGeneration: 0, vesicles: 0, breaks: 0, longestSurvival: 0 } };
+        }
+
+        // Unknown/newer v, corrupt JSON, or a missing field -> fresh data,
+        // never a crash and never a guess at another version's shape.
+        function loadHighScores() {
+            try {
+                let raw = localStorage.getItem(HS_KEY);
+                if (!raw) return freshHighScoreData();
+                let data = JSON.parse(raw);
+                if (!data || data.v !== HS_VERSION || !Array.isArray(data.runs) || !data.totals) return freshHighScoreData();
+                return data;
+            } catch (err) {
+                return freshHighScoreData();
+            }
+        }
+
+        function saveHighScores(data) {
+            try {
+                localStorage.setItem(HS_KEY, JSON.stringify(data));
+            } catch (err) {
+                console.warn('[T54] could not save run history (storage unavailable or full) -- this round will not be remembered', err);
+            }
+        }
+
+        // T54: mode is human/bot composition, not just player count -- a Quick
+        // Play 1v1 and a 4-player round are not comparable (task design §2).
+        function currentModeLabel() {
+            return currentMode + 'h' + aiCount + 'ai';
+        }
+
+        // Records one human player's finished run. Bots are never recorded --
+        // this is the human's high-score table, not a leaderboard of the AI.
+        // Returns true if this run beat every prior score stored for the same
+        // mode (a mode with no prior runs counts its first run as a new best).
+        function recordRun(stats, survivalSeconds, score, mode) {
+            let data = loadHighScores();
+            let priorBest = -1;
+            for (let r of data.runs) if (r.mode === mode && r.score > priorBest) priorBest = r.score;
+            let isNewBest = score > priorBest;
+
+            let vesicleCount = stats.vesicles.membrane + stats.vesicles.lysosome + stats.vesicles.mitochondria;
+            let breakCount = stats.clusterBreaks + stats.massBreaks;
+            data.runs.push({
+                score: score, time: Math.round(survivalSeconds * 10) / 10, gen: stats.maxGeneration,
+                stats: {
+                    vesicles: { membrane: stats.vesicles.membrane, lysosome: stats.vesicles.lysosome, mitochondria: stats.vesicles.mitochondria },
+                    clusterBreaks: stats.clusterBreaks, massBreaks: stats.massBreaks,
+                    mitosisEvents: stats.mitosisEvents, distance: Math.round(stats.distance)
+                },
+                mode: mode, at: Date.now()
+            });
+            if (data.runs.length > HISTORY_MAX) data.runs.splice(0, data.runs.length - HISTORY_MAX);
+
+            // Totals are tracked independently of the capped runs list, so they
+            // stay true lifetime figures even after old runs age out of it.
+            data.totals.rounds++;
+            data.totals.bestGeneration = Math.max(data.totals.bestGeneration, stats.maxGeneration);
+            data.totals.vesicles += vesicleCount;
+            data.totals.breaks += breakCount;
+            data.totals.longestSurvival = Math.max(data.totals.longestSurvival, survivalSeconds);
+
+            saveHighScores(data);
+            return isNewBest;
+        }
+
+        // Called once per round end (both branches of stepSimulation's
+        // round-over check), before renderStatsCard() -- state only, no
+        // PIXI/DOM (§4.4a). Stashes p.isNewHighScore for renderStatsCard() to
+        // read; this is a round-end-only transient, not a per-round-reset
+        // field, the same way playerWins[] is mutated directly at round end.
+        function recordRunsForRoundEnd() {
+            let mode = currentModeLabel();
+            for (let p of players) {
+                if (p.isBot) continue;
+                let score = scoreRun(p.stats, survivalTime);
+                p.isNewHighScore = recordRun(p.stats, survivalTime, score, mode);
+            }
+        }
+
+        // T54: is the high-score panel currently up? Mirrors helpIsOpen()
+        // (T41) -- Escape/P, the #ui mouseleave peek, and the outside-click
+        // resume all have to defer to it while it's open.
+        function highScoreIsOpen() {
+            return !document.getElementById('highScoreOverlay').classList.contains('hidden-help');
+        }
+
+        // T54: same pause/resume contract as toggleHelpPanel (T41) -- opening
+        // pauses a round in progress, closing always resumes. Rebuilds the
+        // panel content on every open since, unlike the static Help panel,
+        // the run history changes between rounds.
+        window.toggleHighScorePanel = function (show) {
+            let overlay = document.getElementById('highScoreOverlay');
+            if (show) {
+                renderHighScorePanel();
+                uiElement.classList.add('hidden-ui');
+                overlay.classList.remove('hidden-help');
+                if (isPlaying) paused = true;
+            } else {
+                overlay.classList.add('hidden-help');
+                if (isPlaying) paused = false;
+                else uiElement.classList.remove('hidden-ui');
+            }
+        };
+
+        // T54: per-run table (top N by score, mode-labelled per the task's
+        // "filter or label" note) plus lifetime totals.
+        function renderHighScorePanel() {
+            let data = loadHighScores();
+            let top = data.runs.slice().sort((a, b) => b.score - a.score).slice(0, HS_TABLE_TOP_N);
+            let rows = top.map(r => {
+                let vesicleCount = r.stats.vesicles.membrane + r.stats.vesicles.lysosome + r.stats.vesicles.mitochondria;
+                let breakCount = r.stats.clusterBreaks + r.stats.massBreaks;
+                return `<tr><td>${r.score}</td><td>${r.time.toFixed(1)}s</td><td>Gen ${r.gen}</td><td>${r.mode}</td><td>${vesicleCount}</td><td>${breakCount}</td></tr>`;
+            }).join('');
+            let t = data.totals;
+            let html = `
+                <h3>Best runs</h3>
+                ${top.length ? `<table class="help-table">
+                    <tr><th>Score</th><th>Time</th><th>Gen</th><th>Mode</th><th>Vesicles</th><th>Breaks</th></tr>
+                    ${rows}
+                </table>` : '<p>No runs recorded yet -- play a round to start your history.</p>'}
+                <h3>Lifetime totals</h3>
+                <table class="help-table">
+                    <tr><td>Rounds played</td><td>${t.rounds}</td></tr>
+                    <tr><td>Best generation reached</td><td>${t.bestGeneration}</td></tr>
+                    <tr><td>Total vesicles collected</td><td>${t.vesicles}</td></tr>
+                    <tr><td>Total breaks</td><td>${t.breaks}</td></tr>
+                    <tr><td>Longest survival</td><td>${t.longestSurvival.toFixed(1)}s</td></tr>
+                </table>
+            `;
+            document.getElementById('highScoreContent').innerHTML = html;
+        }
+
+        // T54: destructive, so it asks first -- it is the player's data on
+        // their device, but a slipped click must not silently wipe it.
+        window.confirmClearHighScores = function () {
+            if (!confirm('Clear all saved run history? This cannot be undone.')) return;
+            saveHighScores(freshHighScoreData());
+            renderHighScorePanel();
+        };
+
         // T53: end-of-round card, built into #ui/#scoreboard's existing spot
         // (AGENT_CONDUCT.md 4.4a -- draw-only, reads state, never mutates it).
         function renderStatsCard() {
@@ -9697,7 +9890,7 @@ void main() {
                 let s = p.stats;
                 let score = scoreRun(s, survivalTime);
                 html += `<div class="stats-card-player${p.alive ? '' : ' dead'}" style="border-left-color:${toHex(p.color)}">` +
-                    `<div class="stats-card-name">P${p.id}${p.isBot ? ' (Bot)' : ''} -- ${p.alive ? 'Survived' : 'Eliminated'} -- Score ${score}</div>` +
+                    `<div class="stats-card-name">P${p.id}${p.isBot ? ' (Bot)' : ''} -- ${p.alive ? 'Survived' : 'Eliminated'} -- Score ${score}${p.isNewHighScore ? ' <span class="hs-new-best">New Best!</span>' : ''}</div>` +
                     `<div class="stats-card-row"><span>Generation reached</span><span>${s.maxGeneration}</span></div>` +
                     `<div class="stats-card-row"><span>Vesicles (mem/lys/mito)</span><span>${s.vesicles.membrane}/${s.vesicles.lysosome}/${s.vesicles.mitochondria}</span></div>` +
                     `<div class="stats-card-row"><span>Breaks (cluster/mass)</span><span>${s.clusterBreaks}/${s.massBreaks}</span></div>` +
