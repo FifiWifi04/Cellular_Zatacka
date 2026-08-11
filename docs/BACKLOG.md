@@ -130,13 +130,18 @@ them.
 
 ## Found while scoping Phases 6 and 7 — 2026-08-03
 
-- **Gap and vesicle spawn are frame-rate dependent, not time dependent.**
-  `GAP_CHANCE = 0.008` is rolled once per player per *frame*; `GAP_LENGTH = 12`
-  counts *frames*, not distance; and both vesicle-spawn sites roll
-  `Math.random() < 0.008` per frame. A device at 30fps therefore gets half the
-  gaps, half the vesicles, and gaps half as long in world distance. This is a
-  live fairness bug on any slow device, not just a multiplayer problem.
-  Addressed by T28. — 2026-08-03
+- ~~**Gap and vesicle spawn are frame-rate dependent, not time dependent.**~~
+  **RESOLVED by T28 — 2026-08-11.** `gameLoop()` now runs a fixed-timestep
+  accumulator (`stepSimulation()` always advances by exactly `FIXED_DT`
+  regardless of display rate); gap chance/length converted to world-distance
+  triggers (`GAP_DISTANCE_MEAN`/`GAP_LENGTH_DIST`, speed-independent too, not
+  just frame-rate-independent) and vesicle spawn to an explicit
+  `VESICLE_SPAWN_PER_SEC` rate. Verified: `survivalTime` after 60 real seconds
+  of manually-paced `gameLoop()` calls matched exactly (60.08s) at 15/30/60/
+  120fps; vesicle-spawn and gap-count means converged within ~2-3% between
+  15fps and 120fps over 6-trial samples; gap length in world units went from
+  the old 18/30/42px spread (Normal/Fast/Very Fast, proportional to speed) to
+  18/20/21px (quantization noise only). — 2026-08-03
 
 - **`drawTraces()` is O(total trace points) every frame, twice.** It clears and
   re-emits every point of every trace for both `trailGlow` and `trailCore`. At

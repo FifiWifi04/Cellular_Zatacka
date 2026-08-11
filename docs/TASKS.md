@@ -324,6 +324,35 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **Track L (Phase 8) is fully done. Next up: Phase 7, starting with T28
 > (fixed-timestep simulation), already `READY`.**
+>
+> **T28 landed 2026-08-11** — `gameLoop()` now drives `stepSimulation()`
+> through a fixed-timestep accumulator (`FIXED_DT=1/60`, clamped to 0.25s per
+> real frame, capped at `MAX_STEPS_PER_FRAME=5` against the spiral of death),
+> so simulation steps — and everything rolled per-step — no longer run at a
+> fraction of the rate on a slow display. Gap chance/length converted from
+> per-frame counts to world-distance triggers (`GAP_DISTANCE_MEAN=187.5`,
+> `GAP_LENGTH_DIST=18`, derived from the old `GAP_CHANCE`/`GAP_LENGTH` at
+> 60fps and Normal speed — see the file's own T28 comment for the arithmetic),
+> so gap spacing is now independent of speed setting as well as frame rate;
+> vesicle spawn converted to an explicit `VESICLE_SPAWN_PER_SEC=0.48` rate
+> (numerically identical to the old per-frame roll at 60fps, `0.008 * 60`).
+> Verified: manually pacing `gameLoop()` at 15/30/60/120fps for 60 real
+> seconds each produced an *identical* `survivalTime` (60.08s) at every rate;
+> vesicle-spawn and gap-count means converged to within ~2-3% between the
+> 15fps and 120fps extremes over 6-trial samples (28.83 vs 29.5 vesicles,
+> matching the ~28.8 analytical expectation; 109.3 vs 106 total trace
+> segments); gap length in world units went from the old 18/30/42px spread
+> (Normal/Fast/Very Fast, proportional to speed) to 18/20/21px (quantization
+> noise only); a forced single-frame 30-second stall advanced `survivalTime`
+> by only 0.084s (the `MAX_STEPS_PER_FRAME` cap) with a 7.5px player move, not
+> a 30s fast-forward or a teleport, and normal pacing resumed cleanly right
+> after; pause/resume freezes and resumes exactly, no burst. Render
+> interpolation between steps deliberately deferred, per the task's own
+> design note — see `docs/BACKLOG.md`. `sw.js` `CACHE_NAME` bumped v33→v34;
+> `dist/` rebuilt. See `docs/tasks/T28-fixed-timestep.md` Findings.
+>
+> **T29 (network transport and lobby) is now `READY`** — its only dependency,
+> T28, is done.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -453,8 +482,8 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `READY` |
-| T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `BLOCKED` |
+| T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `DONE` |
+| T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `READY` |
 | T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `BLOCKED` |
 | T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `BLOCKED` |
 | T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `BLOCKED` |

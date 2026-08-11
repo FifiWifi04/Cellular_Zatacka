@@ -1398,8 +1398,31 @@
         const CHASER_HIT_COOLDOWN = 0.3;       // mirrors CLUSTER_HIT_COOLDOWN / MASS_HIT_COOLDOWN
         const CHASER_SURVIVAL_TARGET = 90.0;   // seconds of active chasing before spawning stops (survivability model (b))
 
-        const GAP_CHANCE = 0.008;
-        const GAP_LENGTH = 12;
+        // T28: stepSimulation() now always advances by exactly FIXED_DT of
+        // simulated time (see gameLoop()'s accumulator), whatever the display
+        // frame rate. MAX_STEPS_PER_FRAME is the spiral-of-death guard for
+        // sustained low real fps.
+        const FIXED_DT = 1 / 60;              // seconds per simulation step
+        const MAX_STEPS_PER_FRAME = 5;
+
+        // T28: vesicle spawn converted from a per-frame roll to an explicit
+        // per-second rate. VESICLE_SPAWN_PER_SEC=0.48 reproduces the old
+        // 0.008-per-frame-at-60fps roll exactly (0.008 * 60); with FIXED_DT now
+        // constant, the per-step chance below is a true per-second rate rather
+        // than a per-display-frame one.
+        const VESICLE_SPAWN_PER_SEC = 0.48;
+        const VESICLE_SPAWN_CHANCE = VESICLE_SPAWN_PER_SEC * FIXED_DT;
+
+        // T28: gap chance/length converted from per-frame counts to world
+        // distance, so gap spacing depends on neither frame rate nor speed
+        // setting. Derived from the pre-T28 behaviour at 60fps and Normal
+        // speed (1.5 px/step): the old GAP_CHANCE=0.008 per-frame roll meant a
+        // mean of 1/0.008=125 steps between gap starts, i.e. 125*1.5=187.5px
+        // of travel at Normal speed; the old GAP_LENGTH=12 steps meant
+        // 12*1.5=18px of gap.
+        const GAP_DISTANCE_MEAN = 187.5;      // mean world-distance between gap starts
+        const GAP_LENGTH_DIST = 18;           // gap length, in world units
+
         const EFFECT_DURATION = 10.0;
 
         // T36: single source of truth for the boost-target legend, read by both
@@ -3341,7 +3364,7 @@
         // below reads the surviving vesicles[] this leaves behind and the Gen 4+
         // well/flash/establish timers this sets, and never mutates either.
         function updateVesicles(delta) {
-            if (Math.random() < 0.008 && vesicles.length < 25 && window.golgiData) {
+            if (Math.random() < VESICLE_SPAWN_CHANCE && vesicles.length < 25 && window.golgiData) {
                 let types = ['mitochondria', 'lysosome', 'membrane'];
                 let targetType = types[Math.floor(Math.random() * types.length)];
                 
@@ -3372,7 +3395,7 @@
             // Spawn vesicles from progenitor in Cell B during mitosis
             if (mitosis.state !== 'idle' && mitosis.progenitor && mitosis.progenitor.active && 
                 (mitosis.progenitor.state === 'growing' || mitosis.progenitor.state === 'complete') &&
-                Math.random() < 0.008 && vesicles.length < 25 && window.golgiData) {
+                Math.random() < VESICLE_SPAWN_CHANCE && vesicles.length < 25 && window.golgiData) {
                 
                 let types = ['mitochondria', 'lysosome', 'membrane'];
                 let targetType = types[Math.floor(Math.random() * types.length)];
@@ -4955,15 +4978,25 @@
                 }
 
                 // 4. Trace Drawing & Gap Management
+                // T28: gap chance/length are world-distance triggers now (see
+                // GAP_DISTANCE_MEAN/GAP_LENGTH_DIST), not per-frame counters --
+                // stepDist is this step's actual travel distance, so gap
+                // spacing/length no longer depend on frame rate or speed setting.
+                let stepDist = actualSpeed * delta;
                 if (p.isGap) {
-                    p.gapCounter -= delta;
-                    if (p.gapCounter <= 0) {
+                    p.gapDist -= stepDist;
+                    if (p.gapDist <= 0) {
                         p.isGap = false;
                         p.traceSegments.push(newTraceSegment(p));
                     }
-                } else if (Math.random() < GAP_CHANCE && !isGhost) {
-                    p.isGap = true;
-                    p.gapCounter = GAP_LENGTH;
+                } else if (!isGhost) {
+                    p.distSinceGap += stepDist;
+                    if (p.distSinceGap >= p.nextGapAt) {
+                        p.isGap = true;
+                        p.gapDist = GAP_LENGTH_DIST;
+                        p.distSinceGap = 0;
+                        p.nextGapAt = GAP_DISTANCE_MEAN * (0.5 + Math.random()); // jitter, mean-preserving
+                    }
                 }
 
                 if (isGhost) {
@@ -6275,6 +6308,17 @@
             }
         }
 
+        // T28: fixed-timestep accumulator. stepSimulation() always advances by
+        // exactly FIXED_DT of simulated time regardless of how many real
+        // display frames that takes, so gap/vesicle-spawn rolls and physics no
+        // longer run at half rate on a 30fps device. Long frames (tab switch,
+        // GC pause) are clamped before accumulating so a stall cannot queue a
+        // burst of catch-up steps; MAX_STEPS_PER_FRAME is the same guard for
+        // sustained low fps instead of a single stall. Render interpolation
+        // between steps is deliberately not implemented -- see docs/BACKLOG.md.
+        let simAccumulator = 0;
+        let lastStepResult = null; // most recent completed step's { isCellFrozen, delta, deltaSec } -- reused to render real frames where no step ran (e.g. above-60Hz displays)
+
         function gameLoop(delta) {
             if (!isPlaying) return;
             // T24: freeze simulation (incl. survivalTime) without stopping the
@@ -6283,15 +6327,28 @@
             // frozen/blank look app.ticker.stop() would give behind the menu.
             if (paused) return;
 
-            let result = stepSimulation(delta);
-            if (result.ended) return;
+            simAccumulator += Math.min(app.ticker.deltaMS / 1000, 0.25); // clamp long frames
+            let steps = 0;
+            while (simAccumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
+                // stepSimulation() reads deltaSec from app.ticker.deltaMS, not
+                // from its delta param -- see stepHeadless's comment below.
+                app.ticker.deltaMS = FIXED_DT * 1000;
+                let result = stepSimulation(FIXED_DT * 60);
+                if (result.ended) { simAccumulator = 0; return; }
+                lastStepResult = result;
+                simAccumulator -= FIXED_DT;
+                steps++;
+            }
+            if (steps === MAX_STEPS_PER_FRAME) simAccumulator = 0; // give up, do not spiral
 
-            renderFrame(result.isCellFrozen, result.deltaSec);
+            if (!lastStepResult) return; // no step has completed yet this round
+
+            renderFrame(lastStepResult.isCellFrozen, lastStepResult.deltaSec);
 
             // Animate Background Elements once per frame globally -- kept fused
             // (state + draw), see updateAndDrawBackgroundElements()'s own comment
             // for why (T22 step 6).
-            if (!result.isCellFrozen) updateAndDrawBackgroundElements(result.delta, result.deltaSec);
+            if (!lastStepResult.isCellFrozen) updateAndDrawBackgroundElements(lastStepResult.delta, lastStepResult.deltaSec);
 
             drawTraces();
         }
@@ -6926,6 +6983,7 @@
             globalRotation = Math.random() * Math.PI * 2;
             survivalTime = 0;
             necrosisTimer = 0; // T13
+            simAccumulator = 0; lastStepResult = null; // T28: never render into a new round with the previous round's leftovers
             malignantMass = { active: false, blockSize: 60, origin: { x: 0, y: 0 }, blocks: [], nextGrowTime: 0 }; // T14
             necroticClusters = new Map(); nextClusterId = 1; necroticDebris = []; // T38
             // T26: fresh adaptive-quality sampling window each round.
@@ -6966,7 +7024,7 @@
                     id: config.id, x: activeCell.x + spawnCfg.dx, y: activeCell.y + spawnCfg.dy, angle: spawnCfg.angle,
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
                     controls: config.controls, isBot: isBot,
-                    alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
+                    alive: true, traceSegments: [[]], isGap: false, gapDist: 0, distSinceGap: 0, nextGapAt: GAP_DISTANCE_MEAN * (0.5 + Math.random()), traceDist: 0, particleTick: 0, // T17; T28: gapDist/distSinceGap/nextGapAt replace the old frame-counted gapCounter
                     assemblyTick: 0, // T56
                     nextSegId: 1, // T58: stable per-segment id counter for isOwnNeck()
                     barX: 0, barY: 0, barGhostTimer: 0, barHunterTimer: 0, barGolgiTimer: 0, barSpeedTimer: 0, barSpeedLevel: 1, // T22 step 5: drawPlayerBars() snapshot
