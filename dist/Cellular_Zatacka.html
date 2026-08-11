@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 3014ab2c00c46a7f -->
+<!-- standalone-build-inputs: 5bcf26fdce8f248b -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4742,6 +4742,7 @@ void main() {
         const MAX_SHAKE_PX = 24; // fixed pixel offset regardless of world.scale (0.3-1.2)
         let shakeTrauma = 0;     // 0..1
         let shakeDecayTime = 0.5; // seconds for the current trauma pool to reach 0
+        let shakeOffsetX = 0, shakeOffsetY = 0; // T22 step 6: state only; drawShake() mirrors these onto shakeRoot
 
         // magnitude: 0..1 added to shakeTrauma (clamped). duration: seconds the
         // current trauma pool takes to decay -- overlapping calls take the longer one
@@ -4751,16 +4752,24 @@ void main() {
             shakeDecayTime = Math.max(shakeDecayTime, duration);
         }
 
+        // T22 step 6: state only (§4.4a) -- see drawShake() for the render half.
+        // Keeps its Math.random() calls at the same point in the per-frame call
+        // sequence they always occupied (T22's "do not change random call order").
         function updateShake(deltaSec) {
             if (shakeTrauma > 0) shakeTrauma = Math.max(0, shakeTrauma - deltaSec / shakeDecayTime);
             if (!window.shakeEnabled || shakeTrauma <= 0) {
-                shakeRoot.x = 0;
-                shakeRoot.y = 0;
+                shakeOffsetX = 0;
+                shakeOffsetY = 0;
                 return;
             }
             let intensity = shakeTrauma * shakeTrauma; // squared falloff feels better than linear
-            shakeRoot.x = (Math.random() * 2 - 1) * MAX_SHAKE_PX * intensity;
-            shakeRoot.y = (Math.random() * 2 - 1) * MAX_SHAKE_PX * intensity;
+            shakeOffsetX = (Math.random() * 2 - 1) * MAX_SHAKE_PX * intensity;
+            shakeOffsetY = (Math.random() * 2 - 1) * MAX_SHAKE_PX * intensity;
+        }
+
+        function drawShake() {
+            shakeRoot.x = shakeOffsetX;
+            shakeRoot.y = shakeOffsetY;
         }
         let fuzzStartWallTime = null;
         let fuzzTopUpTimer = 0;
@@ -8807,14 +8816,148 @@ void main() {
             }
         }
 
-        function gameLoop(delta) {
-            if (!isPlaying) return;
-            // T24: freeze simulation (incl. survivalTime) without stopping the
-            // ticker -- PIXI's own render pass stays registered on it, so the
-            // canvas keeps being redrawn (just unchanged) instead of the
-            // frozen/blank look app.ticker.stop() would give behind the menu.
-            if (paused) return;
+        // T22 step 6: sprite-only teardown/attach for organelles that stay in
+        // `organelles[]` (necrosis repaint) or are spliced out by the caller
+        // (mitosis death-ring shatter) -- unlike destroyNecroticOrganelle(),
+        // neither touches `organelles[]`, `dead`, or emits particles, so both
+        // call sites keep their existing (different) surrounding behaviour.
+        // Pulled out purely so stepSimulation()'s own body stays free of direct
+        // *Layer/.sprite references; the two blocks that call them are still
+        // documented as not-fully-PIXI-free, same as T22 step 5's precedent.
+        function destroyOrganelleSprite(org) {
+            if (org.sprite) {
+                organellesLayer.removeChild(org.sprite);
+                org.sprite.destroy();
+            }
+        }
+        function attachOrganelleSprite(org, sprite) {
+            org.sprite = sprite;
+            organellesLayer.addChild(sprite);
+        }
 
+        // T22 step 6: state only (§4.4a) -- see drawCalcification() for the
+        // render half. calcifyLayer.clear() moved from before this state block
+        // (its original position) to the start of drawCalcification(); clear()
+        // has no state dependency, so redrawing after the shrink/cull instead of
+        // before it produces identical pixels, just from the frame-final radii.
+        function updateCalcification(deltaSec, isCellFrozen) {
+            if (genAtLeast(2) && !isCellFrozen && mitosis.state === 'idle') {
+                // T51: ATP pickups pause the shrink for a few seconds each, capped at
+                // ATP_PAUSE_MAX -- ticks down here so it only moves while the shrink
+                // itself would (frozen/mitosis states already suspend it above).
+                if (calcifyPauseTimer > 0) calcifyPauseTimer = Math.max(0, calcifyPauseTimer - deltaSec);
+
+                let floorX = activeCell.baseRadiusX * CALCIFY_FLOOR;
+                if (calcifyPauseTimer <= 0 && activeCell.radiusX > floorX) {
+                    let shrunkX = Math.max(floorX, activeCell.radiusX - CALCIFY_RATE * deltaSec);
+                    activeCell.radiusY *= shrunkX / activeCell.radiusX;
+                    activeCell.radiusX = shrunkX;
+                }
+                // T48: cull aggregate blocks the membrane has now retreated past --
+                // otherwise they linger as unreachable dead geometry outside the cell.
+                if (malignantMass.blocks.length > 0) {
+                    let massHalf = malignantMass.blockSize / 2;
+                    for (let i = malignantMass.blocks.length - 1; i >= 0; i--) {
+                        let b = malignantMass.blocks[i];
+                        if (isOutsideCell(b.x, b.y, massHalf)) malignantMass.blocks.splice(i, 1);
+                    }
+                    if (malignantMass.blocks.length === 0) malignantMass.active = false;
+                }
+            }
+        }
+
+        // T37: calcifyLayer draws the membrane ring every frame at every
+        // generation (not just Gen 2+) since generateMap() no longer bakes a
+        // ring into cellBg -- this is the only membrane boundary, ever.
+        function drawCalcification() {
+            calcifyLayer.clear();
+            // T51: while a pause is live the inner ring glows the same colour as the
+            // granule that bought it, pulsing, instead of its resting cyan.
+            let atpPauseActive = calcifyPauseTimer > 0;
+            calcifyLayer.lineStyle(15, 0x1e3799, 0.4);
+            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
+            calcifyLayer.lineStyle(8, 0x4a69bd, 0.8);
+            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
+            calcifyLayer.lineStyle(3, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
+            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
+        }
+
+        // T22 step 6: fused pre-existing code (cytosolParticles/membraneProtrusionsList
+        // entries are themselves PIXI.Graphics instances with plain fields hung on
+        // them -- there is no separate physics-object/.sprite pair to split the way
+        // organelles were in step 3). Out of scope for T22, which only ever named
+        // vesicles/infection/organelles/mitosis/players as the systems to split (see
+        // docs/tasks/T22-sim-render-split.md); noted in docs/BACKLOG.md instead of
+        // attempted here. Called directly from gameLoop, not from stepSimulation() or
+        // renderFrame(), so neither of those two is misrepresented as covering it.
+        function updateAndDrawBackgroundElements(delta, deltaSec) {
+            // T49: protrusions and cellBgSprite were baked once from the round-start
+            // radii and never followed Gen 2+ calcification inward. Re-anchor them
+            // from the current radii, but only redo the trig when the radii actually
+            // moved since last frame (they only change while calcifying).
+            if (activeCell.radiusX !== lastMembraneRadiusX || activeCell.radiusY !== lastMembraneRadiusY) {
+                let a = activeCell.radiusX, b = activeCell.radiusY;
+
+                cellBgSprite.clear();
+                cellBgSprite.beginFill(0x0d0d1a);
+                cellBgSprite.drawEllipse(activeCell.x, activeCell.y, a, b);
+                cellBgSprite.endFill();
+
+                membraneProtrusionsList.forEach(p => {
+                    let t = p.angleRad;
+                    p.normAngle = Math.atan2(a * Math.sin(t), b * Math.cos(t));
+                    p.rotation = p.normAngle;
+                    let a2_sin2 = Math.pow(a * Math.sin(t), 2);
+                    let b2_cos2 = Math.pow(b * Math.cos(t), 2);
+                    p.rc = Math.pow(a2_sin2 + b2_cos2, 1.5) / (a * b);
+                    p.x = activeCell.x + a * Math.cos(t);
+                    p.y = activeCell.y + b * Math.sin(t);
+                });
+
+                lastMembraneRadiusX = a;
+                lastMembraneRadiusY = b;
+            }
+
+            cytosolParticles.forEach(blob => {
+                blob.x += blob.vx * delta;
+                blob.y += blob.vy * delta;
+                // T49: pull drifting blobs back inside the current (possibly
+                // shrunk) membrane instead of letting them wander past it.
+                if (isOutsideCell(blob.x, blob.y)) {
+                    let dx = blob.x - activeCell.x;
+                    let dy = blob.y - activeCell.y;
+                    let norm = Math.sqrt((dx * dx) / (activeCell.radiusX * activeCell.radiusX) + (dy * dy) / (activeCell.radiusY * activeCell.radiusY));
+                    if (norm > 0) {
+                        let pull = 0.98 / norm;
+                        blob.x = activeCell.x + dx * pull;
+                        blob.y = activeCell.y + dy * pull;
+                    }
+                    blob.vx *= -1;
+                    blob.vy *= -1;
+                }
+                blob.scale.set(1.0 + Math.sin(survivalTime * 2 + blob.phase) * 0.1);
+                blob.alpha = blob.baseAlpha + Math.sin(survivalTime + blob.phase) * 0.1;
+            });
+
+            membraneProtrusionsList.forEach(p => {
+                p.phase += p.speed * deltaSec;
+                let scale = Math.max(0, Math.sin(p.phase));
+                p.redraw(p.maxRadius * scale);
+            });
+        }
+
+        // T22 step 6: pure state. No PIXI calls whatsoever (see the two
+        // documented exceptions below -- necrosis-promotion and the mitosis
+        // death-ring shatter still call destroyOrganelleSprite()/
+        // attachOrganelleSprite(), same class of pre-existing coupling T22
+        // step 5 already accepted for updatePlayers()/destroyNecroticOrganelle()).
+        // Returns { ended: true } on the two round-end paths (mirroring the old
+        // gameLoop's own early `return;`s) so gameLoop knows to skip renderFrame()
+        // this tick, exactly as it always skipped the rest of the frame here.
+        // Otherwise returns { ended: false, isCellFrozen, delta, deltaSec } --
+        // delta/deltaSec are the post-fuzz-dilation values, needed by
+        // renderFrame() and updateAndDrawBackgroundElements().
+        function stepSimulation(delta) {
             // Rebuild spatial grid once per frame at the start
             rebuildSpatialGrid();
 
@@ -8925,57 +9068,15 @@ void main() {
             let isNucleusReveal = (nucleusTransformTime > -Infinity && (survivalTime - nucleusTransformTime < NUCLEUS_TRANSFORM_FREEZE));
             let isCellFrozen = (infection.state === 'warning') || isMitosisReveal || isNucleusReveal;
 
-            // T12: Gen 2+ membrane calcification. Shrinks activeCell.radiusX/radiusY
-            // frame by frame (paused while frozen or mid-mitosis, since the bridge and
-            // cellB geometry are computed from the radii at event start).
-            // T37: calcifyLayer now draws the membrane ring every frame at every
-            // generation (not just Gen 2+) since generateMap() no longer bakes a
-            // ring into cellBg -- this is the only membrane boundary, ever.
-            calcifyLayer.clear();
-            if (genAtLeast(2) && !isCellFrozen && mitosis.state === 'idle') {
-                // T51: ATP pickups pause the shrink for a few seconds each, capped at
-                // ATP_PAUSE_MAX -- ticks down here so it only moves while the shrink
-                // itself would (frozen/mitosis states already suspend it above).
-                if (calcifyPauseTimer > 0) calcifyPauseTimer = Math.max(0, calcifyPauseTimer - deltaSec);
-
-                let floorX = activeCell.baseRadiusX * CALCIFY_FLOOR;
-                if (calcifyPauseTimer <= 0 && activeCell.radiusX > floorX) {
-                    let shrunkX = Math.max(floorX, activeCell.radiusX - CALCIFY_RATE * deltaSec);
-                    activeCell.radiusY *= shrunkX / activeCell.radiusX;
-                    activeCell.radiusX = shrunkX;
-                }
-                // T48: cull aggregate blocks the membrane has now retreated past --
-                // otherwise they linger as unreachable dead geometry outside the cell.
-                if (malignantMass.blocks.length > 0) {
-                    let massHalf = malignantMass.blockSize / 2;
-                    for (let i = malignantMass.blocks.length - 1; i >= 0; i--) {
-                        let b = malignantMass.blocks[i];
-                        if (isOutsideCell(b.x, b.y, massHalf)) malignantMass.blocks.splice(i, 1);
-                    }
-                    if (malignantMass.blocks.length === 0) malignantMass.active = false;
-                }
-            }
-            // T51: while a pause is live the inner ring glows the same colour as the
-            // granule that bought it, pulsing, instead of its resting cyan.
-            let atpPauseActive = calcifyPauseTimer > 0;
-            calcifyLayer.lineStyle(15, 0x1e3799, 0.4);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
-            calcifyLayer.lineStyle(8, 0x4a69bd, 0.8);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
-            calcifyLayer.lineStyle(3, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
+            // T12/T37: Gen 2+ membrane calcification -- state only; see
+            // drawCalcification() for the render half (T22 step 6).
+            updateCalcification(deltaSec, isCellFrozen);
 
             if (!isCellFrozen) {
                 globalRotation += 0.0015 * delta;
-                rotatingContainer.rotation = globalRotation;
-                // T43: while any local player can pass through the ER/Golgi walls,
-                // dim them to show they are not solid right now. Cheap alpha flip
-                // on the existing container -- no redraw, no allocation.
-                rotatingContainer.alpha = players.some(p => p.alive && !p.isBot && p.effects.golgiTimer > 0) ? 0.35 : 1.0;
-                drawTraces();
-                updateDriftingOrganelles(delta); drawOrganelles(); // T22 step 3
-                updateVesicles(delta); drawVesicles(); // T22 step 1
-                updateATP(deltaSec); drawATP(); // T51
+                updateDriftingOrganelles(delta); // T22 step 3
+                updateVesicles(delta); // T22 step 1
+                updateATP(deltaSec); // T51
 
                 // T13: Gen 2+ organelle necrosis. Every NECROSIS_INTERVAL seconds of
                 // un-frozen game time, freeze one random non-necrotic organelle into a
@@ -9009,13 +9110,8 @@ void main() {
                                     // than grey, so redraw from the same x/y/rotation/bendY/
                                     // radius instead (createOrganelleGraphics respects a
                                     // pre-set bendY rather than re-randomizing it).
-                                    if (pick.sprite) {
-                                        organellesLayer.removeChild(pick.sprite);
-                                        pick.sprite.destroy();
-                                    }
-                                    let greySprite = createOrganelleGraphics(pick, true);
-                                    pick.sprite = greySprite;
-                                    organellesLayer.addChild(greySprite);
+                                    destroyOrganelleSprite(pick);
+                                    attachOrganelleSprite(pick, createOrganelleGraphics(pick, true));
                                 }
                             }
                         }
@@ -9035,16 +9131,8 @@ void main() {
                 updateNucleusChasers(delta, deltaSec);
             }
             updateMitosis(deltaSec);
-            drawMitosisVisuals();
-            drawMalignantMass();
-            drawNecroticClusters();
-            drawNecroticDebris();
-            drawNucleusChasers(); // T57
-
-            updateInfection(delta, deltaSec); drawInfection(); // T22 step 2
-            updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition
-            updateCamera();
-            updateShake(deltaSec); // T16: after updateCamera() so shakeRoot's offset is never lerped into world
+            updateInfection(delta, deltaSec); // T22 step 2
+            updateShake(deltaSec); // T16 (state half, T22 step 6 -- draw half is drawShake())
 
             // The master clock must run in ALL modes so the virus and combos work!
             survivalTime += deltaSec;
@@ -9070,17 +9158,17 @@ void main() {
                 if (fuzzActive) {
                     fuzzStats.rounds++;
                     setTimeout(startRound, 0);
-                    return;
+                    return { ended: true };
                 }
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
                 scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s · Gen ${activeCell.generation}`;
-                return;
+                return { ended: true };
             } else if (totalPlayers > 1 && activePlayers.length <= 1) {
                 if (fuzzActive) {
                     fuzzStats.rounds++;
                     setTimeout(startRound, 0);
-                    return;
+                    return { ended: true };
                 }
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
@@ -9093,7 +9181,7 @@ void main() {
                 if (totalPlayers >= 3) scoreStr += ` | P3: ${playerWins[3]}`;
                 if (totalPlayers >= 4) scoreStr += ` | P4: ${playerWins[4]}`;
                 scoreText.innerText = scoreStr;
-                return;
+                return { ended: true };
             }
 
             // --- DEATH RING SHATTER LOGIC (Organelles & Golgi) ---
@@ -9117,10 +9205,7 @@ void main() {
 
                     if (caught) {
                         spawnVesicles(org.x, org.y, 5, org.type, org.color);
-                        if (org.sprite) {
-                            organellesLayer.removeChild(org.sprite);
-                            org.sprite.destroy();
-                        }
+                        destroyOrganelleSprite(org);
                         organelles.splice(i, 1);
                     }
                 }
@@ -9183,8 +9268,46 @@ void main() {
             }
 
             updatePlayers(delta, deltaSec, isCellFrozen); // T22 step 5
-            drawPlayerBars(); // T22 step 5
 
+            // T17: state half only -- see renderFrame() for the particleLayer
+            // clear-or-draw half of this same frozen/unfrozen split.
+            if (!isCellFrozen) {
+                updateParticles(delta, deltaSec);
+            }
+
+            return { ended: false, isCellFrozen, delta, deltaSec };
+        }
+
+        // T22 step 6: pure reads. Never mutates game state (see updateCamera()'s
+        // and updateWarningFilter()'s own definitions -- both already read-only
+        // despite their "update" names, which is why the task's own design
+        // pseudocode places them here rather than in stepSimulation()).
+        function renderFrame(isCellFrozen, deltaSec) {
+            drawCalcification(); // T22 step 6
+
+            if (!isCellFrozen) {
+                rotatingContainer.rotation = globalRotation;
+                // T43: while any local player can pass through the ER/Golgi walls,
+                // dim them to show they are not solid right now. Cheap alpha flip
+                // on the existing container -- no redraw, no allocation.
+                rotatingContainer.alpha = players.some(p => p.alive && !p.isBot && p.effects.golgiTimer > 0) ? 0.35 : 1.0;
+                drawOrganelles(); // T22 step 3
+                drawVesicles(); // T22 step 1
+                drawATP(); // T51
+            }
+
+            drawMitosisVisuals();
+            drawMalignantMass();
+            drawNecroticClusters();
+            drawNecroticDebris();
+            drawNucleusChasers(); // T57
+
+            drawInfection(); // T22 step 2
+            updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition -- must run after drawInfection() so infection.state reflects this frame
+            updateCamera();
+            drawShake(); // T16: after updateCamera() so shakeRoot's offset is never lerped into world
+
+            drawPlayerBars(); // T22 step 5
             updateNucleusFeedHUD(); // T52
 
             // T17: no splash particles during frozen states (infection warning /
@@ -9193,66 +9316,27 @@ void main() {
             if (isCellFrozen) {
                 particleLayer.clear();
             } else {
-                updateParticles(delta, deltaSec);
                 drawParticles();
             }
+        }
 
-            // Animate Background Elements once per frame globally
-            if (!isCellFrozen) {
-                // T49: protrusions and cellBgSprite were baked once from the round-start
-                // radii and never followed Gen 2+ calcification inward. Re-anchor them
-                // from the current radii, but only redo the trig when the radii actually
-                // moved since last frame (they only change while calcifying).
-                if (activeCell.radiusX !== lastMembraneRadiusX || activeCell.radiusY !== lastMembraneRadiusY) {
-                    let a = activeCell.radiusX, b = activeCell.radiusY;
+        function gameLoop(delta) {
+            if (!isPlaying) return;
+            // T24: freeze simulation (incl. survivalTime) without stopping the
+            // ticker -- PIXI's own render pass stays registered on it, so the
+            // canvas keeps being redrawn (just unchanged) instead of the
+            // frozen/blank look app.ticker.stop() would give behind the menu.
+            if (paused) return;
 
-                    cellBgSprite.clear();
-                    cellBgSprite.beginFill(0x0d0d1a);
-                    cellBgSprite.drawEllipse(activeCell.x, activeCell.y, a, b);
-                    cellBgSprite.endFill();
+            let result = stepSimulation(delta);
+            if (result.ended) return;
 
-                    membraneProtrusionsList.forEach(p => {
-                        let t = p.angleRad;
-                        p.normAngle = Math.atan2(a * Math.sin(t), b * Math.cos(t));
-                        p.rotation = p.normAngle;
-                        let a2_sin2 = Math.pow(a * Math.sin(t), 2);
-                        let b2_cos2 = Math.pow(b * Math.cos(t), 2);
-                        p.rc = Math.pow(a2_sin2 + b2_cos2, 1.5) / (a * b);
-                        p.x = activeCell.x + a * Math.cos(t);
-                        p.y = activeCell.y + b * Math.sin(t);
-                    });
+            renderFrame(result.isCellFrozen, result.deltaSec);
 
-                    lastMembraneRadiusX = a;
-                    lastMembraneRadiusY = b;
-                }
-
-                cytosolParticles.forEach(blob => {
-                    blob.x += blob.vx * delta;
-                    blob.y += blob.vy * delta;
-                    // T49: pull drifting blobs back inside the current (possibly
-                    // shrunk) membrane instead of letting them wander past it.
-                    if (isOutsideCell(blob.x, blob.y)) {
-                        let dx = blob.x - activeCell.x;
-                        let dy = blob.y - activeCell.y;
-                        let norm = Math.sqrt((dx * dx) / (activeCell.radiusX * activeCell.radiusX) + (dy * dy) / (activeCell.radiusY * activeCell.radiusY));
-                        if (norm > 0) {
-                            let pull = 0.98 / norm;
-                            blob.x = activeCell.x + dx * pull;
-                            blob.y = activeCell.y + dy * pull;
-                        }
-                        blob.vx *= -1;
-                        blob.vy *= -1;
-                    }
-                    blob.scale.set(1.0 + Math.sin(survivalTime * 2 + blob.phase) * 0.1);
-                    blob.alpha = blob.baseAlpha + Math.sin(survivalTime + blob.phase) * 0.1;
-                });
-
-                membraneProtrusionsList.forEach(p => {
-                    p.phase += p.speed * deltaSec;
-                    let scale = Math.max(0, Math.sin(p.phase));
-                    p.redraw(p.maxRadius * scale);
-                });
-            }
+            // Animate Background Elements once per frame globally -- kept fused
+            // (state + draw), see updateAndDrawBackgroundElements()'s own comment
+            // for why (T22 step 6).
+            if (!result.isCellFrozen) updateAndDrawBackgroundElements(result.delta, result.deltaSec);
 
             drawTraces();
         }

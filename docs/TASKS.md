@@ -207,9 +207,33 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > clean. One pre-existing violation noted to `docs/BACKLOG.md`:
 > `updatePlayers()` isn't fully PIXI-free (`destroyNecroticOrganelle()` inside
 > it touches `organellesLayer`/`.sprite`, a T13/T38/T50-era coupling predating
-> this split). See `docs/tasks/T22-sim-render-split.md` Findings. Steps 6-7
-> remain; T22 stays `READY` until all seven are ticked. **Next up: Step 6**
-> (`gameLoop` restructured into `stepSimulation` + `renderFrame`).
+> this split). See `docs/tasks/T22-sim-render-split.md` Findings.
+>
+> **Step 6 (`gameLoop` restructured into `stepSimulation`/`renderFrame`) landed
+> 2026-08-11** — the remaining fused code (calcification, screenshake,
+> necrosis-promotion, the mitosis death-ring shatter) got the same state/draw
+> split as everything else, letting the whole frame regroup into
+> `stepSimulation(delta)` (state; returns `{ended:true}` on the two round-end
+> paths so `gameLoop` skips rendering that tick, matching the old code's own
+> early `return;`s) and `renderFrame(isCellFrozen, deltaSec)` (pure reads).
+> Verified: `stepSimulation()`'s own 320-line body has zero `PIXI`/`Layer`/
+> `.sprite`/`.visible` tokens outside one comment; a real 30.2s round played
+> normally; a forced-frozen check held `globalRotation` and organelle/vesicle
+> counts completely flat across 1.5+ game-seconds (and reproduced the same
+> small artefact-drift on pre-step-6 `HEAD` when tested the same way, ruling
+> out a regression); membrane/self-trace/organelle deaths all still lethal;
+> 15s rounds clean at all three speeds; the fuzzer's own round-restart path
+> and a natural round-end both exercised with no console errors. Two new
+> helpers (`destroyOrganelleSprite`/`attachOrganelleSprite`) keep
+> `stepSimulation()`'s own text free of `Layer`/`.sprite` references while the
+> necrosis-promotion and death-ring-shatter blocks that call them remain not
+> fully PIXI-free (same class of exception as step 5's, both filed to
+> `docs/BACKLOG.md` along with the background-elements block, which stayed
+> fused and out of scope since `cytosolParticles`/`membraneProtrusionsList`
+> entries are themselves `PIXI.Graphics` instances with no separate physics
+> record to split). See `docs/tasks/T22-sim-render-split.md` Findings. Step 7
+> remains; T22 stays `READY` until it lands. **Next up: Step 7** (headless
+> step loop exposed and benchmarked).
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.

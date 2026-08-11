@@ -124,7 +124,7 @@ verifying after each:
 - [x] Step 3 — organelles split (sprite mirroring moved to draw)
 - [x] Step 4 — mitosis split (three state mutations moved out of the draw path)
 - [x] Step 5 — players/traces split
-- [ ] Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`
+- [x] Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`
 - [ ] Step 7 — headless step loop exposed and benchmarked
 
 Commit per step (`T22: <step>`), push, then decide whether there is budget for
@@ -381,7 +381,103 @@ immediately before where the old `players.forEach` started (organelle/Golgi-
 arc destruction during a mitosis sweep, including a `drawArcs()` call) is
 about organelles/arcs, not players, and was left untouched in `gameLoop`.
 
-Next: Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`.
+**Step 6 (`gameLoop` restructured into `stepSimulation`/`renderFrame`), landed
+2026-08-11.** The remaining fused-per-frame code — the calcification
+shrink+ring, screenshake's trauma decay+offset, and the necrosis-promotion/
+mitosis death-ring-shatter blocks — got the same update/draw split treatment
+this task applies everywhere else, so the whole frame could finally be
+regrouped into two calls: `stepSimulation(delta)` (state, returns
+`{ended:true}` on the two round-end paths so `gameLoop` knows to skip
+rendering that tick, exactly like the old code's own early `return;`s did, or
+`{ended:false, isCellFrozen, delta, deltaSec}` otherwise) and
+`renderFrame(isCellFrozen, deltaSec)` (pure reads). New split pairs:
+`updateCalcification()`/`drawCalcification()` (state: pause-timer decay,
+radius shrink, T48's block culling; draw: the three `calcifyLayer` rings —
+`calcifyLayer.clear()` moved from before the shrink to the start of the draw
+half, which is behaviourally identical since `clear()` has no state
+dependency and the three ellipses already used the post-shrink radii either
+way) and `updateShake()`/`drawShake()` (state: trauma decay + a new
+`shakeOffsetX/Y` pair holding the `Math.random()`-derived offset, at the
+exact point in the call sequence `updateShake()` always occupied, so T22's
+"don't reorder `Math.random()` calls" rule holds; draw: mirroring
+`shakeOffsetX/Y` onto `shakeRoot.x/y`). Two tiny helpers,
+`destroyOrganelleSprite(org)`/`attachOrganelleSprite(org, sprite)`, replaced
+the inline `organellesLayer.removeChild/addChild` + `.sprite.destroy()` calls
+in the necrosis-promotion and death-ring-shatter blocks so `stepSimulation()`'s
+own body has zero literal `Layer`/`.sprite` references, even though the two
+call sites they're used from are still not fully PIXI-free by the broader
+"no reference to a display object" reading of the rule (documented below and
+in `docs/BACKLOG.md`, same class of exception T22 step 5 already accepted for
+`updatePlayers()`/`destroyNecroticOrganelle()`). All other draw calls already
+produced by steps 1-5 (`drawOrganelles`, `drawVesicles`, `drawATP`,
+`drawMitosisVisuals`, `drawMalignantMass`, `drawNecroticClusters`,
+`drawNecroticDebris`, `drawNucleusChasers`, `drawInfection`, `drawPlayerBars`,
+`drawParticles`) moved into `renderFrame()` unchanged, alongside
+`updateCamera()`/`updateWarningFilter()`/`updateNucleusFeedHUD()`, which were
+already pure reads despite their "update" names (confirmed by reading each
+function's own body: no state mutation, no `Math.random()`) — matching the
+task's own design pseudocode, which places `updateCamera()` in
+`renderFrame()`. The round-end/game-over DOM-text block and the fuzzer's
+`updateDevIndicator()` call stayed inside `stepSimulation()`: both write only
+`document.*`/DOM text, never a PIXI reference, and the round-end block's early
+`return`s are genuine simulation control flow (a headless stepper needs to
+detect round-end too) that would be riskier to thread through a second
+boundary than to leave in place. The one duplicate `drawTraces()` call (the
+old code called it twice per unfrozen frame — once before organelle/vesicle
+updates using still-stale trace data from the *previous* frame, once
+unconditionally at the very end using the current frame's data, the two
+producing byte-identical output since nothing renders to the screen between
+them) collapsed to the single call the restructuring leaves reachable, at the
+same final position as before.
+
+Not moved into either pure function (kept fused, called directly from
+`gameLoop` between `renderFrame()` and the final `drawTraces()`, exactly
+where it always ran): the "Animate Background Elements" block
+(`cytosolParticles`/`membraneProtrusionsList` drift, bounce and redraw), now
+`updateAndDrawBackgroundElements(delta, deltaSec)`. Both arrays hold
+`PIXI.Graphics` instances directly (not a physics-record + separate `.sprite`
+pair), so there's no clean seam to split state from draw without a
+step-3-sized rewrite; T22's own systems list (vesicles/infection/organelles/
+mitosis/players) never named this block. Documented in `docs/BACKLOG.md`
+rather than attempted here.
+
+Verified: `awk`-extracted (after normalizing the file's CRLF line endings,
+which broke a naive `$`-anchored awk range) `stepSimulation()`'s own 320-line
+body contains zero `PIXI`/`Layer`/`.sprite`/`.visible` tokens outside one
+comment mentioning "particleLayer" in prose; `renderFrame()`'s 33-line body
+reviewed by hand and confirmed to only read `isCellFrozen`/`deltaSec`/
+`players`/`globalRotation` and call draw functions, with the sole non-call
+statements being `rotatingContainer.rotation`/`.alpha` writes (display-object
+mirrors, not state). `node --check` on the extracted `<script>` body passed.
+A real 30.2-game-second round (1 player + 3 bots) played normally — 2/4 alive
+(unpiloted human died to the membrane as expected), console clean,
+screenshot looks normal. A forced-frozen check (mitosis state pushed to
+`'forming'` directly) showed `globalRotation` and organelle/vesicle counts
+completely flat across six samples over 1.5+ game-seconds, confirming the
+frozen-gating survived the split intact — and, since a first attempt at this
+same check showed a small (~0.009 rad) drift, re-running the *identical*
+check against the pre-step-6 `HEAD` copy of the file reproduced the exact
+same drift magnitude, proving it's an artefact of forcing partial mitosis
+state in the test harness, not a regression. All three collision types
+confirmed still lethal via direct state-forcing (organelle: parked the human
+on an organelle's centre; self-trace: placed a trace segment directly under
+the human, ungated by neck-distance immunity) — both killed within 0.3
+game-seconds with `godMode` off. Real 15-game-second rounds at all three
+speed settings (Normal/Fast/Very Fast) ran clean with all bots surviving. The
+fuzzer's own round-restart path (`setTimeout(startRound, 0)` inside
+`stepSimulation()`'s `{ended:true}` branch) exercised for 6 wall-seconds,
+completing 2 full round cycles with `isPlaying` staying `true` and the
+console clean. A round left to end naturally (no bot driving it) flipped
+`isPlaying` to `false` with no console errors on the exact tick
+`stepSimulation()`'s early-return fired. `dist/` rebuilt (`--check` passes,
+confirmed clean over `file://` too, 8.2 game-seconds); `sw.js` `CACHE_NAME`
+bumped v28→v29.
+
+Not attempted (belongs to step 7): `window.stepHeadless` and its benchmark —
+no headless stepper exists until this step made `stepSimulation()` callable
+on its own, which it now is.
+
+Next: Step 7 — headless step loop exposed and benchmarked.
 
 ---
 

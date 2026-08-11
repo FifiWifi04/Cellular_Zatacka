@@ -749,3 +749,31 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   Noted so a later T22 step (or its own task) doesn't rediscover it from
   scratch when auditing `stepSimulation()` for the mechanical
   zero-display-object-references check in step 6/7. — 2026-08-11
+
+## Found while doing T22 step 6 (gameLoop restructured into stepSimulation/renderFrame) — 2026-08-11
+
+- **`cytosolParticles`/`membraneProtrusionsList` entries are themselves
+  `PIXI.Graphics` instances** with plain physics-ish fields (`x`, `y`, `phase`,
+  `rc`, `normAngle`) hung directly on them — there is no separate
+  physics-object/`.sprite` pair to split the way organelles were in step 3.
+  The old fused "Animate Background Elements" block (position/phase
+  integration + `.redraw()`/`.scale.set()`/`.alpha` draw calls, all on the
+  same object) is now `updateAndDrawBackgroundElements()`, called directly
+  from `gameLoop` rather than from `stepSimulation()`/`renderFrame()`, so it
+  doesn't misrepresent either of those two as covering it. T22 never scoped
+  this block (its own systems list is vesicles/infection/organelles/mitosis/
+  players); splitting it properly would mean giving both lists real physics
+  records with a separate `.sprite` reference, mirroring the organelle
+  pattern — a same-sized follow-up to step 3, not a step-6-sized tweak.
+  — 2026-08-11
+- **The mitosis death-ring shatter block and the Gen 2+ necrosis-promotion
+  block are not fully PIXI-free either** — same class of exception as step
+  5's `updatePlayers()` note above. Both now call two small new helpers,
+  `destroyOrganelleSprite(org)`/`attachOrganelleSprite(org, sprite)`, added
+  purely so `stepSimulation()`'s own body stays free of direct `organellesLayer`/
+  `.sprite` references; the helpers themselves still touch the display list,
+  same coupling as `destroyNecroticOrganelle()`. Also unmoved: `drawArcs()`,
+  called from inside the death-ring shatter block for its side effect of
+  rebuilding `centralHitboxes` (a collision-relevant state mutation hiding
+  inside a nominally-"draw" function) — already flagged in T22 step 4's
+  Findings, still true here. — 2026-08-11
