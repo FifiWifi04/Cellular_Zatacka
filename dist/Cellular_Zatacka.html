@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 3a45fe5b00897a37 -->
+<!-- standalone-build-inputs: 7c42016794045318 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3751,6 +3751,59 @@ void main() {
             background: #ff7675;
         }
 
+        /* T55: one row per upgrade in the Shop panel. */
+        .shop-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .shop-row-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-size: 14px;
+        }
+
+        .shop-row-info span {
+            color: #b2bec3;
+            font-size: 13px;
+        }
+
+        .shop-buy-btn {
+            flex: none;
+            background: #00b894;
+        }
+
+        .shop-buy-btn:hover:not(:disabled) {
+            background: #55efc4;
+        }
+
+        .shop-buy-btn:disabled {
+            background: #636e72;
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .shop-owned {
+            flex: none;
+            color: #00d2d3;
+            font-size: 13px;
+        }
+
+        .shop-spawn-select {
+            width: 100%;
+            margin: 4px 0 12px;
+        }
+
+        .shop-note {
+            color: #b2bec3;
+            font-size: 12px;
+        }
+
         .help-panel h2 {
             text-align: center;
             margin-top: 0;
@@ -3947,6 +4000,9 @@ void main() {
             <!-- T54: reachable from here both before a round (main menu) and
                  during one (pause menu), mirrors T41's Help button above. -->
             <button class="help-btn" onclick="toggleHighScorePanel(true)">Scores</button>
+            <!-- T55: reachable from here both before a round (main menu) and
+                 during one (pause menu), mirrors T41/T54's buttons above. -->
+            <button class="help-btn" onclick="toggleShopPanel(true)">Shop</button>
         </div>
         <div id="controlSplash" class="control-splash">
             <div id="splashCards" class="splash-cards"></div>
@@ -3975,6 +4031,19 @@ void main() {
             <h2>High Scores</h2>
             <div id="highScoreContent"></div>
             <button class="hs-clear-btn" onclick="confirmClearHighScores()">Clear History</button>
+        </div>
+    </div>
+
+    <!-- T55: spend points banked from run scores on microtubule upgrades,
+         mirrors T41/T54's overlay structure exactly (task design §5) -- same
+         close button, outside-click close, and pause interaction, rebuilt
+         into shopContent on open since balance/ownership can change between
+         opens. -->
+    <div id="shopOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleShopPanel(false)">
+        <div class="help-panel">
+            <button class="ui-close-btn help-close-btn" onclick="toggleShopPanel(false)" aria-label="Close shop">&#10005;</button>
+            <h2>Microtubule Upgrades</h2>
+            <div id="shopContent"></div>
         </div>
     </div>
 
@@ -7903,6 +7972,14 @@ void main() {
 
                 if (p.isBot) {
                     updateBotAI(p, delta);
+                    // T55: bots hold the same Shed the Tail upgrade as the human
+                    // (design §3) and use it on their own the moment it's off
+                    // cooldown -- a bot has no equivalent of a player choosing
+                    // the moment, so "as soon as available" is its loadout.
+                    if (p.upgrades.shedTail && survivalTime - p.effects.lastShedTail > SHED_TAIL_COOLDOWN) {
+                        p.effects.lastShedTail = survivalTime;
+                        deleteOldestTrace(p, SHED_TAIL_FRACTION);
+                    }
                 } else {
                     if (keys[p.controls.left] || keys[p.controls.leftAlt]) p.angle -= 0.08 * delta;
                     if (keys[p.controls.right] || keys[p.controls.rightAlt]) p.angle += 0.08 * delta;
@@ -8035,7 +8112,7 @@ void main() {
                 // 3. Vesicle Collection Logic
                 for (let i = vesicles.length - 1; i >= 0; i--) {
                     let v = vesicles[i];
-                    if (Math.hypot(nextX - v.x, nextY - v.y) < v.radius + TRACE_WIDTH + 6) {
+                    if (Math.hypot(nextX - v.x, nextY - v.y) < v.radius + TRACE_WIDTH + 6 + p.upgrades.pickupRadiusBonus) { // T55
 
                         // T36: 'attack' (red) sends the beneficial effect below to
                         // an opponent instead of the picker; see boostTarget().
@@ -8104,7 +8181,7 @@ void main() {
                 // the one calcifyPauseTimer, capped at ATP_PAUSE_MAX.
                 for (let i = atpGranules.length - 1; i >= 0; i--) {
                     let g = atpGranules[i];
-                    if (Math.hypot(nextX - g.x, nextY - g.y) < g.radius + TRACE_WIDTH + 6) {
+                    if (Math.hypot(nextX - g.x, nextY - g.y) < g.radius + TRACE_WIDTH + 6 + p.upgrades.pickupRadiusBonus) { // T55
                         calcifyPauseTimer = Math.min(ATP_PAUSE_MAX, calcifyPauseTimer + ATP_PAUSE_DURATION);
                         emitParticles(g.x, g.y, 10, { speed: 2.5, spread: Math.PI * 2, life: 0.6, size: 3, color: ATP_COLOR }); // T17
                         atpGranules.splice(i, 1);
@@ -8515,12 +8592,14 @@ void main() {
             // T40: Escape/P are free of every playerConfigs binding (checked against
             // all four) -- primary pause/resume shortcut, mirrors pauseMenuBtn.
             if (isPlaying && (e.key === 'Escape' || e.key === 'p' || e.key === 'P')) {
-                // T41/T54: Escape/P closes whichever overlay is open first,
-                // rather than also toggling the pause menu underneath it.
+                // T41/T54/T55: Escape/P closes whichever overlay is open
+                // first, rather than also toggling the pause menu underneath it.
                 if (helpIsOpen()) {
                     toggleHelpPanel(false);
                 } else if (highScoreIsOpen()) {
                     toggleHighScorePanel(false);
+                } else if (shopIsOpen()) {
+                    toggleShopPanel(false);
                 } else {
                     togglePauseMenu();
                 }
@@ -8551,6 +8630,19 @@ void main() {
                     p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
                 }
             });
+
+            // T55: Shed the Tail active ability. Single-player only (upgrades
+            // don't apply once currentMode > 1, design §4), so this only ever
+            // needs to drive players[0], the sole human in that mode. 'x' is
+            // free of every playerConfigs binding and every dev hotkey.
+            if (isPlaying && !paused && (e.key === 'x' || e.key === 'X')) {
+                let p = players[0];
+                if (p && p.alive && !p.isBot && p.upgrades.shedTail &&
+                    survivalTime - p.effects.lastShedTail > SHED_TAIL_COOLDOWN) {
+                    p.effects.lastShedTail = survivalTime;
+                    deleteOldestTrace(p, SHED_TAIL_FRACTION);
+                }
+            }
         });
         window.addEventListener('keyup', e => keys[e.key] = false);
 
@@ -8626,12 +8718,12 @@ void main() {
         if (!isTouchDevice) {
             uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
             uiElement.addEventListener('mouseleave', () => {
-                // T46/T54: toggleHelpPanel(true)/toggleHighScorePanel(true) hide
-                // #ui, which slides the panel out from under the cursor and fires
-                // this handler -- which then resumed the very round the overlay
-                // had just paused. Whichever overlay is open owns pause for as
-                // long as it stays open.
-                if (helpIsOpen() || highScoreIsOpen()) return;
+                // T46/T54/T55: toggleHelpPanel(true)/toggleHighScorePanel(true)/
+                // toggleShopPanel(true) hide #ui, which slides the panel out
+                // from under the cursor and fires this handler -- which then
+                // resumed the very round the overlay had just paused. Whichever
+                // overlay is open owns pause for as long as it stays open.
+                if (helpIsOpen() || highScoreIsOpen() || shopIsOpen()) return;
                 if (isPlaying) {
                     // Also clears any pause opened via pauseMenuBtn -- otherwise the
                     // mouse leaving would hide the menu but leave the round paused
@@ -8671,9 +8763,9 @@ void main() {
         document.addEventListener('pointerdown', e => {
             if (!paused) return;
             if (uiElement.contains(e.target) || e.target === pauseMenuBtn) return;
-            // T41/T54: each overlay owns its own outside-click close (and its
-            // own resume-on-close logic) while it's open -- don't race it here.
-            if (helpIsOpen() || highScoreIsOpen()) return;
+            // T41/T54/T55: each overlay owns its own outside-click close (and
+            // its own resume-on-close logic) while it's open -- don't race it here.
+            if (helpIsOpen() || highScoreIsOpen() || shopIsOpen()) return;
             uiElement.classList.add('hidden-ui');
             paused = false;
         });
@@ -9735,12 +9827,37 @@ void main() {
         // throw on read *or* write, and a failure here must not stop the
         // player from finishing their round (see docs/tasks/T54-high-score-table.md).
         const HS_KEY = 'cellularZatackaHighScores';
-        const HS_VERSION = 1;
+        const HS_VERSION = 2; // T55: v2 adds balance/owned/preferredSpawnSlot -- see migrateV1ToV2()
         const HISTORY_MAX = 50; // oldest runs drop first once exceeded
         const HS_TABLE_TOP_N = 10;
 
+        // T55: microtubule upgrades, bought with points banked from every
+        // recorded run's score (T53/T54). Applied once at round start (see
+        // resolvePlayerUpgrades()), single-player only (design §4) -- none of
+        // these touch a hazard constant, only the player's own tools, per the
+        // task's hard rule.
+        const UPGRADES = {
+            pickupRadius: { name: 'Wider Pickup Radius', cost: 600, desc: 'Vesicles and ATP granules can be collected from further away.' },
+            shedTail: { name: 'Shed the Tail', cost: 1000, desc: "Press X to cut away the oldest third of your own trace. Long cooldown." },
+            spawnChoice: { name: 'Choice of Spawn', cost: 400, desc: 'Pick which of the 4 starting positions you begin the round at (Shop panel).' }
+        };
+        const PICKUP_RADIUS_BONUS = 12; // px added to the vesicle/ATP collection distance
+        const SHED_TAIL_FRACTION = 0.3; // fraction of own trace points cut per use
+        const SHED_TAIL_COOLDOWN = 30; // seconds
+
         function freshHighScoreData() {
-            return { v: HS_VERSION, runs: [], totals: { rounds: 0, bestGeneration: 0, vesicles: 0, breaks: 0, longestSurvival: 0 } };
+            return {
+                v: HS_VERSION, runs: [], totals: { rounds: 0, bestGeneration: 0, vesicles: 0, breaks: 0, longestSurvival: 0 },
+                balance: 0, owned: {}, preferredSpawnSlot: 0 // T55
+            };
+        }
+
+        // T55: a v1 (T54-era) save has no balance/owned/preferredSpawnSlot --
+        // keep its runs/totals, start the new fields at zero/empty rather than
+        // discarding the whole save the way an unrecognised version would.
+        function migrateV1ToV2(v1) {
+            if (!v1 || !Array.isArray(v1.runs) || !v1.totals) return freshHighScoreData();
+            return { v: 2, runs: v1.runs, totals: v1.totals, balance: 0, owned: {}, preferredSpawnSlot: 0 };
         }
 
         // Unknown/newer v, corrupt JSON, or a missing field -> fresh data,
@@ -9750,7 +9867,9 @@ void main() {
                 let raw = localStorage.getItem(HS_KEY);
                 if (!raw) return freshHighScoreData();
                 let data = JSON.parse(raw);
-                if (!data || data.v !== HS_VERSION || !Array.isArray(data.runs) || !data.totals) return freshHighScoreData();
+                if (data && data.v === 1) data = migrateV1ToV2(data);
+                if (!data || data.v !== HS_VERSION || !Array.isArray(data.runs) || !data.totals ||
+                    typeof data.balance !== 'number' || !data.owned || typeof data.preferredSpawnSlot !== 'number') return freshHighScoreData();
                 return data;
             } catch (err) {
                 return freshHighScoreData();
@@ -9763,6 +9882,52 @@ void main() {
             } catch (err) {
                 console.warn('[T54] could not save run history (storage unavailable or full) -- this round will not be remembered', err);
             }
+        }
+
+        // T55: atomic purchase -- write to storage FIRST; the caller always
+        // re-reads via loadHighScores(), so nothing in memory is ever mutated
+        // ahead of a successful write. Returns false (no charge, no ownership)
+        // on: already owned, insufficient balance, or a storage failure -- the
+        // same failure that can leave a purchase un-persisted must also leave
+        // it un-applied, never one without the other.
+        function purchaseUpgrade(id) {
+            let upgrade = UPGRADES[id];
+            if (!upgrade) return false;
+            let data = loadHighScores();
+            if (data.owned[id] || data.balance < upgrade.cost) return false;
+            let next = Object.assign({}, data, {
+                balance: data.balance - upgrade.cost,
+                owned: Object.assign({}, data.owned, { [id]: true })
+            });
+            try {
+                localStorage.setItem(HS_KEY, JSON.stringify(next));
+            } catch (err) {
+                console.warn('[T55] purchase failed to persist (storage unavailable or full) -- balance and ownership unchanged', err);
+                return false;
+            }
+            return true;
+        }
+
+        window.attemptPurchase = function (id) {
+            purchaseUpgrade(id);
+            renderShopPanel();
+        };
+
+        window.setPreferredSpawnSlot = function (slotStr) {
+            let data = loadHighScores();
+            data.preferredSpawnSlot = parseInt(slotStr, 10) || 0;
+            saveHighScores(data);
+        };
+
+        // T55 design §2: the one place owned upgrades are read into plain
+        // numbers, at round start -- movement/collision code never calls
+        // hasUpgrade()-style checks of its own. Empty in local multiplayer
+        // (currentMode > 1, design §4): upgrades are a single-player
+        // progression, so a 2-4 human round stays symmetric.
+        function resolvePlayerUpgrades() {
+            if (currentMode > 1) return { owned: {}, preferredSpawnSlot: 0 };
+            let data = loadHighScores();
+            return { owned: data.owned, preferredSpawnSlot: data.preferredSpawnSlot };
         }
 
         // T54: mode is human/bot composition, not just player count -- a Quick
@@ -9793,6 +9958,7 @@ void main() {
                 mode: mode, at: Date.now()
             });
             if (data.runs.length > HISTORY_MAX) data.runs.splice(0, data.runs.length - HISTORY_MAX);
+            data.balance += score; // T55: every recorded run banks its score as spendable currency
 
             // Totals are tracked independently of the capped runs list, so they
             // stay true lifetime figures even after old runs age out of it.
@@ -9882,6 +10048,55 @@ void main() {
             renderHighScorePanel();
         };
 
+        // T55: is the shop panel currently up? Mirrors helpIsOpen()/highScoreIsOpen().
+        function shopIsOpen() {
+            return !document.getElementById('shopOverlay').classList.contains('hidden-help');
+        }
+
+        // T55: same pause/resume contract as toggleHelpPanel/toggleHighScorePanel.
+        window.toggleShopPanel = function (show) {
+            let overlay = document.getElementById('shopOverlay');
+            if (show) {
+                renderShopPanel();
+                uiElement.classList.add('hidden-ui');
+                overlay.classList.remove('hidden-help');
+                if (isPlaying) paused = true;
+            } else {
+                overlay.classList.add('hidden-help');
+                if (isPlaying) paused = false;
+                else uiElement.classList.remove('hidden-ui');
+            }
+        };
+
+        const SPAWN_SLOT_NAMES = ['West (default)', 'East', 'North', 'South'];
+
+        // T55: balance, one row per upgrade (cost/description/buy-or-owned),
+        // and -- only once Choice of Spawn is owned -- the spawn-slot picker.
+        // No currency purchase, no ads (design §5): the only way to a Buy
+        // button being enabled is a balance banked from real recorded runs.
+        function renderShopPanel() {
+            let data = loadHighScores();
+            let rows = Object.keys(UPGRADES).map(id => {
+                let u = UPGRADES[id];
+                let owned = !!data.owned[id];
+                let afford = data.balance >= u.cost;
+                let action = owned ? '<span class="shop-owned">Owned</span>' :
+                    `<button class="shop-buy-btn" ${afford ? '' : 'disabled'} onclick="attemptPurchase('${id}')">Buy (${u.cost})</button>`;
+                return `<div class="shop-row"><div class="shop-row-info"><b>${u.name}</b><span>${u.desc}</span></div>${action}</div>`;
+            }).join('');
+            let spawnPicker = data.owned.spawnChoice ? `
+                <h3>Spawn position</h3>
+                <select class="shop-spawn-select" onchange="setPreferredSpawnSlot(this.value)">
+                    ${SPAWN_SLOT_NAMES.map((n, i) => `<option value="${i}" ${data.preferredSpawnSlot === i ? 'selected' : ''}>${n}</option>`).join('')}
+                </select>` : '';
+            document.getElementById('shopContent').innerHTML = `
+                <p>Balance: <b>${data.balance}</b> points</p>
+                ${rows}
+                ${spawnPicker}
+                <p class="shop-note">Upgrades apply to single-player rounds only (bots get the same loadout). Not available in local multiplayer (2+ human players).</p>
+            `;
+        }
+
         // T53: end-of-round card, built into #ui/#scoreboard's existing spot
         // (AGENT_CONDUCT.md 4.4a -- draw-only, reads state, never mutates it).
         function renderStatsCard() {
@@ -9961,23 +10176,49 @@ void main() {
             players = [];
 
             let totalPlayers = currentMode + aiCount;
+
+            // T55 design §2/§3: resolved ONCE here, into plain numbers on each
+            // player object below -- nothing downstream calls hasUpgrade()
+            // itself. Bots get the exact same owned set as the human (design
+            // §3: "comparable loadout"), so a purchase never quietly makes the
+            // round easier relative to the bots in it. resolvePlayerUpgrades()
+            // already empties `owned` in local multiplayer (currentMode > 1).
+            let resolvedUpgrades = resolvePlayerUpgrades();
+            let owned = resolvedUpgrades.owned;
+            // Player 0 (the sole human when currentMode === 1) spawns at its
+            // preferred slot instead of slot 0; everyone else keeps filling the
+            // remaining slots in their original order, so no two players ever
+            // land on the same spawn point.
+            let preferredSlot = owned.spawnChoice ? resolvedUpgrades.preferredSpawnSlot : 0;
+            let spawnSlotForIndex = [preferredSlot, ...[0, 1, 2, 3].filter(s => s !== preferredSlot)];
+
             for (let i = 0; i < totalPlayers; i++) {
-                let config = playerConfigs[i];
+                let config = playerConfigs[i]; // identity (id/color/controls) always comes from the player's own slot
+                let spawnCfg = playerConfigs[spawnSlotForIndex[i]]; // position/facing only
                 let isBot = (i >= currentMode);
                 players.push({
-                    id: config.id, x: activeCell.x + config.dx, y: activeCell.y + config.dy, angle: config.angle,
+                    id: config.id, x: activeCell.x + spawnCfg.dx, y: activeCell.y + spawnCfg.dy, angle: spawnCfg.angle,
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
                     controls: config.controls, isBot: isBot,
                     alive: true, traceSegments: [[]], isGap: false, gapCounter: 0, traceDist: 0, particleTick: 0, // T17
                     assemblyTick: 0, // T56
                     nextSegId: 1, // T58: stable per-segment id counter for isOwnNeck()
                     barX: 0, barY: 0, barGhostTimer: 0, barHunterTimer: 0, barGolgiTimer: 0, barSpeedTimer: 0, barSpeedLevel: 1, // T22 step 5: drawPlayerBars() snapshot
+                    // T55: resolved once here (not read from `owned` anywhere
+                    // else) -- pickupRadiusBonus is the only number the
+                    // collision/pickup code reads; shedTail just gates the key
+                    // handler/bot check below.
+                    upgrades: {
+                        pickupRadiusBonus: owned.pickupRadius ? PICKUP_RADIUS_BONUS : 0,
+                        shedTail: !!owned.shedTail
+                    },
                     effects: {
                         speedTimer: 0, golgiTimer: 0, speedLevel: 1, lastMitoHit: -10,
                         blueCount: 0, blueWindow: 0, ghostTimer: 0,
                         redCount: 0, redWindow: 0, hunterTimer: 0, lastMassHit: -10, // T14
                         lastClusterHit: -10, // T38
-                        lastChaserHit: -10 // T57
+                        lastChaserHit: -10, // T57
+                        lastShedTail: -Infinity // T55: usable immediately at round start
                     },
                     // T53: per-round counters, built alongside effects so the two can't
                     // drift apart. Incremented at the existing event sites (vesicle

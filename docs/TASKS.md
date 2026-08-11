@@ -292,7 +292,38 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > `raycast()`/`rebuildSpatialGrid()` are untouched, so §7.6's regression sweep
 > doesn't apply here. `sw.js` `CACHE_NAME` bumped v31→v32; `dist/` rebuilt. See
 > `docs/tasks/T54-high-score-table.md` Findings for full numbers.
-> **T55 (microtubule upgrades) is now `READY`.**
+>
+> **T55 landed 2026-08-11 — Track L (Phase 8) is now fully done.** Three
+> upgrades, bought with points banked from every recorded run's score (`HS_VERSION`
+> 1→2, migrated in place): Wider Pickup Radius (+12px vesicle/ATP collection
+> distance), Shed the Tail ('x' key, 30s cooldown, cuts the oldest 30% of your
+> own trace via the existing `deleteOldestTrace()`), and Choice of Spawn (pick
+> which of the 4 starting slots you begin at, persisted alongside the save).
+> Two of the task's five suggested examples ("second boost slot", "faster
+> target-mode switching") don't map onto anything the codebase actually
+> restricts today and were skipped rather than faked — see Findings. Resolved
+> once per player at round start (`resolvePlayerUpgrades()` → `p.upgrades`),
+> bots always get the human's exact loadout, and everything is guarded off
+> whenever `currentMode > 1` (local multiplayer) — confirmed empty upgrades
+> and default spawn for a 2-human round even with all 3 owned. No hazard
+> constant touched (`TRACE_HITBOX`/`EFFECT_DURATION`/the three hit-cooldowns
+> read back identical under a full loadout; `checkCollision`/`checkArcCollision`/
+> `raycast`/`rebuildSpatialGrid` don't appear in the diff at all). Purchase is
+> atomic against induced storage failure (write-first, verified both ways);
+> persistence survives a real reload; a real v1 (T54-era) payload migrates
+> cleanly to v2. Win-rate check: 10 headless Gen-2 4-player rounds with every
+> player (human slot piloted by the same AI as the bots, for lack of a
+> scriptable human) holding the identical full loadout — human slot won 1/10,
+> nowhere near making anyone unbeatable. Shop panel (new overlay, mirrors
+> T41/T54's structure exactly) screenshotted legible at 390×844, 844×390 and
+> 1280×800. `sw.js` `CACHE_NAME` bumped v32→v33; `dist/` rebuilt. Two
+> incidental findings filed to `docs/BACKLOG.md` (raycast()'s reward-sensing
+> radius doesn't reflect the pickup upgrade; a suspicious starting-slot skew
+> in the base 4-player win distribution). See
+> `docs/tasks/T55-microtubule-upgrades.md` Findings for full numbers.
+>
+> **Track L (Phase 8) is fully done. Next up: Phase 7, starting with T28
+> (fixed-timestep simulation), already `READY`.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -483,7 +514,7 @@ after T22 — build and play each layer before adding the next.
 |----|------|-----------|--------|
 | T53 | [Run stats and a score](tasks/T53-run-stats-and-score.md) | — | `DONE` |
 | T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `DONE` |
-| T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `READY` |
+| T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `DONE` |
 
 ### Parked
 

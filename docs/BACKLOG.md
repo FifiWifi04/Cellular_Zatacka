@@ -789,3 +789,28 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   string. Not touched — out of scope for T53, which only extends the actual
   game-over paths (`renderStatsCard()` calls were added to those, not to this
   branch). — 2026-08-11
+
+## Found while doing T55 (microtubule upgrades) — 2026-08-11
+
+- **`raycast()`'s vesicle/ATP reward-sensing radius doesn't know about the
+  `pickupRadius` upgrade.** The actual collection check in `updatePlayers()`
+  now tests `v.radius + TRACE_WIDTH + 6 + p.upgrades.pickupRadiusBonus`, but
+  the sensor pre-pass at the two `item.type === 'vesicle'`/`'atp'` branches in
+  `raycast()` still tests the base `+6` pad with no bonus term — a bot holding
+  the upgrade can actually collect from `PICKUP_RADIUS_BONUS` (12px) further
+  out than it currently perceives as "close enough to be worth a detour."
+  Reward-channel precision gap only (not a hazard, so §4.1's dual-path rule
+  doesn't strictly apply); threading a per-caster bonus through raycast()'s
+  signature (currently `startX, startY, angle, maxDist, casterId`, no player
+  object) was out of scope for T55's smallest-diff rule. — 2026-08-11
+
+- **4-player round win distribution looks skewed by starting slot, not by
+  anything upgrade-related.** T55's win-rate check ran 10 headless Gen-2
+  rounds with all 4 players (1 human-slot + 3 bots) holding an *identical*
+  full upgrade loadout, piloted by the same AI. Win share was P1 10%, P2 20%,
+  P3 30%, P4 40% — since loadout and piloting skill were held constant across
+  all 4, this reads like a pre-existing asymmetry in the base 4-player mode
+  (spawn slot, or turn order in a simultaneous-tie collision check), not
+  something T55 introduced. Small sample (10 rounds); worth a dedicated
+  measurement before trusting the exact numbers, but the direction is
+  suspicious. — 2026-08-11
