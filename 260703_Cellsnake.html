@@ -252,6 +252,42 @@
             text-shadow: 0 0 10px rgba(0, 210, 211, 0.5);
         }
 
+        /* T53: end-of-round stats card. Lives inside #ui so it inherits its
+           existing min-width/max-height/overflow-y clamp (T24) instead of
+           becoming a second thing that might not fit on a phone. */
+        .stats-card {
+            margin-top: 6px;
+            text-align: left;
+        }
+
+        .stats-card.hidden-stats {
+            display: none;
+        }
+
+        .stats-card-player {
+            margin: 6px 0;
+            padding: 6px 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border-left: 4px solid #636e72;
+            font-size: clamp(11px, 3vw, 13px);
+        }
+
+        .stats-card-player.dead {
+            opacity: 0.55;
+        }
+
+        .stats-card-name {
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+
+        .stats-card-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
         /* When full screen is active, strip away the borders and fill the monitor */
         :fullscreen #game-container {
             width: 100vw;
@@ -662,6 +698,7 @@
         </div>
         <h3 id="controlsText">P1 (Blue): Left/Right Arrows</h3>
         <h2 id="scoreboard">Survival Time: 0.0s</h2>
+        <div id="statsCard" class="stats-card hidden-stats"></div>
     </div>
 
     <!-- T41: static How-to-Play guide, closable, reachable from the menu above. -->
@@ -1542,6 +1579,7 @@
         let fuzzToggleTimer = 0;
         let fuzzStatsTimer = 0;
         const scoreText = document.getElementById('scoreboard');
+        const statsCardElement = document.getElementById('statsCard'); // T53
         const warningElement = document.getElementById('globalWarning');
         const modeSelect = document.getElementById('modeSelect');
         const aiSelect = document.getElementById('aiSelect');
@@ -4117,6 +4155,14 @@
                     if (!mitosis.generationCounted) {
                         activeCell.generation++;
                         mitosis.generationCounted = true;
+                        // T53: credited to whoever made it to Cell B (section 4 above
+                        // already killed anyone who didn't) -- a survived mitosis, not
+                        // just an elapsed one.
+                        players.forEach(p => {
+                            if (!p.alive) return;
+                            p.stats.mitosisEvents++;
+                            if (activeCell.generation > p.stats.maxGeneration) p.stats.maxGeneration = activeCell.generation;
+                        });
                     }
 
                     // 9. Reset the cycle for another 4 minutes later
@@ -4623,6 +4669,7 @@
                                 destroyNecroticOrganelle(o);
                             }
                             p.effects.lastClusterHit = survivalTime;
+                            p.stats.clusterBreaks++; // T53
                         }
                         break;
                     }
@@ -4664,6 +4711,7 @@
                             if (survivalTime - p.effects.lastMassHit > MASS_HIT_COOLDOWN) {
                                 malignantMass.blocks.splice(i, 1);
                                 p.effects.lastMassHit = survivalTime;
+                                p.stats.massBreaks++; // T53
                             }
                         } else {
                             p.alive = false;
@@ -4724,6 +4772,7 @@
                         // T36: 'attack' (red) sends the beneficial effect below to
                         // an opponent instead of the picker; see boostTarget().
                         let target = boostTarget(p);
+                        p.stats.vesicles[v.type]++; // T53: credited to the picker, not the redirect target
 
                         if (v.type === 'membrane') {
                             if (target.effects.ghostTimer > 0) {
@@ -4824,6 +4873,13 @@
                     seg.push({ x: nextX, y: nextY, d: p.traceDist });
                 }
                 trimTraceToCap(p, MAX_TRACE_POINTS);
+
+                // T53: unconditional (unlike p.traceDist above, which only tracks
+                // drawn-trace length) so gap/ghost movement still counts toward the
+                // anti-turtling distance term -- actualSpeed*delta already accounts
+                // for elapsed real time (see stepHeadless's comment), so this stays
+                // frame-rate independent without a separate deltaSec multiply.
+                p.stats.distance += Math.hypot(nextX - p.x, nextY - p.y);
 
                 p.x = nextX;
                 p.y = nextY;
@@ -5929,6 +5985,7 @@
                 isPlaying = false;
                 uiElement.classList.remove('hidden-ui'); // SHOW MENU ON DEATH
                 scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s · Gen ${activeCell.generation}`;
+                renderStatsCard(); // T53
                 return { ended: true };
             } else if (totalPlayers > 1 && activePlayers.length <= 1) {
                 if (fuzzActive) {
@@ -5947,6 +6004,7 @@
                 if (totalPlayers >= 3) scoreStr += ` | P3: ${playerWins[3]}`;
                 if (totalPlayers >= 4) scoreStr += ` | P4: ${playerWins[4]}`;
                 scoreText.innerText = scoreStr;
+                renderStatsCard(); // T53
                 return { ended: true };
             }
 
@@ -6377,8 +6435,49 @@
             startRound();
         };
 
+        // T53: score weights, named so the reasoning lives with the numbers
+        // instead of scattered through scoreRun(). Generations dominate on
+        // purpose -- reaching a new generation means surviving a mitosis
+        // event, the single biggest jump in hazard density the game has, so
+        // it outweighs a long but timid round. per100px is a mild
+        // anti-turtling nudge, not a primary term. See docs/tasks/
+        // T53-run-stats-and-score.md Findings for the three worked examples.
+        const SCORE = { perSecond: 2, perGeneration: 750, perVesicle: 15, perBreak: 50, per100px: 1 };
+        function scoreRun(stats, survivalSeconds) {
+            let vesicleCount = stats.vesicles.membrane + stats.vesicles.lysosome + stats.vesicles.mitochondria;
+            let breakCount = stats.clusterBreaks + stats.massBreaks;
+            return Math.round(
+                survivalSeconds * SCORE.perSecond +
+                (stats.maxGeneration - 1) * SCORE.perGeneration +
+                vesicleCount * SCORE.perVesicle +
+                breakCount * SCORE.perBreak +
+                (stats.distance / 100) * SCORE.per100px
+            );
+        }
+
+        // T53: end-of-round card, built into #ui/#scoreboard's existing spot
+        // (AGENT_CONDUCT.md 4.4a -- draw-only, reads state, never mutates it).
+        function renderStatsCard() {
+            let html = '';
+            for (let p of players) {
+                let s = p.stats;
+                let score = scoreRun(s, survivalTime);
+                html += `<div class="stats-card-player${p.alive ? '' : ' dead'}" style="border-left-color:${toHex(p.color)}">` +
+                    `<div class="stats-card-name">P${p.id}${p.isBot ? ' (Bot)' : ''} -- ${p.alive ? 'Survived' : 'Eliminated'} -- Score ${score}</div>` +
+                    `<div class="stats-card-row"><span>Generation reached</span><span>${s.maxGeneration}</span></div>` +
+                    `<div class="stats-card-row"><span>Vesicles (mem/lys/mito)</span><span>${s.vesicles.membrane}/${s.vesicles.lysosome}/${s.vesicles.mitochondria}</span></div>` +
+                    `<div class="stats-card-row"><span>Breaks (cluster/mass)</span><span>${s.clusterBreaks}/${s.massBreaks}</span></div>` +
+                    `<div class="stats-card-row"><span>Mitosis events</span><span>${s.mitosisEvents}</span></div>` +
+                    `<div class="stats-card-row"><span>Distance</span><span>${Math.round(s.distance)}px</span></div>` +
+                    `</div>`;
+            }
+            statsCardElement.innerHTML = html;
+            statsCardElement.classList.remove('hidden-stats');
+        }
+
         window.startRound = function () {
             // 1. Clear previous round data
+            statsCardElement.classList.add('hidden-stats'); // T53: hide the previous round's card
             uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
             atpGranules = []; atpLayer.clear(); calcifyPauseTimer = 0; // T51
@@ -6452,6 +6551,15 @@
                         redCount: 0, redWindow: 0, hunterTimer: 0, lastMassHit: -10, // T14
                         lastClusterHit: -10, // T38
                         lastChaserHit: -10 // T57
+                    },
+                    // T53: per-round counters, built alongside effects so the two can't
+                    // drift apart. Incremented at the existing event sites (vesicle
+                    // pickup, cluster/mass break, mitosis completion, movement) --
+                    // see scoreRun()/renderStatsCard() below for how this is read.
+                    stats: {
+                        vesicles: { membrane: 0, lysosome: 0, mitochondria: 0 },
+                        clusterBreaks: 0, massBreaks: 0, mitosisEvents: 0,
+                        distance: 0, maxGeneration: 1
                     }
                 });
                 players[players.length - 1].traceSegments[0].id = 0; // T58: id 0 for the starting segment

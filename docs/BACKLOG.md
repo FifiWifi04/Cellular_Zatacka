@@ -777,3 +777,15 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   rebuilding `centralHitboxes` (a collision-relevant state mutation hiding
   inside a nominally-"draw" function) — already flagged in T22 step 4's
   Findings, still true here. — 2026-08-11
+
+## Found while doing T53 (run stats and a score) — 2026-08-11
+
+- **The `totalPlayers === 1` "You Survived" branch in `stepSimulation()` is
+  dead in practice.** It sets `scoreText.innerText` to `You Survived: Xs! ·
+  Gen Y` and stops the ticker when `!players.some(p => p.alive) && !godMode`,
+  but the very next block (`activePlayers.length === 0`, same tick) always
+  fires under the identical condition and overwrites `scoreText.innerText`
+  with `Game Over! Time: Xs · Gen Y` before a frame ever renders the first
+  string. Not touched — out of scope for T53, which only extends the actual
+  game-over paths (`renderStatsCard()` calls were added to those, not to this
+  branch). — 2026-08-11

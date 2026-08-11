@@ -259,6 +259,21 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **T28 (fixed-timestep simulation) is now `READY`** — its only dependency,
 > T22, is fully done.
+>
+> **T53 landed 2026-08-11** — per-player `p.stats` (vesicles by type, cluster/
+> mass breaks, mitosis events, distance, max generation reached), a
+> `scoreRun()` with named weights that deliberately let generations dominate
+> (worked examples: timid Gen 1 580, aggressive Gen 2 2086, long Gen 3 3795),
+> and an end-of-round card extending the existing `#ui`/`#scoreboard` game-over
+> spot (readable and reachable at 390x844/844x390/1280x800, restart still works
+> both by keyboard and click with the card up). Bots get the same stats object,
+> no special-casing. Distance proven frame-rate independent (1800/1800/1800.75px
+> across dt=1/20, 1/60, 1/120 for the same 20 game-seconds) and speed-proportional
+> (1800px at Normal vs 4200px at Very Fast). `worldChildren` flat (16) across 20
+> scripted restarts; regression sweep (§7.6) passed at all 3 speeds via direct
+> `checkCollision()` calls. `sw.js` `CACHE_NAME` bumped v30→v31; `dist/` rebuilt.
+> See `docs/tasks/T53-run-stats-and-score.md` Findings for full numbers.
+> **T54 (persistent high-score table) is now `READY`.**
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -447,8 +462,8 @@ after T22 — build and play each layer before adding the next.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T53 | [Run stats and a score](tasks/T53-run-stats-and-score.md) | — | `READY` |
-| T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `BLOCKED` |
+| T53 | [Run stats and a score](tasks/T53-run-stats-and-score.md) | — | `DONE` |
+| T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `READY` |
 | T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `BLOCKED` |
 
 ### Parked
