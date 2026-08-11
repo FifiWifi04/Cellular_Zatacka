@@ -54,8 +54,9 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > rather than made stable. `sw.js` `CACHE_NAME` bumped v22→v23; `dist/` rebuilt.
 > See `docs/tasks/T58-red-vesicle-instakills-opponent.md` Findings.
 >
-> **T22 is next** (sim/render split, already `READY`, depends only on T06a).
-> After T22: **Track L** (Phase 8), then Phase 7. Phase 9
+> **T22 landed 2026-08-11 — all 7 steps done, see the Track G notes below.**
+> Next up: **Track L** (Phase 8, starting with T53, already `READY`), then
+> Phase 7 starting with T28 (now `READY`). Phase 9
 > (`PHASE9-LATE-GAME-ARC.md`) is scoped but deliberately has no task files until
 > T52/T57 have been played.
 >
@@ -231,9 +232,33 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > `docs/BACKLOG.md` along with the background-elements block, which stayed
 > fused and out of scope since `cytosolParticles`/`membraneProtrusionsList`
 > entries are themselves `PIXI.Graphics` instances with no separate physics
-> record to split). See `docs/tasks/T22-sim-render-split.md` Findings. Step 7
-> remains; T22 stays `READY` until it lands. **Next up: Step 7** (headless
-> step loop exposed and benchmarked).
+> record to split). See `docs/tasks/T22-sim-render-split.md` Findings.
+>
+> **Step 7 (headless step loop exposed and benchmarked) landed 2026-08-11 —
+> T22 is now fully `DONE`.** `window.stepHeadless(seconds, dt)` fixes a bug in
+> the task's own pseudocode: `stepSimulation()` reads `deltaSec` from
+> `app.ticker.deltaMS`, not from its `delta` parameter, and `delta` itself is
+> PIXI frame-units (`≈ dt_seconds * 60`, not seconds) — so a naive
+> `stepSimulation(dt)` loop would leave `deltaSec` frozen at a stale value and
+> under-drive every `delta`-scaled quantity 60x. The fix sets
+> `app.ticker.deltaMS = dt * 1000` and calls `stepSimulation(dt * 60)` per
+> iteration, matching what a real tick at that rate would produce, and stops
+> early on `{ended:true}`. `Game.run_headless_seconds()` added to
+> `tools/verify_harness.py`. **Speedup measured: 17.5x** — 30 game-seconds
+> headless in 4.01 wall-seconds (7.53x real time) versus the same 30
+> game-seconds through the rendered loop in 70.63 wall-seconds (0.43x real
+> time, matching the harness's documented ~0.38x at 640x480). A 10s immortal
+> headless run advanced `survivalTime` by 10.2s and produced 2209 trace points
+> with `worldChildren` unchanged (16, same as an equivalent rendered round) and
+> console clean; a screenshot taken immediately after showed a fully-formed,
+> undistorted scene once a real frame caught up. A real (non-headless) 30.2s
+> round played normally afterward, and an 8.2s headless run over `file://`
+> (offline, `dist/`) also completed clean. `dist/` rebuilt (`--check` passes);
+> `sw.js` `CACHE_NAME` bumped v29→v30. See
+> `docs/tasks/T22-sim-render-split.md` Findings for full numbers.
+>
+> **T28 (fixed-timestep simulation) is now `READY`** — its only dependency,
+> T22, is fully done.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -335,7 +360,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T22 | [Separate simulation from rendering](tasks/T22-sim-render-split.md) ⏳ *resumable* | T06a | `READY` |
+| T22 | [Separate simulation from rendering](tasks/T22-sim-render-split.md) ⏳ *resumable* | T06a | `DONE` |
 
 > **Phase 1 gate: PASS** — `docs/reports/PHASE1-GATE.md`, signed off 2026-08-07.
 > The retention T06c chased was resolved by T07's trace cap: run A re-measured
@@ -363,7 +388,7 @@ later returns FAIL, revisit anything that landed in that window.
 
 | ID | Task | Depends on | Status |
 |----|------|-----------|--------|
-| T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `BLOCKED` |
+| T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `READY` |
 | T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `BLOCKED` |
 | T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `BLOCKED` |
 | T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `BLOCKED` |

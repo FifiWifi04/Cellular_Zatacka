@@ -137,6 +137,17 @@ class Game:
                     f"split this check into several scripts.")
             self.page.wait_for_timeout(250)
 
+    # T22 step 7: drives window.stepHeadless() directly instead of polling
+    # survivalTime over wall-clock ticks -- no rendering happens at all, so
+    # there is no TRAP-4-style ratio to wait out.
+    def run_headless_seconds(self, seconds, dt=1 / 60):
+        start = self.evaluate("survivalTime")
+        t0 = time.time()
+        self.evaluate(f"() => window.stepHeadless({seconds}, {dt})")
+        wall = time.time() - t0
+        elapsed = self.evaluate("survivalTime") - start
+        return elapsed, wall
+
     def stats(self):
         return self.evaluate("""{
             players: players.length,

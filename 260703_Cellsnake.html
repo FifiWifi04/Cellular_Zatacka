@@ -6475,6 +6475,26 @@
         // running a mitosis event.
         window.setGeneration = n => { activeCell.generation = n; };
 
+        // T22 step 7: advance the simulation with no PIXI draw call at all.
+        // stepSimulation() reads deltaSec from app.ticker.deltaMS (not from its
+        // own delta parameter -- see the top of that function), so a fake tick
+        // must set deltaMS too, or survivalTime would advance by whatever the
+        // last real render tick left behind instead of dt. delta (PIXI's
+        // deltaTime) is dt seconds * 60, matching the engine's 60fps target
+        // (targetFPMS 0.06) that the rest of the codebase already assumes --
+        // see AGENT_CONDUCT.md's "3.5 * delta pixels per frame".
+        window.stepHeadless = function (seconds, dt) {
+            dt = dt || 1 / 60;
+            let steps = 0;
+            for (let t = 0; t < seconds; t += dt) {
+                app.ticker.deltaMS = dt * 1000;
+                let result = stepSimulation(dt * 60);
+                steps++;
+                if (result.ended) break;
+            }
+            return steps;
+        };
+
         generateMap();
         world.scale.set(0.3);
         world.x = SCREEN_WIDTH / 2 - activeCell.x * 0.3;

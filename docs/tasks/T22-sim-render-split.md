@@ -125,7 +125,7 @@ verifying after each:
 - [x] Step 4 — mitosis split (three state mutations moved out of the draw path)
 - [x] Step 5 — players/traces split
 - [x] Step 6 — `gameLoop` restructured into `stepSimulation` + `renderFrame`
-- [ ] Step 7 — headless step loop exposed and benchmarked
+- [x] Step 7 — headless step loop exposed and benchmarked
 
 Commit per step (`T22: <step>`), push, then decide whether there is budget for
 the next. Leave T22 `READY` until every step is ticked.
@@ -477,7 +477,69 @@ Not attempted (belongs to step 7): `window.stepHeadless` and its benchmark —
 no headless stepper exists until this step made `stepSimulation()` callable
 on its own, which it now is.
 
-Next: Step 7 — headless step loop exposed and benchmarked.
+**Step 7 (headless step loop exposed and benchmarked), landed 2026-08-11.**
+Added `window.stepHeadless(seconds, dt)`, placed next to the existing
+`window.setGeneration` headless-driver hook. The task's own pseudocode
+(`for (let t=0;t<seconds;t+=dt) stepSimulation(dt)`) does not work as written:
+`stepSimulation()`'s `deltaSec` is read from `app.ticker.deltaMS` (line 1 of
+the function), not derived from its own `delta` parameter, so calling
+`stepSimulation(dt)` directly leaves `deltaSec` (and therefore
+`survivalTime`, trace growth, every timer) pinned to whatever the last real
+render tick left in `app.ticker.deltaMS` — a value that never changes across
+a synchronous headless loop, since no RAF tick can interleave with it.
+Separately, the `delta` parameter itself is in PIXI "frames" units
+(`deltaTime = deltaMS * targetFPMS`, `targetFPMS = 0.06` i.e. a 60fps target
+— PIXI's unmodified default, confirmed nowhere in the game code overrides
+`TARGET_FPMS`), not seconds — passing `dt` (e.g. `1/60`) straight through as
+`delta` would under-drive every `delta`-scaled quantity (e.g.
+`globalRotation += 0.0015 * delta`) by 60x. This matches the existing
+convention documented in `AGENT_CONDUCT.md` §4.2 ("players move up to
+`3.5 * delta` pixels per frame") and the fuzzer's own dilation code
+(`delta *= 4.0; deltaSec *= 4.0;`, always scaled together, confirming
+`delta == deltaSec * 60` is an invariant the rest of the codebase already
+relies on). The implementation sets `app.ticker.deltaMS = dt * 1000` and
+calls `stepSimulation(dt * 60)` each iteration, so both quantities read
+correctly inside `stepSimulation()` exactly as a real tick at that framerate
+would produce them; it breaks the loop early if a call returns
+`{ended:true}`, mirroring `gameLoop`'s own early return on round-end. No
+change was made to `stepSimulation()`, `gameLoop`, or any `updateX()`
+function — the fix lives entirely in the new driver function, per the task's
+"keep passing the existing variable `delta` through, unchanged" rule.
+
+Added `Game.run_headless_seconds(seconds, dt=1/60)` to `tools/verify_harness.py`
+alongside `run_game_seconds()`; it calls `window.stepHeadless` once and reads
+`survivalTime` before/after, with no wall-clock polling loop (headless has no
+TRAP-4-style real-time ratio to wait out).
+
+Verified: a 10-second immortal headless run (1 player + 3 bots) advanced
+`survivalTime` by 10.2s in 1.71 wall-seconds, produced 2209 trace points, left
+`worldChildren` at 16 (same baseline as an equivalent real round, meaning no
+sprites were created or destroyed by the headless path), and left the console
+completely clean — matching this step's own Verification item 5 almost
+exactly. A screenshot taken immediately after the headless call (before any
+further real ticks) shows a fully-formed, undistorted scene (traces, nucleus,
+organelles, vesicles all in consistent positions), confirming the advanced
+physics state renders correctly once a real frame catches up — no corruption
+from manipulating `app.ticker.deltaMS` mid-round. **Headless speedup
+measured**: 30 game-seconds headless took 4.01 wall-seconds (7.53x real
+time) versus the same 30 game-seconds through the normal rendered
+`run_game_seconds()` loop taking 70.63 wall-seconds (0.43x real time, in
+line with the harness docstring's documented ~0.38x at 640x480) — a **17.5x
+speedup**, meaning T06a-style soaks that took ~40 minutes rendered could run
+in roughly 2-3 minutes headless. A real (non-immortal, non-headless) 30.2s
+round with 1 player + 3 bots played normally afterward (2/4 alive, the
+unpiloted human died to the membrane as expected, console clean),
+confirming the new code path doesn't affect ordinary rendered gameplay. An
+8.2s headless run over `file://` (offline, `dist/`) also completed clean.
+`node --check` on the extracted `<script>` body passed. The mechanical
+check (`stepSimulation()`'s own body, brace-matched after CRLF
+normalization) still shows zero `PIXI`/`Layer`/`.sprite`/`.visible` tokens
+outside the one pre-existing comment — unchanged by this step, since
+`window.stepHeadless` is a separate driver function, not part of
+`stepSimulation()` itself. `dist/` rebuilt (`--check` passes); `sw.js`
+`CACHE_NAME` bumped v29→v30.
+
+**T22 is now fully done — all 7 steps landed.**
 
 ---
 
@@ -528,12 +590,12 @@ faster.
 
 ## Definition of done
 
-- [ ] `stepSimulation()` provably free of display-object references
-- [ ] `renderFrame()` provably free of state mutation
-- [ ] Mitosis's three state mutations moved out of the draw path
-- [ ] Behaviour parity demonstrated against a recorded baseline
-- [ ] `window.stepHeadless` exposed; speedup measured and reported
-- [ ] `docs/TASKS.md`: T22 → `DONE`; T28 → `READY`
+- [x] `stepSimulation()` provably free of display-object references
+- [x] `renderFrame()` provably free of state mutation
+- [x] Mitosis's three state mutations moved out of the draw path
+- [x] Behaviour parity demonstrated against a recorded baseline
+- [x] `window.stepHeadless` exposed; speedup measured and reported
+- [x] `docs/TASKS.md`: T22 → `DONE`; T28 → `READY`
 
 ## Rollback
 
