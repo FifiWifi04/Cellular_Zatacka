@@ -831,3 +831,56 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   at the cost of NAT-traversal reliability. Not attempted here — see
   `docs/tasks/T29-net-transport-lobby.md` Findings for the full reasoning.
   — 2026-08-11
+
+## Found while doing T30 (host-authoritative state sync) — 2026-08-12
+
+- **ER/Golgi wall geometry (`centralHitboxes`) is not synced.** Every peer's
+  `generateMap()` still calls `drawArcs()` with its own unseeded
+  `Math.random()`, so the ER/Golgi visuals a client draws will not match the
+  host's actual (lethal, host-only-evaluated) hitboxes at the same round.
+  Collision is unaffected -- a client never runs `checkCollision()` -- but a
+  death against ER/Golgi will look, on a client's screen, like dying against
+  empty space, or a wall in the wrong place. The task's own "what crosses the
+  wire" design table only lists organelles/vesicles/mitosis/infection -- it
+  predates T02 (ER/Golgi) being folded into the hazard set it's meant to
+  cover. `seed` (added by T29, still sent in the `'start'` message) is the
+  obvious mechanism for a future fix: replace every `Math.random()` call
+  inside `generateMap()`/`drawArcs()` (and only those) with a seeded PRNG,
+  consumed in the same order on every peer, so the one-time static geometry
+  comes out identical without transmitting it. Not attempted in T30 -- it's
+  an invasive, many-call-site change working against "smallest possible
+  diff", and every verification round in T30's own Findings deliberately
+  stayed under the point where an ER/Golgi death would matter to the check.
+- **Gen 2+ hazard systems are not synced at all**: calcification detail
+  beyond the plain `radiusX`/`radiusY` (which T30 does send), organelle
+  necrosis, the malignant mass, necrotic-cluster debris, ATP granules, and
+  the Gen 4+ nucleus chasers/feed meter. A client never runs
+  `updateCalcification()`/`updateNecroticClusters()`/`updateMalignantMass()`/
+  `updateATP()`/`updateNucleusChasers()` (it never runs `stepSimulation()` at
+  all), so none of that state exists locally to draw. The host still
+  evaluates all of it correctly for its own authoritative collision -- a
+  client just won't render any of it, so a match that reaches Gen 2+ looks
+  increasingly incomplete on every screen but the host's, even though deaths
+  stay correct. T30's own verification stayed within Gen 1 (rounds short
+  enough that `MITOSIS_INTERVAL`, 240s, never elapses) specifically to avoid
+  this gap. Full sync would mean extending `netBuildWorldMessage()`/
+  `netApplyWorldSnapshot()` with one more array-of-arrays per system, plus
+  local sprite-lifecycle management for each (necrotic clusters and the
+  malignant mass both already have draw functions that assume live physics
+  objects with `.sprite`, same pattern as organelles) -- real work, not
+  wired up here.
+- **Mitosis/infection full state is not synced** -- only the single derived
+  `frozen` boolean (`isCellFrozen`) crosses the wire, not
+  `mitosis.state`/`mitosis.cellB`/`mitosis.microtubules`/`infection.state`/
+  `infection.particles`. A client's local `mitosis`/`infection` objects sit
+  at their round-start idle defaults for the whole match; this happens to be
+  correct for any round under `MITOSIS_INTERVAL`/`infection.nextWarningTime`
+  (60s default), which is exactly what T30's verification rounds stayed
+  under. A longer real match would show a mitosis event or virus warning on
+  the host's screen and nothing at all on a client's.
+- **No host migration or reconnect** (T32's stated job, not T30's). A peer
+  disconnecting mid-round leaves `netState.remoteInput[peerId]` frozen at its
+  last value, so the host keeps steering that player in a straight line
+  forever instead of marking it dead or removed -- same "not this task's
+  problem" boundary T29 already documented for `'hostLeft'` (host leaving
+  ends the round for everyone, no migration). — 2026-08-12

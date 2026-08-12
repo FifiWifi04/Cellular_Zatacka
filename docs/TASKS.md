@@ -384,6 +384,41 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **T30 (host-authoritative state sync) is now `READY`** — its only
 > dependency, T29, is done.
+>
+> **T30 landed 2026-08-12** — the host now runs the only `stepSimulation()`;
+> clients skip it entirely and just `renderFrame()` from network snapshots
+> written straight into the existing `players[]`/`organelles[]`/`vesicles[]`
+> module state, so `updateCamera()`/`drawPlayerBars()`/`drawTraces()`/every
+> other draw function needed zero changes. Player state broadcasts at 20Hz,
+> organelles/vesicles/membrane radii at 5Hz, both as positional arrays with
+> rounded numbers (an early keyed-object wire format measured ~12KB/s for a
+> 4-player match; switching to arrays + dropping the redundant `color` field
+> brought that to ~2KB/s each direction, inside the design note's "low
+> single-digit KB/s"). Traces are never sent -- reconstructed client-side from
+> head position + `isGap` using the same segment-boundary rule
+> `updatePlayers()` itself uses. Verified with real Playwright/WebSocket-relay
+> peers: 2-player and 4-player (host+2 clients+1 bot) matches play with
+> matching positions/traces/organelles; gaps appear on remote screens; 10/10
+> forced deaths agreed between host and client; out-of-order and 20%-dropped
+> messages proven harmless (self-healing full-list/staleness design); a
+> `window.checkCollision` call-counter proved 0 calls on either client across
+> a full trial (387-420 on the host); offline single/local-multiplayer and
+> `file://` both regression-clean, plus the full §7.6 sweep (membrane/
+> trace/organelle death, near-miss survival) at all 3 speeds --
+> `checkCollision`/`raycast`/`checkArcCollision`/`rebuildSpatialGrid` are
+> untouched by this diff. **Scope note:** ER/Golgi wall geometry, Gen 2+
+> hazard systems (necrosis, the malignant mass, ATP, nucleus chasers), and
+> full mitosis/infection state are *not* synced -- the task's own design
+> table predates most of that content; every verification round stayed
+> within Gen 1 and under `MITOSIS_INTERVAL`/the infection warning timer so
+> the gap doesn't invalidate the results. Filed to `docs/BACKLOG.md` with the
+> concrete mechanism each would need (a seeded-PRNG pass for ER/Golgi is the
+> likely fix, using the `seed` field T29 already carries but this task never
+> consumed). See `docs/tasks/T30-host-authoritative-sync.md` Findings for
+> full numbers.
+>
+> **T31 (client prediction and interpolation) is now `READY`** — its only
+> dependency, T30, is done.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -515,8 +550,8 @@ later returns FAIL, revisit anything that landed in that window.
 |----|------|-----------|--------|
 | T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `DONE` |
 | T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `DONE` |
-| T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `READY` |
-| T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `BLOCKED` |
+| T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `DONE` |
+| T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `READY` |
 | T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `BLOCKED` |
 
 ### Track J — Playtest fixes (owner session 2026-08-07)

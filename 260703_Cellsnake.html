@@ -1592,6 +1592,14 @@
         let currentMode = 1;
         let aiCount = 0;
         let currentSpeed = 1.5;
+        // T30: true only while an online round (host or client) is running --
+        // gates the player-roster/index-mapping and stepSimulation-skip logic
+        // below without disturbing the offline currentMode/aiCount meaning.
+        let netOnlineActive = false;
+        // T30: mirrors stepSimulation()'s local isCellFrozen so the host's
+        // periodic state broadcast can read it without threading it through
+        // every call in between.
+        let lastIsCellFrozen = false;
         let survivalTime = 0;
         let necrosisTimer = 0; // T13: seconds of un-frozen game time accumulated since the last freeze
         // T38: clusterId -> { members: [organelle,...], nextEmitTime }. Organelles
@@ -4823,6 +4831,17 @@
                         p.effects.lastShedTail = survivalTime;
                         deleteOldestTrace(p, SHED_TAIL_FRACTION);
                     }
+                } else if (p.netPeerId != null) {
+                    // T30: this player's human is a remote peer -- steer from the
+                    // most recently received 'input' message instead of `keys`
+                    // (only the host ever has a netPeerId'd player here; see
+                    // startRound()). targetMode itself is flipped once, on
+                    // receipt, in netHandleMessage()'s 'input' case -- not here.
+                    let inp = netState.remoteInput[p.netPeerId];
+                    if (inp) {
+                        if (inp.left) p.angle -= 0.08 * delta;
+                        if (inp.right) p.angle += 0.08 * delta;
+                    }
                 } else {
                     if (keys[p.controls.left] || keys[p.controls.leftAlt]) p.angle -= 0.08 * delta;
                     if (keys[p.controls.right] || keys[p.controls.rightAlt]) p.angle += 0.08 * delta;
@@ -5479,7 +5498,12 @@
             // --- DYNAMIC TOGGLE LOGIC ---
             players.forEach(p => {
                 let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
-                if (!p.alive || p.isBot || infection.state === 'warning' || isMitosisReveal) return;
+                // T30: a net client never mutates targetMode locally (no
+                // prediction -- see the task's own design note); it only sends
+                // the held key, and the host flips it once on the rising edge
+                // (netHandleMessage()'s 'input' case). p.netPeerId!=null skips a
+                // host-side player whose human is a remote peer, not this keyboard.
+                if (!p.alive || p.isBot || p.netPeerId != null || (netOnlineActive && netState.role === 'client') || infection.state === 'warning' || isMitosisReveal) return;
 
                 if (e.key === p.controls.toggle || e.key === p.controls.toggleAlt) {
                     p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
@@ -6107,6 +6131,7 @@
             // rather than adding a third mechanism.
             let isNucleusReveal = (nucleusTransformTime > -Infinity && (survivalTime - nucleusTransformTime < NUCLEUS_TRANSFORM_FREEZE));
             let isCellFrozen = (infection.state === 'warning') || isMitosisReveal || isNucleusReveal;
+            lastIsCellFrozen = isCellFrozen; // T30: read by the host's periodic state broadcast
 
             // T12/T37: Gen 2+ membrane calcification -- state only; see
             // drawCalcification() for the render half (T22 step 6).
@@ -6177,7 +6202,9 @@
             // The master clock must run in ALL modes so the virus and combos work!
             survivalTime += deltaSec;
 
-            let totalPlayers = currentMode + aiCount;
+            // T30: online play's totalPlayers is the lobby roster (peers + bots),
+            // not the local menu's currentMode/aiCount -- see startRound().
+            let totalPlayers = netOnlineActive ? netState.roster.length : (currentMode + aiCount);
             // Only update the UI text to show the timer if it's a Solo game and not frozen
             if (totalPlayers === 1 && !isCellFrozen) {
                 if (!players.some(p => p.alive) && !godMode) {
@@ -6205,6 +6232,7 @@
                 scoreText.innerText = `Game Over! Time: ${survivalTime.toFixed(1)}s · Gen ${activeCell.generation}`;
                 recordRunsForRoundEnd(); // T54
                 renderStatsCard(); // T53
+                netHandleRoundEnd(); // T30
                 return { ended: true };
             } else if (totalPlayers > 1 && activePlayers.length <= 1) {
                 if (fuzzActive) {
@@ -6225,6 +6253,7 @@
                 scoreText.innerText = scoreStr;
                 recordRunsForRoundEnd(); // T54
                 renderStatsCard(); // T53
+                netHandleRoundEnd(); // T30
                 return { ended: true };
             }
 
@@ -6382,6 +6411,19 @@
             // canvas keeps being redrawn (just unchanged) instead of the
             // frozen/blank look app.ticker.stop() would give behind the menu.
             if (paused) return;
+
+            // T30: a net client never simulates -- it just renders whatever the
+            // host's last snapshots put into players[]/organelles[]/vesicles[]
+            // (netApplyStateSnapshot()/netApplyWorldSnapshot()). No
+            // stepSimulation(), no accumulator: the host already ran physics at
+            // its own fixed rate and is the sole source of truth.
+            if (netOnlineActive && netState.role === 'client') {
+                let deltaSec = app.ticker.deltaMS / 1000;
+                renderFrame(netState.frozen, deltaSec);
+                if (!netState.frozen) updateAndDrawBackgroundElements(delta, deltaSec);
+                drawTraces();
+                return;
+            }
 
             simAccumulator += Math.min(app.ticker.deltaMS / 1000, 0.25); // clamp long frames
             let steps = 0;
@@ -6804,7 +6846,7 @@
         // (currentMode > 1, design §4): upgrades are a single-player
         // progression, so a 2-4 human round stays symmetric.
         function resolvePlayerUpgrades() {
-            if (currentMode > 1) return { owned: {}, preferredSpawnSlot: 0 };
+            if (currentMode > 1 || netOnlineActive) return { owned: {}, preferredSpawnSlot: 0 }; // T30: upgrades stay single-player-only, same as local multiplayer
             let data = loadHighScores();
             return { owned: data.owned, preferredSpawnSlot: data.preferredSpawnSlot };
         }
@@ -7055,7 +7097,10 @@
             // Reset player array to avoid duplicates
             players = [];
 
-            let totalPlayers = currentMode + aiCount;
+            // T30: online play sources the roster from the lobby (host + peers,
+            // in the fixed order every machine computed identically in
+            // netBuildRoster()) instead of the local menu's currentMode/aiCount.
+            let totalPlayers = netOnlineActive ? netState.roster.length : (currentMode + aiCount);
 
             // T55 design §2/§3: resolved ONCE here, into plain numbers on each
             // player object below -- nothing downstream calls hasUpgrade()
@@ -7075,11 +7120,18 @@
             for (let i = 0; i < totalPlayers; i++) {
                 let config = playerConfigs[i]; // identity (id/color/controls) always comes from the player's own slot
                 let spawnCfg = playerConfigs[spawnSlotForIndex[i]]; // position/facing only
-                let isBot = (i >= currentMode);
+                let isBot = netOnlineActive ? netState.roster[i].isBot : (i >= currentMode);
+                // T30: non-null only for a roster slot that is a human peer other
+                // than this machine -- updatePlayers() reads netState.remoteInput
+                // by this id instead of `keys` for exactly those players. Both the
+                // host's own player and every client's own player keep it null
+                // (their own local `keys` already drives them); bots keep it null too.
+                let rosterPeerId = netOnlineActive ? netState.roster[i].peerId : null;
+                let netPeerId = (netOnlineActive && !isBot && rosterPeerId !== netState.id) ? rosterPeerId : null;
                 players.push({
                     id: config.id, x: activeCell.x + spawnCfg.dx, y: activeCell.y + spawnCfg.dy, angle: spawnCfg.angle,
                     color: config.color, coreColor: config.coreColor, targetMode: 'self',
-                    controls: config.controls, isBot: isBot,
+                    controls: config.controls, isBot: isBot, netPeerId: netPeerId,
                     alive: true, traceSegments: [[]], isGap: false, gapDist: 0, distSinceGap: 0, nextGapAt: GAP_DISTANCE_MEAN * (0.5 + Math.random()), traceDist: 0, particleTick: 0, // T17; T28: gapDist/distSinceGap/nextGapAt replace the old frame-counted gapCounter
                     assemblyTick: 0, // T56
                     nextSegId: 1, // T58: stable per-segment id counter for isOwnNeck()
@@ -7120,6 +7172,19 @@
             rebuildTraceRT();
 
             generateMap();
+
+            // T30: a client's own generateMap() just built a random, purely
+            // local organelle/vesicle layout with no relation to the host's --
+            // the host's periodic 'world' broadcast is authoritative, so drop
+            // the local guess instead of showing it for one frame and then
+            // jumping. ER/Golgi geometry and background art stay local and
+            // unsynced (documented gap -- see docs/tasks/T30-host-authoritative-sync.md Findings).
+            if (netOnlineActive && netState.role === 'client') {
+                for (let o of organelles) destroyOrganelleSprite(o);
+                organelles = [];
+                vesicles = [];
+            }
+
             isPlaying = true;
             paused = false; // T24: a restart from a paused menu must not stay frozen
             uiElement.classList.add('hidden-ui'); // AUTO-HIDE MENU ON START
@@ -7245,16 +7310,30 @@
         //   { t:'lobby',  players:[{id,name,isHost}] }    relay -> room: membership snapshot
         //   { t:'peerLeft', id }                          relay -> room: a non-host left
         //   { t:'hostLeft' }                              relay -> room: host left, round over
-        //   { t:'start',  config, seed }                  host -> room (relayed)
-        //   { t:'input',  seq, left, right, toggle }       client -> host (relayed)
-        //   { t:'state',  tick, ts }                       host -> room (relayed; stub heartbeat for T30)
+        //   { t:'start',  config, seed }                  host -> room (relayed): launches the round on every peer
+        //   { t:'input',  seq, left, right, toggle }       client -> host (relayed): held-key state, sampled at NET_INPUT_HZ
+        //   { t:'state', tick, ts, frozen, survivalTime, generation, players:[...] }  host -> room: T30 per-player
+        //       snapshot at NET_STATE_HZ (x/y/angle/alive/isGap/targetMode/effect timers, roster order -- see
+        //       netBuildStateMessage()). Traces are never sent; clients reconstruct them from isGap + head position.
+        //   { t:'world', radiusX, radiusY, orgs:[...], ves:[...] }  host -> room: T30 organelle/vesicle full-list
+        //       reconciliation at NET_WORLD_HZ (see netBuildWorldMessage() and this task's Findings for why this is a
+        //       full-list replace rather than the task's literal spawn/collect *events* wording for vesicles).
+        //   { t:'roundEnd' }                              host -> room: the host's round ended; clients show the menu
         //   { t:'ping', ts, to } / { t:'pong', ts, to }    either -> a specific peer (relayed, RTT probe)
         //   { t:'bye' }                                    either -> relay: clean leave
         // Every relayed message is tagged with `from` (the sender's peer id)
         // by the relay before delivery.
+        //
+        // T30 scope note: ER/Golgi wall geometry, Gen2+ hazard systems
+        // (necrosis, the malignant mass, nucleus chasers, ATP granules) and
+        // full mitosis/infection state are NOT synced -- only the `frozen`
+        // flag crosses the wire for those. Verified within short (pre-mitosis,
+        // pre-infection, Gen 1) rounds; see docs/tasks/T30-host-authoritative-sync.md
+        // Findings and docs/BACKLOG.md for the documented follow-up.
         const NET_PROTOCOL_VERSION = 1;
         const NET_INPUT_HZ = 30;  // matches the task's own ~1.5KB/s-at-4-players bandwidth note
-        const NET_STATE_HZ = 10;
+        const NET_STATE_HZ = 20;  // T30: player snapshots -- design note recommends 20-30Hz
+        const NET_WORLD_HZ = 5;   // T30: organelle/vesicle reconciliation -- cheap, doesn't need player-rate freshness
         const NET_PING_HZ = 1;
 
         let netState = null; // null only transiently inside resetNetState() itself
@@ -7266,6 +7345,7 @@
             if (netState) {
                 clearInterval(netState.inputTimer);
                 clearInterval(netState.stateTimer);
+                clearInterval(netState.worldTimer);
                 clearInterval(netState.pingTimer);
                 if (netState.ws) { try { netState.ws.close(); } catch (e) { } }
             }
@@ -7274,7 +7354,13 @@
                 players: [], started: false,
                 statusText: '', statusIsFinal: false, // statusIsFinal: the close handler must not overwrite it with a generic message
                 rtt: {}, lastInputSeqSeen: {}, lastStateAt: null, mySeq: 0,
-                inputTimer: null, stateTimer: null, pingTimer: null
+                inputTimer: null, stateTimer: null, worldTimer: null, pingTimer: null,
+                // T30 additions below -- all rebuilt fresh per room, same as everything above.
+                roster: null,       // [{peerId, isBot}], fixed for the round, built identically by every peer -- see netBuildRoster()
+                myIndex: -1,        // this machine's own index into players[]/roster (unused directly, kept for debugging)
+                remoteInput: {},    // host only: peerId -> {left, right, toggle} most recently received hold state
+                lastAppliedTick: -1, // client only: highest 'state' tick applied -- discards stale/out-of-order snapshots
+                frozen: false       // client only: mirrors the host's isCellFrozen this frame
             };
         }
         resetNetState();
@@ -7301,8 +7387,9 @@
         function netStopTimers() {
             clearInterval(netState.inputTimer);
             clearInterval(netState.stateTimer);
+            clearInterval(netState.worldTimer);
             clearInterval(netState.pingTimer);
-            netState.inputTimer = netState.stateTimer = netState.pingTimer = null;
+            netState.inputTimer = netState.stateTimer = netState.worldTimer = netState.pingTimer = null;
         }
 
         // Opens the socket and wires the message/close/error handlers, then
@@ -7367,16 +7454,49 @@
                 case 'hostLeft':
                     netState.started = false; netStopTimers();
                     netState.statusText = 'Host left -- round ended.'; netState.statusIsFinal = true;
+                    netEndOnlineRoundLocally(); // T30: the host was the sole authority -- nothing left to render
                     break;
                 case 'start':
-                    netStarted();
-                    break;
+                    netStarted(msg.config);
+                    return; // netStarted() already calls renderNetPanel() once, after closing the panel
                 case 'input':
-                    if (netState.role === 'host') netState.lastInputSeqSeen[msg.from] = msg.seq;
-                    break;
+                    // T30: host-only. Edge-triggered targetMode toggle, mirroring
+                    // the local keydown handler exactly (flips once per rising
+                    // edge, not once per held-frame) -- then the hold state is
+                    // stored for updatePlayers() to read every simulation step.
+                    if (netState.role === 'host') {
+                        netState.lastInputSeqSeen[msg.from] = msg.seq;
+                        let prev = netState.remoteInput[msg.from] || { left: false, right: false, toggle: false };
+                        if (msg.toggle && !prev.toggle) {
+                            let p = players.find(pl => pl.netPeerId === msg.from);
+                            let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+                            if (p && p.alive && infection.state !== 'warning' && !isMitosisReveal) {
+                                p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
+                            }
+                        }
+                        netState.remoteInput[msg.from] = { left: !!msg.left, right: !!msg.right, toggle: !!msg.toggle };
+                    }
+                    return; // 30Hz -- never worth a lobby-panel rebuild
                 case 'state':
-                    if (netState.role === 'client') netState.lastStateAt = performance.now();
-                    break;
+                    // T30: client-only. Discards a snapshot older than the newest
+                    // already applied -- see Verification item 8; today's WS relay
+                    // happens to deliver in order already, but this is what makes
+                    // a future unreliable channel safe (see docs/BACKLOG.md's
+                    // WebRTC migration note).
+                    if (netState.role === 'client') {
+                        netState.lastStateAt = performance.now();
+                        if (msg.tick > netState.lastAppliedTick) {
+                            netState.lastAppliedTick = msg.tick;
+                            netApplyStateSnapshot(msg);
+                        }
+                    }
+                    return; // 20Hz -- never worth a lobby-panel rebuild
+                case 'world':
+                    if (netState.role === 'client') netApplyWorldSnapshot(msg); // T30: client-only
+                    return; // 5Hz -- never worth a lobby-panel rebuild
+                case 'roundEnd':
+                    netEndOnlineRoundLocally(); // T30: only ever received by clients (the host drives its own end locally)
+                    return;
                 case 'ping':
                     netSend({ t: 'pong', ts: msg.ts, to: msg.from });
                     return; // no render needed for a bounced ping
@@ -7389,12 +7509,140 @@
             renderNetPanel();
         }
 
-        // Enters the (still gameplay-free, T30's job) "started" state on both
-        // sides: host and every client independently start their own timers
-        // once they know about it -- the host does not wait for an echo of
-        // its own broadcast.
-        function netStarted() {
+        // T30: applied on the client, every 'state' message that passes the
+        // staleness check above. Writes straight into the same players[]/
+        // traceSegments/activeCell fields stepSimulation() would have -- so
+        // renderFrame()/drawTraces()/drawPlayerBars()/updateCamera() all run
+        // completely unmodified, unaware they're driven by the network. Trace
+        // points are reconstructed from head position + isGap using the exact
+        // append rule updatePlayers() uses (segment ends on the isGap
+        // true->false edge, points append to the last segment while !isGap) --
+        // see the task's own "trace-append subtlety": this is cosmetic only,
+        // collision is decided entirely by the host.
+        function netApplyStateSnapshot(msg) {
+            netState.frozen = !!msg.fr;
+            if (msg.st != null) survivalTime = msg.st;
+            if (msg.gn != null) activeCell.generation = msg.gn;
+            msg.p.forEach((snap, i) => {
+                let p = players[i];
+                if (!p) return;
+                // matches netBuildStateMessage()'s per-player array order exactly
+                let [alive, x, y, angle, isGap, attack, ghostTimer, hunterTimer, golgiTimer, speedTimer, speedLevel] = snap;
+                p.alive = !!alive;
+                if (!p.alive) return; // nothing else about a dead player matters
+                let wasGap = p.isGap;
+                p.angle = angle;
+                p.targetMode = attack ? 'attack' : 'self';
+                p.effects.ghostTimer = ghostTimer;
+                p.effects.hunterTimer = hunterTimer;
+                p.effects.golgiTimer = golgiTimer;
+                p.effects.speedTimer = speedTimer;
+                p.effects.speedLevel = speedLevel;
+                p.isGap = !!isGap;
+                if (wasGap && !p.isGap) p.traceSegments.push(newTraceSegment(p)); // gap just ended -- start a fresh segment
+                if (!p.isGap) {
+                    let seg = p.traceSegments[p.traceSegments.length - 1];
+                    let prevD = seg.length > 0 ? seg[seg.length - 1].d : p.traceDist;
+                    p.traceDist = prevD + Math.hypot(x - p.x, y - p.y);
+                    seg.push({ x: x, y: y, d: p.traceDist });
+                    trimTraceToCap(p, MAX_TRACE_POINTS);
+                }
+                p.x = x; p.y = y;
+                // T22 step 5's bar snapshot -- drawPlayerBars() reads these, not
+                // p.x/p.effects.* directly. No pre/post-pickup ordering subtlety
+                // to preserve here (unlike updatePlayers()): a single network
+                // snapshot IS this frame's value.
+                p.barX = p.x; p.barY = p.y;
+                p.barGhostTimer = p.effects.ghostTimer; p.barHunterTimer = p.effects.hunterTimer;
+                p.barGolgiTimer = p.effects.golgiTimer; p.barSpeedTimer = p.effects.speedTimer; p.barSpeedLevel = p.effects.speedLevel;
+            });
+        }
+
+        // T30: applied on the client, every 'world' message (no staleness
+        // tracking -- a dropped or reordered one just means organelle/vesicle
+        // positions jump slightly instead of drifting smoothly, self-corrected
+        // within one more tick; nothing depends on strict ordering here the way
+        // trace reconstruction does above). Organelle count/order is fixed for
+        // a Gen 1 round with no mitosis event yet (see Findings), so sprites
+        // are created once and then just have their fields updated in place;
+        // vesicles are redrawn from scratch every frame by drawVesicles() (no
+        // persistent sprite), so that array can just be replaced wholesale.
+        function netApplyWorldSnapshot(msg) {
+            if (msg.rx != null) { activeCell.radiusX = msg.rx; activeCell.radiusY = msg.ry; }
+            for (let i = 0; i < msg.o.length; i++) {
+                // matches netBuildWorldMessage()'s per-organelle array order exactly
+                let [x, y, radius, isMito, rotation, necrotic] = msg.o[i];
+                let type = isMito ? 'mitochondria' : 'lysosome';
+                let o = organelles[i];
+                if (!o) {
+                    o = { x, y, radius, type, color: isMito ? C_MITO : C_LYSO, rotation, necrotic: !!necrotic, vx: 0, vy: 0, rotSpeed: 0 };
+                    attachOrganelleSprite(o, createOrganelleGraphics(o, !!necrotic));
+                    organelles[i] = o;
+                } else {
+                    o.x = x; o.y = y; o.rotation = rotation; o.necrotic = !!necrotic;
+                }
+            }
+            while (organelles.length > msg.o.length) destroyOrganelleSprite(organelles.pop());
+            vesicles = msg.v.map(([x, y, radius, typeCode, rotation]) => {
+                let type = typeCode === 1 ? 'mitochondria' : (typeCode === 2 ? 'lysosome' : 'membrane');
+                let color = typeCode === 1 ? C_MITO : (typeCode === 2 ? C_LYSO : C_MEMB);
+                return { x, y, radius, type, color, rotation, vx: 0, vy: 0 };
+            });
+        }
+
+        // T30: shared by the host (called directly from stepSimulation()'s two
+        // round-end branches) and the client (called from the 'roundEnd'
+        // message case above) -- both need the same "stop treating this as an
+        // online round, show the menu" cleanup; only the host also has to tell
+        // everyone else.
+        function netHandleRoundEnd() {
+            if (!netOnlineActive) return;
+            if (netState.role === 'host') netSend({ t: 'roundEnd' });
+            netOnlineActive = false;
+        }
+
+        // T30: the client-side twin of the line above -- isPlaying/uiElement
+        // are host-owned in an online round (stepSimulation() never runs here),
+        // so a client only learns the round ended from an explicit message
+        // ('roundEnd') or the host disconnecting ('hostLeft'), not from its own
+        // simulation returning {ended:true}.
+        function netEndOnlineRoundLocally() {
+            if (!netOnlineActive) return;
+            isPlaying = false;
+            uiElement.classList.remove('hidden-ui');
+            netOnlineActive = false;
+        }
+
+        // T30: builds the round roster identically on every peer, from data
+        // every peer already has by the time 'start' arrives -- netState.players
+        // (broadcast by the relay in insertion order: host first, then joiners
+        // in join order, see relay_server.js's Map) and the config the host
+        // just broadcast alongside it. No extra round-trip needed. Bots are
+        // clamped so peers+bots never exceeds the 4 playerConfigs slots.
+        function netBuildRoster(config) {
+            let bots = Math.max(0, Math.min(config.ai, 4 - netState.players.length));
+            let roster = netState.players.map(p => ({ peerId: p.id, isBot: false }));
+            for (let i = 0; i < bots; i++) roster.push({ peerId: null, isBot: true });
+            return roster;
+        }
+
+        // T30: fires on the host right after it sends 'start', and on every
+        // client the moment the relayed 'start' arrives -- neither waits for an
+        // echo of its own broadcast. Builds the shared roster, adopts the
+        // host's chosen speed/camera (gameplay-critical, must match exactly;
+        // config is the single source of truth for every peer, not each
+        // machine's own menu selects), and launches the round exactly like the
+        // offline Start button does, just sourced from the network roster
+        // (see startRound()'s netOnlineActive branch) instead of currentMode/aiCount.
+        function netStarted(config) {
             netState.started = true;
+            netState.roster = netBuildRoster(config);
+            netState.myIndex = netState.roster.findIndex(r => r.peerId === netState.id);
+            netOnlineActive = true;
+            currentSpeed = config.speed;
+            cameraMode = config.camera;
+            document.getElementById('netOverlay').classList.add('hidden-help');
+            startRound();
             netStartTimers();
             renderNetPanel();
         }
@@ -7414,15 +7662,17 @@
             }, 1000 / NET_PING_HZ);
         }
 
-        // Only runs once the host clicks "Start transport demo" -- input/state
-        // are the messages T30 will eventually carry real gameplay over.
+        // Runs once the host actually starts the round (netStarted()). Clients
+        // sample their own held keys and send input; the host broadcasts real
+        // gameplay snapshots at two rates (see netBuildStateMessage()/
+        // netBuildWorldMessage()) -- always arrow keys regardless of which
+        // roster slot this peer landed in, since online play is one keyboard
+        // per machine, not local multiplayer's shared-keyboard slot mapping.
         function netStartTimers() {
             clearInterval(netState.inputTimer);
             clearInterval(netState.stateTimer);
+            clearInterval(netState.worldTimer);
             if (netState.role === 'client') {
-                // T30 will read real steering here; for now this only proves
-                // the channel carries sampled `keys` state with sequence
-                // numbers, per the task's "input intent, not positions" design.
                 netState.inputTimer = setInterval(() => {
                     netState.mySeq++;
                     netSend({
@@ -7434,9 +7684,58 @@
             if (netState.role === 'host') {
                 netState.stateTimer = setInterval(() => {
                     netState.mySeq++;
-                    netSend({ t: 'state', tick: netState.mySeq, ts: performance.now() });
+                    netSend(netBuildStateMessage());
                 }, 1000 / NET_STATE_HZ);
+                netState.worldTimer = setInterval(() => {
+                    netSend(netBuildWorldMessage());
+                }, 1000 / NET_WORLD_HZ);
             }
+        }
+
+        // T30: host-only, called from the stateTimer above. Per-player snapshot
+        // in netState.roster order -- every peer computed that same order
+        // independently from the same 'lobby'+'start' data (see
+        // netBuildRoster()), so no per-entry id is needed on the wire. Traces
+        // are never sent -- see the "trace-append subtlety" note above
+        // netApplyStateSnapshot(). Positional arrays (not objects) and rounded
+        // numbers, not verbose keys -- an early object-keyed version measured
+        // ~12KB/s combined with netBuildWorldMessage() below, well past the
+        // design note's "low single-digit KB/s"; see Findings for the before/after.
+        function netBuildStateMessage() {
+            return {
+                t: 'state', tick: netState.mySeq,
+                fr: lastIsCellFrozen ? 1 : 0, st: Math.round(survivalTime * 10) / 10, gn: activeCell.generation,
+                // per player: [alive, x, y, angle, isGap, attackMode, ghostTimer, hunterTimer, golgiTimer, speedTimer, speedLevel]
+                p: players.map(p => [
+                    p.alive ? 1 : 0, Math.round(p.x), Math.round(p.y), Math.round(p.angle * 1000) / 1000,
+                    p.isGap ? 1 : 0, p.targetMode === 'attack' ? 1 : 0,
+                    Math.round(p.effects.ghostTimer * 10) / 10, Math.round(p.effects.hunterTimer * 10) / 10,
+                    Math.round(p.effects.golgiTimer * 10) / 10, Math.round(p.effects.speedTimer * 10) / 10, p.effects.speedLevel
+                ])
+            };
+        }
+
+        // T30: host-only, called from the worldTimer above. Full-list
+        // reconciliation for organelles/vesicles (see this file's message
+        // envelope comment for why that differs from the task's literal
+        // "events" wording for vesicles) plus the membrane radii (Gen 2+
+        // calcification -- cheap, and without it a long-enough round would
+        // show clients a membrane in the wrong place even though nothing dies
+        // to it incorrectly, since collision stays host-only). ER/Golgi
+        // geometry and every other Gen2+ hazard system are NOT included --
+        // documented gap, see Findings/BACKLOG. Positional arrays, rounded
+        // numbers, no color (createOrganelleGraphics()/drawVesicles() already
+        // derive color purely from type -- see Findings) -- same bandwidth
+        // reasoning as netBuildStateMessage() above.
+        function netBuildWorldMessage() {
+            return {
+                t: 'world',
+                rx: Math.round(activeCell.radiusX), ry: Math.round(activeCell.radiusY),
+                // per organelle: [x, y, radius, isMitochondria(0/1, else lysosome), rotation, necrotic(0/1)]
+                o: organelles.map(o => [Math.round(o.x), Math.round(o.y), Math.round(o.radius), o.type === 'mitochondria' ? 1 : 0, Math.round(o.rotation * 100) / 100, o.necrotic ? 1 : 0]),
+                // per vesicle: [x, y, radius, type(1=mitochondria,2=lysosome,0=membrane), rotation]
+                v: vesicles.map(v => [Math.round(v.x), Math.round(v.y), Math.round(v.radius), v.type === 'mitochondria' ? 1 : (v.type === 'lysosome' ? 2 : 0), Math.round(v.rotation * 100) / 100])
+            };
         }
 
         window.netHostRoom = function () {
@@ -7459,6 +7758,7 @@
 
         window.netLeaveRoom = function () {
             netSend({ t: 'bye' });
+            netEndOnlineRoundLocally(); // T30: abandoning mid-round must not leave isPlaying stuck true
             resetNetState();
             renderNetPanel();
         };
@@ -7492,7 +7792,7 @@
             if (!netState.ws) {
                 el.innerHTML = `
                     <p class="shop-note">Play with others in different browsers over a small WebSocket relay
-                    (<code>tools/relay_server.js</code>) -- transport only, no gameplay syncs yet.</p>
+                    (<code>tools/relay_server.js</code>). The host is authoritative; everyone else renders what the host sends.</p>
                     <label class="net-field">Name<input id="netNameInput" maxlength="16" value="${netDefaultName()}"></label>
                     <div class="net-row">
                         <button onclick="netHostRoom()">Host a room</button>
@@ -7525,45 +7825,44 @@
                 return `<div class="shop-row"><div class="shop-row-info"><b>${label}</b></div><span class="shop-owned">${extra}</span></div>`;
             }).join('');
 
+            // T30: this panel closes itself the instant netStarted() launches
+            // the round (see netStarted()), so `netState.started` is only ever
+            // true here for the brief window between clicking Start and the
+            // overlay hiding -- this branch is effectively unreachable in
+            // normal play, but kept truthful rather than left describing the
+            // old pre-T30 transport-only demo.
             let demoLine = '';
             if (netState.started) {
-                if (netState.role === 'host') {
-                    demoLine = 'Transport demo running -- receiving timestamped input from clients above.';
-                } else {
-                    let age = netState.lastStateAt != null ? ((performance.now() - netState.lastStateAt) / 1000).toFixed(1) + 's ago' : 'none yet';
-                    demoLine = 'Transport demo running -- last host heartbeat: ' + age + '.';
-                }
+                demoLine = netState.role === 'host' ? 'Starting...' : 'Joining the round...';
             }
 
             el.innerHTML = `
                 <p><b>Room ${netState.room}</b> -- ${netState.statusText}</p>
                 ${rows}
                 ${netState.started
-                    ? `<p class="shop-note">${demoLine} No gameplay is synced yet (T30).</p>`
-                    : (netState.role === 'host' ? `<button onclick="netHostStart()">Start transport demo</button>` : `<p class="shop-note">Waiting for the host to start.</p>`)}
+                    ? `<p class="shop-note">${demoLine}</p>`
+                    : (netState.role === 'host' ? `<button onclick="netHostStart()">Start round</button>` : `<p class="shop-note">Waiting for the host to start.</p>`)}
                 <button onclick="netLeaveRoom()">Leave</button>
             `;
         }
 
         window.netHostStart = function () {
             if (netState.role !== 'host') return;
-            let seed = Math.floor(Math.random() * 0xffffffff);
+            let seed = Math.floor(Math.random() * 0xffffffff); // not yet consumed -- reserved for a future shared-map-geometry pass, see BACKLOG
             // Read the DOM selects directly, not the currentMode/aiCount/
             // cameraMode/currentSpeed globals -- those are only set once
             // updateUI() has run at least once, which is not guaranteed here
-            // (a host can open Online and start the demo without ever
-            // touching the main menu; see the "updateUI() is not called at
-            // startup" comment above renderControlSplash()).
-            netSend({
-                t: 'start',
-                config: {
-                    mode: parseInt(modeSelect.value), ai: parseInt(aiSelect.value),
-                    camera: document.getElementById('cameraSelect').value,
-                    speed: parseFloat(speedSelect.value)
-                },
-                seed
-            });
-            netStarted();
+            // (a host can open Online and start without ever touching the main
+            // menu; see the "updateUI() is not called at startup" comment above
+            // renderControlSplash()). config.ai is the *requested* bot count --
+            // netBuildRoster() clamps it to fit the 4 playerConfigs slots.
+            let config = {
+                mode: parseInt(modeSelect.value), ai: parseInt(aiSelect.value),
+                camera: document.getElementById('cameraSelect').value,
+                speed: parseFloat(speedSelect.value)
+            };
+            netSend({ t: 'start', config, seed });
+            netStarted(config); // the host does not wait for an echo of its own broadcast
         };
 
     </script>
