@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 685d5c2fc9f7cb28 -->
+<!-- standalone-build-inputs: 7dc58fa49fde941b -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3844,6 +3844,22 @@ void main() {
             min-width: 0;
         }
 
+        /* T32: see netUpdateStatusBar() -- display:none by default, toggled to
+           block only while at least one peer/the host is not 'ok'. */
+        #netStatusBar {
+            display: none;
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            z-index: 500;
+            background: rgba(20, 20, 25, 0.75);
+            color: #ffeaa7;
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 5px;
+            pointer-events: none;
+        }
+
         .help-panel h2 {
             text-align: center;
             margin-top: 0;
@@ -4100,6 +4116,12 @@ void main() {
             <div id="netContent"></div>
         </div>
     </div>
+
+    <!-- T32: connection-health readout for the peers/host currently not 'ok'
+         (lagging/dropped/gone/backgrounded) -- see netUpdateStatusBar(). Empty
+         and hidden through ordinary online play; only ever visible during
+         disconnect handling. -->
+    <div id="netStatusBar"></div>
 
     <div id="game-container"></div>
 
@@ -10572,15 +10594,19 @@ void main() {
         // zero client-side library to vendor: `WebSocket` is a browser built-in.
         //
         // Message envelope (versioned in the handshake; one place, this table):
-        //   { t:'create', v, name }                     client -> relay: host a new room
-        //   { t:'join',   v, name, room }                client -> relay: join by code
+        //   { t:'create', v, name, cid }                 client -> relay: host a new room
+        //   { t:'join',   v, name, room, cid }            client -> relay: join by code
         //   { t:'created', room, id }                    relay -> client: you are host
-        //   { t:'joined',  room, id, host }               relay -> client: joined ok
+        //   { t:'joined',  room, id, host, rejoinedAs }    relay -> client: joined ok (T32: rejoinedAs is the old
+        //       peerId this cid reclaimed, if the relay's rejoin window matched one -- see tools/relay_server.js)
         //   { t:'joinError', reason }                     relay -> client: refused (bad code/full/version)
         //   { t:'lobby',  players:[{id,name,isHost}] }    relay -> room: membership snapshot
         //   { t:'peerLeft', id }                          relay -> room: a non-host left
         //   { t:'hostLeft' }                              relay -> room: host left, round over
-        //   { t:'start',  config, seed }                  host -> room (relayed): launches the round on every peer
+        //   { t:'peerRejoined', oldId, newId }            relay -> room (T32): a departed cid reconnected;
+        //       host-only remap, see netHandlePeerRejoined()
+        //   { t:'start',  config, seed, to? }             host -> room (relayed, optionally targeted): launches
+        //       the round on every peer, or (T32, targeted) catches up one rejoining peer
         //   { t:'input',  seq, left, right, toggle }       client -> host (relayed): held-key state, sampled at NET_INPUT_HZ
         //   { t:'state', tick, ts, frozen, survivalTime, generation, players:[...] }  host -> room: T30 per-player
         //       snapshot at NET_STATE_HZ (x/y/angle/alive/isGap/targetMode/effect timers, T31's per-player input-ack
@@ -10593,6 +10619,12 @@ void main() {
         //       full-list replace rather than the task's literal spawn/collect *events* wording for vesicles).
         //   { t:'roundEnd' }                              host -> room: the host's round ended; clients show the menu
         //   { t:'ping', ts, to } / { t:'pong', ts, to }    either -> a specific peer (relayed, RTT probe)
+        //   { t:'bg', hidden }                            client -> host (T32): visibilitychange -- distinguishes
+        //       backgrounding from a real drop, see netUpdateStatusBar()
+        //   { t:'requestSnapshot' }                       client -> host (T32): "I just came back, catch me up"
+        //   { t:'rejoinSnapshot', to, players:[{pts,isGap}] }  host -> one peer (T32, targeted): downsampled trace
+        //       history, sent after a rejoin's 'start' and after any 'requestSnapshot' -- see
+        //       netBuildRejoinSnapshot()/netApplyRejoinSnapshot()
         //   { t:'bye' }                                    either -> relay: clean leave
         // Every relayed message is tagged with `from` (the sender's peer id)
         // by the relay before delivery.
@@ -10603,6 +10635,13 @@ void main() {
         // flag crosses the wire for those. Verified within short (pre-mitosis,
         // pre-infection, Gen 1) rounds; see docs/tasks/T30-host-authoritative-sync.md
         // Findings and docs/BACKLOG.md for the documented follow-up.
+        //
+        // T32 scope note: disconnect handling covers non-host clients (staged
+        // lagging/dropped/gone classification, bot handoff, rejoin within
+        // NET_GONE_MS) and a departed/hung host (match ends honestly, final
+        // standings shown, back to the room picker). Host migration itself
+        // stays out of scope -- see docs/tasks/T32-net-resilience.md §3 and
+        // the existing docs/BACKLOG.md entry.
         const NET_PROTOCOL_VERSION = 1;
         const NET_INPUT_HZ = 30;  // matches the task's own ~1.5KB/s-at-4-players bandwidth note
         const NET_STATE_HZ = 20;  // T30: player snapshots -- design note recommends 20-30Hz
@@ -10619,6 +10658,20 @@ void main() {
         // ~identical value -- avoids sub-pixel float jitter every snapshot.
         const NET_RECONCILE_SNAP_THRESHOLD_SQ = 4 * 4;
         const NET_PRED_BUFFER_MAX = 300; // ~5s at 60fps -- bounds growth if acks stop arriving entirely
+        // T32: staged silence classification, per docs/tasks/T32-net-resilience.md's
+        // design table -- shared by the host (classifying each client) and every
+        // client (classifying the host). Driven by netState.lastSeenAt, updated
+        // on ANY relayed message from that peer (ping/pong already run at 1Hz
+        // continuously from room-join, so no separate heartbeat message type is
+        // needed -- see netCheckHealth()).
+        const NET_LAG_MS = 1000;
+        const NET_DROP_MS = 5000;
+        const NET_GONE_MS = 15000;
+        const NET_HEALTH_HZ = 2;
+        // T32: rejoin snapshot trace downsample -- every Nth point of each
+        // player's trace, so a rejoining client's screen looks right without
+        // sending the full (potentially thousands-of-points) trace history.
+        const NET_REJOIN_TRACE_STRIDE = 8;
 
         let netState = null; // null only transiently inside resetNetState() itself
 
@@ -10631,6 +10684,7 @@ void main() {
                 clearInterval(netState.stateTimer);
                 clearInterval(netState.worldTimer);
                 clearInterval(netState.pingTimer);
+                clearInterval(netState.healthTimer);
                 if (netState.ws) { try { netState.ws.close(); } catch (e) { } }
             }
             netState = {
@@ -10648,10 +10702,35 @@ void main() {
                 // T31 additions below -- also cleared in netStarted() (not just here), since a room can host more
                 // than one round and stale entries from a prior round must not leak into a new one.
                 snapBuffer: [],     // client only: per-player-index array of {t,x,y,angle} samples, for netInterpolateRemotePlayers()
-                predInputs: []      // client only: ring buffer of {seq,left,right,dt} applied to the local head, for netReconcileLocalPlayer()
+                predInputs: [],     // client only: ring buffer of {seq,left,right,dt} applied to the local head, for netReconcileLocalPlayer()
+                // T32 additions below.
+                lastSeenAt: {},        // peerId -> performance.now() of the last message received from them (any type)
+                peerHealth: {},        // peerId -> 'ok'|'lagging'|'dropped'|'gone', see netCheckHealth()
+                healthTimer: null,
+                backgroundedPeers: {}, // host only: peerId -> true while that client reports itself hidden (see visibilitychange below)
+                hostGoneHandled: false, // client only: guards netHandleHostGone() against firing twice (relay 'hostLeft' racing our own heartbeat)
+                startConfig: null,     // host only: the config passed to the last 'start' broadcast, resent (targeted) to a rejoining peer
+                confirmedGone: {}      // host only: peerId -> true once the relay reported an actual socket close (peerLeft/hostLeft) --
+                // latches 'gone' against a straggler message (one already in flight when the socket closed) that would
+                // otherwise refresh lastSeenAt and make netCheckHealth() briefly reclassify back to 'ok', silently
+                // undoing the bot handoff. Cleared only by an explicit rejoin (netHandlePeerRejoined()).
             };
         }
         resetNetState();
+
+        // T32: this browser's persistent identity across reconnects, independent
+        // of the relay's per-connection peerId -- lets a client that actually
+        // drops and reconnects (new WebSocket, new peerId) be recognised as the
+        // same player and handed back its old roster slot. Generated once and
+        // kept in localStorage, same pattern as netDefaultName().
+        function netClientId() {
+            let id = localStorage.getItem('cz_netClientId');
+            if (!id) {
+                id = 'c' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+                localStorage.setItem('cz_netClientId', id);
+            }
+            return id;
+        }
 
         function netDefaultName() {
             return localStorage.getItem('cz_netName') || 'Player';
@@ -10677,7 +10756,8 @@ void main() {
             clearInterval(netState.stateTimer);
             clearInterval(netState.worldTimer);
             clearInterval(netState.pingTimer);
-            netState.inputTimer = netState.stateTimer = netState.worldTimer = netState.pingTimer = null;
+            clearInterval(netState.healthTimer);
+            netState.inputTimer = netState.stateTimer = netState.worldTimer = netState.pingTimer = netState.healthTimer = null;
         }
 
         // Opens the socket and wires the message/close/error handlers, then
@@ -10709,6 +10789,13 @@ void main() {
                 netStopTimers();
                 if (!netState.statusIsFinal) netState.statusText = 'Disconnected from the relay.';
                 netState.role = null;
+                // T32: without this, renderNetPanel() keeps showing the dead-end
+                // "Cancel"-only screen (its `!netState.ws` check sees a truthy,
+                // just-closed socket) instead of the Host/Join form -- blocking
+                // exactly the rejoin the design asks for after an involuntary
+                // drop (wifi, sleep, crash -- anything that didn't go through
+                // netLeaveRoom()'s own explicit resetNetState()).
+                netState.ws = null;
                 renderNetPanel();
             });
             ws.addEventListener('error', () => {
@@ -10719,6 +10806,12 @@ void main() {
         }
 
         function netHandleMessage(msg) {
+            // T32: generic liveness tracking -- every relayed message is tagged
+            // with `from` by the relay, so this covers ping/pong (running at
+            // 1Hz from the moment a room forms) plus, once a round is live,
+            // input/state/world at their much higher rates. No separate
+            // heartbeat message type is needed -- see netCheckHealth().
+            if (msg.from != null) netState.lastSeenAt[msg.from] = performance.now();
             switch (msg.t) {
                 case 'created':
                     netState.role = 'host'; netState.room = msg.room; netState.id = msg.id; netState.hostId = msg.id;
@@ -10728,6 +10821,7 @@ void main() {
                 case 'joined':
                     netState.role = 'client'; netState.room = msg.room; netState.id = msg.id; netState.hostId = msg.host;
                     netState.statusText = 'Joined.'; netState.statusIsFinal = false;
+                    netState.lastSeenAt[msg.host] = performance.now(); // T32: seed host liveness now, not on the first ping a second from now
                     netStartPingTimer();
                     break;
                 case 'joinError':
@@ -10738,12 +10832,42 @@ void main() {
                     break;
                 case 'peerLeft':
                     delete netState.rtt[msg.id]; delete netState.lastInputSeqSeen[msg.id];
+                    // T32: a relay-reported close is unambiguous -- don't wait out
+                    // the staged lagging/dropped thresholds, apply the drop
+                    // behaviour immediately (still within the "5s" test budget,
+                    // just sooner and for a certain reason instead of a guess).
+                    if (netState.role === 'host') {
+                        netState.confirmedGone[msg.id] = true;
+                        netState.peerHealth[msg.id] = 'gone'; netApplyClientDrop(msg.id); netUpdateStatusBar();
+                    }
                     break;
                 case 'hostLeft':
-                    netState.started = false; netStopTimers();
-                    netState.statusText = 'Host left -- round ended.'; netState.statusIsFinal = true;
-                    netEndOnlineRoundLocally(); // T30: the host was the sole authority -- nothing left to render
+                    netHandleHostGone('Host disconnected -- match ended.');
                     break;
+                case 'peerRejoined':
+                    // T32: host-only. A departed peer's cid matched within the
+                    // relay's rejoin window -- remap the fixed roster/player
+                    // record from the old (now-dead) peerId to the new
+                    // connection's peerId, hand control back, and catch the
+                    // rejoiner up with a fresh 'start' + downsampled trace
+                    // snapshot (see netHandlePeerRejoined()).
+                    if (netState.role === 'host') netHandlePeerRejoined(msg.oldId, msg.newId);
+                    return; // rebuilds its own UI state as needed; no generic repaint
+                case 'bg':
+                    // T32: host-only. Lets the status bar say "backgrounded"
+                    // instead of "dropped/gone" for a client that told us it is
+                    // merely hidden, not gone -- see the visibilitychange handler.
+                    if (netState.role === 'host') { netState.backgroundedPeers[msg.from] = !!msg.hidden; netUpdateStatusBar(); }
+                    return;
+                case 'requestSnapshot':
+                    // T32: host-only. A client just came back from being hidden
+                    // and wants a full picture instead of catching up from
+                    // whatever partial state it missed while backgrounded.
+                    if (netState.role === 'host' && netOnlineActive) netSend(Object.assign({ t: 'rejoinSnapshot', to: msg.from }, netBuildRejoinSnapshot()));
+                    return;
+                case 'rejoinSnapshot':
+                    if (netState.role === 'client') netApplyRejoinSnapshot(msg);
+                    return;
                 case 'start':
                     netStarted(msg.config);
                     return; // netStarted() already calls renderNetPanel() once, after closing the panel
@@ -10795,6 +10919,209 @@ void main() {
                     return;
             }
             renderNetPanel();
+        }
+
+        // T32: classifies elapsed silence per docs/tasks/T32-net-resilience.md's
+        // design table. Shared by the host (per client) and every client
+        // (for the host).
+        function netHealthClass(elapsedMs) {
+            if (elapsedMs > NET_GONE_MS) return 'gone';
+            if (elapsedMs > NET_DROP_MS) return 'dropped';
+            if (elapsedMs > NET_LAG_MS) return 'lagging';
+            return 'ok';
+        }
+
+        // T32: host-only, idempotent. Hands the given roster peer's player to
+        // the bot AI (design's recommended option, now that T03's bot is
+        // competent) instead of freezing it in place as a lethal stationary
+        // wall or an unexplained straight-line drive. Never un-kills an
+        // already-dead player -- a drop doesn't reverse a real death.
+        function netApplyClientDrop(peerId) {
+            if (!netOnlineActive) return;
+            let p = players.find(pl => pl.netPeerId === peerId);
+            if (p && p.alive) p.isBot = true;
+        }
+
+        // T32: host-only. Hands control back once a dropped/gone peer's
+        // heartbeat recovers (silent same-connection recovery) or it rejoins
+        // with a new connection (netHandlePeerRejoined() calls this too).
+        function netApplyClientRejoinControl(peerId) {
+            let p = players.find(pl => pl.netPeerId === peerId);
+            if (p) p.isBot = false;
+        }
+
+        // T32: run at NET_HEALTH_HZ (see netStartPingTimer()) for the whole
+        // room lifetime, not just mid-round -- classification is cheap and
+        // harmless before a round starts, and this way RTT-adjacent staleness
+        // is visible in the lobby too. Host classifies every non-bot, non-self
+        // ROSTER slot (not the live netState.players lobby list, which drops a
+        // departed peer the instant they leave -- the fixed roster is what
+        // still matters for a round in progress, and netHandlePeerRejoined()
+        // keeps its peerId fields current across a reconnect). A client only
+        // ever classifies the host.
+        function netCheckHealth() {
+            if (!netState.role) return;
+            let now = performance.now();
+            if (netState.role === 'host' && netOnlineActive && netState.roster) {
+                for (const slot of netState.roster) {
+                    if (slot.isBot || slot.peerId === netState.id) continue;
+                    if (netState.confirmedGone[slot.peerId]) continue; // relay already confirmed the close -- a stray in-flight message must not un-drop them
+                    let last = netState.lastSeenAt[slot.peerId];
+                    if (last == null) continue; // no traffic yet this room -- don't guess
+                    let cls = netHealthClass(now - last);
+                    let prev = netState.peerHealth[slot.peerId];
+                    netState.peerHealth[slot.peerId] = cls;
+                    if (cls !== prev) {
+                        if (cls === 'dropped' || cls === 'gone') netApplyClientDrop(slot.peerId);
+                        else if (cls === 'ok' && (prev === 'dropped' || prev === 'gone')) netApplyClientRejoinControl(slot.peerId);
+                    }
+                }
+            } else if (netState.role === 'client' && netState.hostId != null) {
+                let last = netState.lastSeenAt[netState.hostId];
+                if (last != null) {
+                    let cls = netHealthClass(now - last);
+                    let prev = netState.peerHealth[netState.hostId];
+                    netState.peerHealth[netState.hostId] = cls;
+                    // T32: a hung host (process frozen/asleep, socket never
+                    // actually closes) never sends 'hostLeft' -- this is the
+                    // only thing that catches that case instead of a silent
+                    // freeze. A clean close is still faster (netHandleHostGone()
+                    // itself guards against handling it twice).
+                    if (cls === 'gone' && prev !== 'gone') netHandleHostGone('Host connection lost -- match ended.');
+                }
+            }
+            netUpdateStatusBar();
+        }
+
+        // T32: shared by the relay-reported 'hostLeft' message and this
+        // client's own heartbeat detecting a hung host -- both need the same
+        // "stop, say what happened, show final standings, go back to the room
+        // picker" handling (design §3/§6: never a frozen canvas). Idempotent.
+        function netHandleHostGone(reason) {
+            if (netState.role !== 'client' || netState.hostGoneHandled) return;
+            netState.hostGoneHandled = true;
+            netStopTimers();
+            netState.started = false;
+            // Final standings from whatever this client's own screen last knew
+            // (alive flags + survivalTime, both kept current by 'state'
+            // snapshots up to the moment the host vanished) -- honest without
+            // inventing a stats-transfer message the host never got to send.
+            let standings = players.map(p => `P${p.id}: ${p.alive ? 'alive' : 'eliminated'}`).join(' · ');
+            netState.statusText = reason + ' Final -- ' + standings + ` (${survivalTime.toFixed(1)}s)`;
+            netState.statusIsFinal = true;
+            netState.role = null; // T32: reuses the "no role" panel branch (message + a button back to host/join) -- the lobby, not a frozen canvas
+            netEndOnlineRoundLocally();
+            toggleNetPanel(true); // force the panel open -- a message nobody can see is as bad as a freeze
+        }
+
+        // T32: host-only. A departed peer's cid matched within the relay's
+        // rejoin window (tools/relay_server.js's REJOIN_WINDOW_MS, kept equal
+        // to NET_GONE_MS). Remap every place the old peerId was recorded to the
+        // new connection, hand control back, and catch the rejoiner up exactly
+        // like a fresh join (reusing 'start' verbatim, targeted so nobody
+        // else's round restarts) followed by a downsampled trace snapshot --
+        // ordered after 'start' on purpose, since messages on one WebSocket
+        // connection arrive in send order, and the client's own startRound()
+        // (from 'start') must build a fresh players[] before rejoinSnapshot
+        // has anywhere to write trace points.
+        function netHandlePeerRejoined(oldId, newId) {
+            if (!netOnlineActive || !netState.roster) return;
+            let slot = netState.roster.find(r => r.peerId === oldId);
+            if (slot) slot.peerId = newId;
+            let p = players.find(pl => pl.netPeerId === oldId);
+            if (p) p.netPeerId = newId;
+            netApplyClientRejoinControl(newId);
+            netState.remoteInput[newId] = netState.remoteInput[oldId] || { left: false, right: false, toggle: false };
+            delete netState.remoteInput[oldId];
+            netState.lastInputSeqSeen[newId] = netState.lastInputSeqSeen[oldId] || 0;
+            delete netState.lastInputSeqSeen[oldId];
+            delete netState.peerHealth[oldId];
+            delete netState.confirmedGone[oldId]; // T32: the only place this ever clears -- a real rejoin, not mere silence
+            netState.peerHealth[newId] = 'ok';
+            netState.lastSeenAt[newId] = performance.now();
+            delete netState.backgroundedPeers[oldId];
+            netSend({ t: 'start', config: netState.startConfig, seed: 0, to: newId });
+            netSend(Object.assign({ t: 'rejoinSnapshot', to: newId }, netBuildRejoinSnapshot()));
+        }
+
+        // T32: host-only, built on demand (a rejoin/resnapshot request is a
+        // rare, one-off event -- not the per-frame hot path §5 governs).
+        // Downsamples every player's trace to every NET_REJOIN_TRACE_STRIDE-th
+        // point (plus each segment's true last point, so the growing tip is
+        // still exactly where the live 'state' stream will next place it) --
+        // sending the full trace (thousands of points in a long round)
+        // contradicts T30's whole low-bandwidth design.
+        function netBuildRejoinSnapshot() {
+            return {
+                players: players.map(p => {
+                    let pts = [];
+                    for (const seg of p.traceSegments) {
+                        for (let i = 0; i < seg.length; i += NET_REJOIN_TRACE_STRIDE) pts.push([Math.round(seg[i].x), Math.round(seg[i].y)]);
+                        let last = seg[seg.length - 1];
+                        let lastRounded = last ? [Math.round(last.x), Math.round(last.y)] : null;
+                        if (lastRounded && (pts.length === 0 || pts[pts.length - 1][0] !== lastRounded[0] || pts[pts.length - 1][1] !== lastRounded[1])) pts.push(lastRounded);
+                    }
+                    return { pts, isGap: p.isGap };
+                })
+            };
+        }
+
+        // T32: client-only. Replaces a player's local trace geometry wholesale
+        // from a downsampled snapshot -- used both for a genuine rejoin (fresh
+        // players[] from netStarted()'s startRound()) and for the
+        // visibilitychange "catch me up" request (existing players[], stale
+        // geometry). Collision is unaffected either way -- the host never reads
+        // this, see the T30-era "trace-append subtlety" note above
+        // netApplyStateSnapshot().
+        function netApplyRejoinSnapshot(msg) {
+            msg.players.forEach((entry, i) => {
+                let p = players[i];
+                if (!p || !entry || !entry.pts || entry.pts.length === 0) return;
+                let seg = [];
+                let d = 0, prevX = null, prevY = null;
+                for (const [x, y] of entry.pts) {
+                    if (prevX != null) d += Math.hypot(x - prevX, y - prevY);
+                    seg.push({ x, y, d });
+                    prevX = x; prevY = y;
+                }
+                seg.id = 0;
+                p.traceSegments = [seg];
+                p.traceDist = d;
+                p.nextSegId = 1;
+                p.isGap = !!entry.isGap;
+            });
+            traceRTNeedsFullRedraw = true; // T25: geometry replaced wholesale, must redraw
+        }
+
+        // T32: small always-in-DOM readout (hidden unless netOnlineActive) for
+        // the design's "shown as" column -- a dimmed name isn't practical
+        // without touching drawPlayerBars()' PIXI draw path for a per-frame
+        // concern that only changes a couple times a second, so this reuses
+        // the cheaper DOM route the rest of the lobby UI already uses. Only
+        // lists peers NOT currently 'ok', so it stays empty and invisible
+        // through ordinary play -- see netCheckHealth(), which calls this at
+        // NET_HEALTH_HZ, never from the render/gameLoop hot path.
+        function netUpdateStatusBar() {
+            let el = document.getElementById('netStatusBar');
+            if (!el) return;
+            if (!netOnlineActive) { el.style.display = 'none'; return; }
+            let lines = [];
+            if (netState.role === 'host' && netState.roster) {
+                for (const slot of netState.roster) {
+                    if (slot.isBot || slot.peerId === netState.id) continue;
+                    let cls = netState.peerHealth[slot.peerId] || 'ok';
+                    if (cls === 'ok') continue;
+                    let p = players.find(pl => pl.netPeerId === slot.peerId);
+                    let label = p ? ('P' + p.id) : ('Player ' + slot.peerId);
+                    let bg = netState.backgroundedPeers[slot.peerId] ? ' (backgrounded)' : '';
+                    lines.push(`${label}: ${cls}${bg}`);
+                }
+            } else if (netState.role === 'client' && netState.hostId != null) {
+                let cls = netState.peerHealth[netState.hostId] || 'ok';
+                if (cls !== 'ok') lines.push(`Host: ${cls}`);
+            }
+            el.style.display = lines.length ? 'block' : 'none';
+            el.textContent = lines.join(' · ');
         }
 
         // T30: applied on the client, every 'state' message that passes the
@@ -11069,6 +11396,10 @@ void main() {
                     }
                 }
             }, 1000 / NET_PING_HZ);
+            // T32: same lifetime as the ping timer above -- classification is
+            // meaningful from the moment a room forms, not just mid-round.
+            clearInterval(netState.healthTimer);
+            netState.healthTimer = setInterval(netCheckHealth, 1000 / NET_HEALTH_HZ);
         }
 
         // Runs once the host actually starts the round (netStarted()). Clients
@@ -11154,7 +11485,7 @@ void main() {
         window.netHostRoom = function () {
             let name = (document.getElementById('netNameInput').value || 'Player').slice(0, 16);
             localStorage.setItem('cz_netName', name);
-            netConnect(() => netSend({ t: 'create', v: NET_PROTOCOL_VERSION, name }));
+            netConnect(() => netSend({ t: 'create', v: NET_PROTOCOL_VERSION, name, cid: netClientId() }));
         };
 
         window.netJoinRoomClick = function () {
@@ -11166,7 +11497,10 @@ void main() {
                 renderNetPanel();
                 return;
             }
-            netConnect(() => netSend({ t: 'join', v: NET_PROTOCOL_VERSION, name, room }));
+            // T32: cid lets the relay recognise a reconnect within the rejoin
+            // window (tools/relay_server.js) as the same player instead of a
+            // brand-new one -- see netHandlePeerRejoined().
+            netConnect(() => netSend({ t: 'join', v: NET_PROTOCOL_VERSION, name, room, cid: netClientId() }));
         };
 
         window.netLeaveRoom = function () {
@@ -11206,6 +11540,8 @@ void main() {
                 el.innerHTML = `
                     <p class="shop-note">Play with others in different browsers over a small WebSocket relay
                     (<code>tools/relay_server.js</code>). The host is authoritative; everyone else renders what the host sends.</p>
+                    <p class="shop-note">A dropped player is handed to the bot AI and can rejoin their slot within 15s.
+                    If the host disconnects, the match ends for everyone -- there is no host handoff yet.</p>
                     <label class="net-field">Name<input id="netNameInput" maxlength="16" value="${netDefaultName()}"></label>
                     <div class="net-row">
                         <button onclick="netHostRoom()">Host a room</button>
@@ -11274,9 +11610,20 @@ void main() {
                 camera: document.getElementById('cameraSelect').value,
                 speed: parseFloat(speedSelect.value)
             };
+            netState.startConfig = config; // T32: resent (targeted) to a rejoining peer -- see netHandlePeerRejoined()
             netSend({ t: 'start', config, seed });
             netStarted(config); // the host does not wait for an echo of its own broadcast
         };
+
+        // T32: backgrounding must not look like a silent freeze or an
+        // unexplained disconnect. Distinct from T23's touch-release listener
+        // above (same event, different concern) -- both must fire, so this is
+        // a second listener, not a replacement.
+        document.addEventListener('visibilitychange', () => {
+            if (!netOnlineActive) return;
+            netSend({ t: 'bg', hidden: document.hidden });
+            if (!document.hidden && netState.role === 'client') netSend({ t: 'requestSnapshot' });
+        });
 
     </script>
 </body>

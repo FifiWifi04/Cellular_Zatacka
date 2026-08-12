@@ -878,9 +878,13 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   (60s default), which is exactly what T30's verification rounds stayed
   under. A longer real match would show a mitosis event or virus warning on
   the host's screen and nothing at all on a client's.
-- **No host migration or reconnect** (T32's stated job, not T30's). A peer
+- ~~**No host migration or reconnect** (T32's stated job, not T30's). A peer
   disconnecting mid-round leaves `netState.remoteInput[peerId]` frozen at its
   last value, so the host keeps steering that player in a straight line
-  forever instead of marking it dead or removed -- same "not this task's
-  problem" boundary T29 already documented for `'hostLeft'` (host leaving
-  ends the round for everyone, no migration). — 2026-08-12
+  forever instead of marking it dead or removed.~~ **RESOLVED (the
+  reconnect/frozen-input half) by T32 — 2026-08-12.** A relay-confirmed close
+  now hands that player to the bot AI immediately (`netApplyClientDrop()`),
+  and a heartbeat catches the case where the socket never actually closes
+  (hung peer). Host migration itself remains out of scope, as this note and
+  T29's own boundary both already said — see
+  `docs/tasks/T32-net-resilience.md` Findings.

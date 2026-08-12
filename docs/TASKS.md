@@ -445,6 +445,40 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **T32 (network resilience and disconnects) is now `READY`** — its only
 > dependency, T31, is done.
+>
+> **T32 landed 2026-08-12 — Track I (Phase 7: multiplayer) is now fully done.**
+> Staged `lagging`(>1s)/`dropped`(>5s)/`gone`(>15s) silence classification
+> reuses the existing ping/pong + gameplay traffic as its heartbeat (no new
+> message type); a client crossing `dropped` is handed to the bot AI
+> (`p.isBot=true`, T03's bot is competent) and handed back on recovery or
+> rejoin. A departed non-host peer can rejoin its exact slot within 15s via a
+> persistent per-browser `cid` the relay tracks (`tools/relay_server.js`'s new
+> `room.departed`/`REJOIN_WINDOW_MS`), restoring a downsampled trace snapshot
+> (every 8th point) so the rejoined screen looks right -- measured at 6364
+> bytes for a synthetic 4000-point trace. Host disconnect (or a hung host that
+> never sends `hostLeft`, caught by the same heartbeat) ends the match
+> honestly for every client: final standings, forced-open panel, back to the
+> room picker, never a frozen canvas -- stated in the lobby UI before a match
+> starts too. `visibilitychange` tells the host "backgrounded" (not an
+> alarming drop) and asks for a fresh snapshot on return. Two real bugs only
+> caught by testing with actual Playwright peers (not synthetic delays): a
+> straggler message in flight when a socket closed could silently undo a
+> confirmed drop's bot handoff (fixed with a `confirmedGone` latch cleared
+> only by an explicit rejoin); and the close handler never nulled `netState.ws`,
+> so reopening the panel after an involuntary drop showed a dead-end screen
+> with no way back in. Verified with real 2- and 4-peer Playwright rounds over
+> `tools/relay_server.js`: client-drop, host-drop, a 3.5s silent-but-connected
+> blip that recovers without ever dropping, a real 8s socket-close-then-rejoin
+> (item 4's own number), and all 3 clients in a 4-peer room closing
+> simultaneously leaving the host running with zero console errors. Host
+> migration stays out of scope (design's own §3; already in
+> `docs/BACKLOG.md`). `checkCollision`/`checkArcCollision`/`raycast`/
+> `rebuildSpatialGrid` untouched -- §7.6 doesn't apply. `sw.js` `CACHE_NAME`
+> bumped v37→v38; `dist/` rebuilt. See `docs/tasks/T32-net-resilience.md`
+> Findings for full numbers.
+>
+> **Nothing depends on T32** -- it was the last task in Track I's dependency
+> chain. No other task's status changes as a result.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -578,7 +612,7 @@ later returns FAIL, revisit anything that landed in that window.
 | T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `DONE` |
 | T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `DONE` |
 | T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `DONE` |
-| T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `READY` |
+| T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `DONE` |
 
 ### Track J — Playtest fixes (owner session 2026-08-07)
 
