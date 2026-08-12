@@ -419,6 +419,32 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 >
 > **T31 (client prediction and interpolation) is now `READY`** — its only
 > dependency, T30, is done.
+>
+> **T31 landed 2026-08-12** — remote players now render ~100ms in the past,
+> linearly interpolated between buffered snapshots (`netInterpolateRemotePlayers()`,
+> shortest-arc angle blend); the local player's own head is predicted every
+> rendered frame from live `keys` (`netPredictLocalPlayer()`) and reconciled
+> by rewind-and-replay against the host's per-player input-ack seq
+> (`netReconcileLocalPlayer()`, a 12th element added to `netBuildStateMessage()`'s
+> per-player array). Both the host and the network client now move a human
+> head through exactly one function, `computeMovementStep()` -- extracting it
+> surfaced a real bug (a stale `actualSpeed` reference 40 lines below the old
+> inline calc, only caught by actually running a round in a browser, not by
+> `node --check`), fixed by computing the equivalent `Math.hypot()` distance
+> instead. Verified with real Playwright peers over `tools/relay_server.js`:
+> prediction responds within the next rendered frame (no network round-trip);
+> remote motion sampled at ~60Hz stayed in small continuous increments (mean
+> 7.7-7.9px, max 15-16px) rather than 50ms stair-steps; reconciliation jumps
+> stayed bounded (max ~15px) under both a clean local link and an injected
+> 200ms-latency/5%-loss link, with no growth or oscillation; 10/10 forced-death
+> trials under 200ms delay showed the client's local-player `alive` flag
+> transition cleanly `true→false` and never flip back (no predicted deaths, no
+> un-dying); full offline §7.6 regression sweep passed at all 3 speeds.
+> `sw.js` `CACHE_NAME` bumped v36→v37; `dist/` rebuilt. See
+> `docs/tasks/T31-client-prediction.md` Findings for full numbers.
+>
+> **T32 (network resilience and disconnects) is now `READY`** — its only
+> dependency, T31, is done.
 
 1. Open this file. Find the lowest-numbered task with status **`READY`**,
    **subject to the priority override above**.
@@ -551,8 +577,8 @@ later returns FAIL, revisit anything that landed in that window.
 | T28 | [Fixed-timestep simulation](tasks/T28-fixed-timestep.md) | T22 | `DONE` |
 | T29 | [Network transport and lobby](tasks/T29-net-transport-lobby.md) | T28 | `DONE` |
 | T30 | [Host-authoritative state sync](tasks/T30-host-authoritative-sync.md) | T29 | `DONE` |
-| T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `READY` |
-| T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `BLOCKED` |
+| T31 | [Client prediction and interpolation](tasks/T31-client-prediction.md) | T30 | `DONE` |
+| T32 | [Network resilience and disconnects](tasks/T32-net-resilience.md) | T31 | `READY` |
 
 ### Track J — Playtest fixes (owner session 2026-08-07)
 

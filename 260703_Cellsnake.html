@@ -4780,6 +4780,28 @@
             });
         }
 
+        // T31: single implementation of "how a human head turns and steps
+        // forward" -- used by the host below (for both a local `keys`-driven
+        // player and a netPeerId'd remote player) and by the network client's
+        // own local-head prediction/reconciliation (netPredictLocalPlayer()/
+        // netReconcileLocalPlayer(), Section 7 networking code) so the two can
+        // never drift apart, per the task's own warning against two copies of
+        // movement code. Pure: reads p.angle/p.effects/currentSpeed but never
+        // mutates p -- the caller commits the result (on the host, only after
+        // checkCollision() clears it).
+        function computeMovementStep(p, input, delta) {
+            let angle = p.angle;
+            if (input.left) angle -= 0.08 * delta;
+            if (input.right) angle += 0.08 * delta;
+            let effectSpeedBonus = p.effects.speedTimer > 0 ? (p.effects.speedLevel === 2 ? 2.0 : 1.0) : 0;
+            let actualSpeed = currentSpeed + effectSpeedBonus;
+            return {
+                angle,
+                x: p.x + Math.cos(angle) * actualSpeed * delta,
+                y: p.y + Math.sin(angle) * actualSpeed * delta
+            };
+        }
+
         // T22 step 5: state half of the players/traces split. Moved verbatim out
         // of gameLoop's old fused `players.forEach` (bot AI, movement, every
         // swept collision check, vesicle/ATP pickup, trace append and gap
@@ -4821,6 +4843,7 @@
 
                 if (isCellFrozen) return;
 
+                let nextX, nextY;
                 if (p.isBot) {
                     updateBotAI(p, delta);
                     // T55: bots hold the same Shed the Tail upgrade as the human
@@ -4831,27 +4854,28 @@
                         p.effects.lastShedTail = survivalTime;
                         deleteOldestTrace(p, SHED_TAIL_FRACTION);
                     }
-                } else if (p.netPeerId != null) {
-                    // T30: this player's human is a remote peer -- steer from the
-                    // most recently received 'input' message instead of `keys`
-                    // (only the host ever has a netPeerId'd player here; see
-                    // startRound()). targetMode itself is flipped once, on
-                    // receipt, in netHandleMessage()'s 'input' case -- not here.
-                    let inp = netState.remoteInput[p.netPeerId];
-                    if (inp) {
-                        if (inp.left) p.angle -= 0.08 * delta;
-                        if (inp.right) p.angle += 0.08 * delta;
-                    }
+                    let effectSpeedBonus = p.effects.speedTimer > 0 ? (p.effects.speedLevel === 2 ? 2.0 : 1.0) : 0;
+                    let actualSpeed = currentSpeed + effectSpeedBonus;
+                    nextX = p.x + Math.cos(p.angle) * actualSpeed * delta;
+                    nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
                 } else {
-                    if (keys[p.controls.left] || keys[p.controls.leftAlt]) p.angle -= 0.08 * delta;
-                    if (keys[p.controls.right] || keys[p.controls.rightAlt]) p.angle += 0.08 * delta;
+                    // T30/T31: a netPeerId'd player steers from the most recently
+                    // received 'input' message instead of `keys` (only the host
+                    // ever has a netPeerId'd player here; see startRound()).
+                    // targetMode itself is flipped once, on receipt, in
+                    // netHandleMessage()'s 'input' case -- not here. Both this
+                    // and the local-`keys` branch now go through
+                    // computeMovementStep(), the same function the network
+                    // client uses to predict its own head -- see that function's
+                    // comment.
+                    let input = p.netPeerId != null
+                        ? (netState.remoteInput[p.netPeerId] || { left: false, right: false })
+                        : { left: keys[p.controls.left] || keys[p.controls.leftAlt], right: keys[p.controls.right] || keys[p.controls.rightAlt] };
+                    let step = computeMovementStep(p, input, delta);
+                    p.angle = step.angle;
+                    nextX = step.x;
+                    nextY = step.y;
                 }
-
-                let effectSpeedBonus = p.effects.speedTimer > 0 ? (p.effects.speedLevel === 2 ? 2.0 : 1.0) : 0;
-                let actualSpeed = currentSpeed + effectSpeedBonus;
-
-                let nextX = p.x + Math.cos(p.angle) * actualSpeed * delta;
-                let nextY = p.y + Math.sin(p.angle) * actualSpeed * delta;
                 let isGhost = p.effects.ghostTimer > 0;
 
                 // 0.9 Necrotic Organelle Break (T38, extended by T50 to lone
@@ -5055,7 +5079,13 @@
                 // GAP_DISTANCE_MEAN/GAP_LENGTH_DIST), not per-frame counters --
                 // stepDist is this step's actual travel distance, so gap
                 // spacing/length no longer depend on frame rate or speed setting.
-                let stepDist = actualSpeed * delta;
+                // T31: nextX/nextY -> p.x/p.y is exactly actualSpeed*delta long in
+                // both branches above (each computes it via cos/sin * actualSpeed *
+                // delta), so this hypot is identical to the old shared-scope
+                // `actualSpeed * delta` -- computed this way since actualSpeed
+                // itself is no longer in scope here (it's local to each movement
+                // branch above, including inside computeMovementStep()).
+                let stepDist = Math.hypot(nextX - p.x, nextY - p.y);
                 if (p.isGap) {
                     p.gapDist -= stepDist;
                     if (p.gapDist <= 0) {
@@ -6419,6 +6449,12 @@
             // its own fixed rate and is the sole source of truth.
             if (netOnlineActive && netState.role === 'client') {
                 let deltaSec = app.ticker.deltaMS / 1000;
+                // T31: client-side prediction (own head, applied every frame from
+                // live input) and interpolation (everyone else, smoothed between
+                // buffered snapshots) -- both purely visual, reconciled/refreshed
+                // for real by the next 'state' message in netApplyStateSnapshot().
+                netPredictLocalPlayer(deltaSec);
+                netInterpolateRemotePlayers();
                 renderFrame(netState.frozen, deltaSec);
                 if (!netState.frozen) updateAndDrawBackgroundElements(delta, deltaSec);
                 drawTraces();
@@ -7313,8 +7349,11 @@
         //   { t:'start',  config, seed }                  host -> room (relayed): launches the round on every peer
         //   { t:'input',  seq, left, right, toggle }       client -> host (relayed): held-key state, sampled at NET_INPUT_HZ
         //   { t:'state', tick, ts, frozen, survivalTime, generation, players:[...] }  host -> room: T30 per-player
-        //       snapshot at NET_STATE_HZ (x/y/angle/alive/isGap/targetMode/effect timers, roster order -- see
-        //       netBuildStateMessage()). Traces are never sent; clients reconstruct them from isGap + head position.
+        //       snapshot at NET_STATE_HZ (x/y/angle/alive/isGap/targetMode/effect timers, T31's per-player input-ack
+        //       seq, roster order -- see netBuildStateMessage()). Traces are never sent; clients reconstruct them
+        //       from isGap + head position. The ack lets each client's own row rewind-and-replay its own predicted
+        //       head (see netReconcileLocalPlayer()); every other row is interpolated ~100ms in the past instead
+        //       (see netInterpolateRemotePlayers()).
         //   { t:'world', radiusX, radiusY, orgs:[...], ves:[...] }  host -> room: T30 organelle/vesicle full-list
         //       reconciliation at NET_WORLD_HZ (see netBuildWorldMessage() and this task's Findings for why this is a
         //       full-list replace rather than the task's literal spawn/collect *events* wording for vesicles).
@@ -7335,6 +7374,17 @@
         const NET_STATE_HZ = 20;  // T30: player snapshots -- design note recommends 20-30Hz
         const NET_WORLD_HZ = 5;   // T30: organelle/vesicle reconciliation -- cheap, doesn't need player-rate freshness
         const NET_PING_HZ = 1;
+        // T31: remote players are rendered this far in the past so there is
+        // always a bracketing pair of snapshots to interpolate between
+        // (buffer covers several NET_STATE_HZ intervals -- see
+        // netInterpolateRemotePlayers()). Small enough to still feel live.
+        const NET_INTERP_DELAY_MS = 100;
+        const NET_SNAP_BUFFER_MAX = 6; // per remote player -- ~300ms of history at NET_STATE_HZ
+        // T31: below this, a client's rewind-and-replay reconciliation keeps
+        // the existing prediction as-is rather than overwriting it with an
+        // ~identical value -- avoids sub-pixel float jitter every snapshot.
+        const NET_RECONCILE_SNAP_THRESHOLD_SQ = 4 * 4;
+        const NET_PRED_BUFFER_MAX = 300; // ~5s at 60fps -- bounds growth if acks stop arriving entirely
 
         let netState = null; // null only transiently inside resetNetState() itself
 
@@ -7357,10 +7407,14 @@
                 inputTimer: null, stateTimer: null, worldTimer: null, pingTimer: null,
                 // T30 additions below -- all rebuilt fresh per room, same as everything above.
                 roster: null,       // [{peerId, isBot}], fixed for the round, built identically by every peer -- see netBuildRoster()
-                myIndex: -1,        // this machine's own index into players[]/roster (unused directly, kept for debugging)
+                myIndex: -1,        // client only: this machine's own index into players[]/roster -- T31: also picks out which row to predict/reconcile instead of interpolate
                 remoteInput: {},    // host only: peerId -> {left, right, toggle} most recently received hold state
                 lastAppliedTick: -1, // client only: highest 'state' tick applied -- discards stale/out-of-order snapshots
-                frozen: false       // client only: mirrors the host's isCellFrozen this frame
+                frozen: false,      // client only: mirrors the host's isCellFrozen this frame
+                // T31 additions below -- also cleared in netStarted() (not just here), since a room can host more
+                // than one round and stale entries from a prior round must not leak into a new one.
+                snapBuffer: [],     // client only: per-player-index array of {t,x,y,angle} samples, for netInterpolateRemotePlayers()
+                predInputs: []      // client only: ring buffer of {seq,left,right,dt} applied to the local head, for netReconcileLocalPlayer()
             };
         }
         resetNetState();
@@ -7527,7 +7581,14 @@
                 let p = players[i];
                 if (!p) return;
                 // matches netBuildStateMessage()'s per-player array order exactly
-                let [alive, x, y, angle, isGap, attack, ghostTimer, hunterTimer, golgiTimer, speedTimer, speedLevel] = snap;
+                let [alive, x, y, angle, isGap, attack, ghostTimer, hunterTimer, golgiTimer, speedTimer, speedLevel, ack] = snap;
+                // T31: only this client's own row gets predicted -- capture what
+                // it was showing (already-applied prediction) before this
+                // snapshot overwrites p.x/p.y/p.angle below, so
+                // netReconcileLocalPlayer() has something to compare the
+                // rewind-and-replay result against.
+                let isLocalRow = netOnlineActive && netState.role === 'client' && i === netState.myIndex;
+                let preX = p.x, preY = p.y, preAngle = p.angle;
                 p.alive = !!alive;
                 if (!p.alive) return; // nothing else about a dead player matters
                 let wasGap = p.isGap;
@@ -7555,7 +7616,119 @@
                 p.barX = p.x; p.barY = p.y;
                 p.barGhostTimer = p.effects.ghostTimer; p.barHunterTimer = p.effects.hunterTimer;
                 p.barGolgiTimer = p.effects.golgiTimer; p.barSpeedTimer = p.effects.speedTimer; p.barSpeedLevel = p.effects.speedLevel;
+                // T31: p.x/p.y/p.angle right here are the host's raw, un-predicted
+                // truth (just assigned above) -- exactly the "rewind" half of
+                // rewind-and-replay. Every other row instead gets buffered for
+                // netInterpolateRemotePlayers() to smooth between on the next
+                // rendered frame(s); it must NOT be overwritten with this raw
+                // value, so isLocalRow gates it out here.
+                if (isLocalRow) netReconcileLocalPlayer(p, preX, preY, preAngle, ack || 0);
+                else netRecordSnapshotSample(i, p.x, p.y, p.angle);
             });
+        }
+
+        // T31: called only for this client's own row (netApplyStateSnapshot()
+        // has just rewound p.x/p.y/p.angle to the host's raw snapshot values).
+        // Replays every locally-applied input newer than what the host had
+        // already incorporated as of this snapshot (ackSeq), using the exact
+        // same computeMovementStep() the host itself steps players with, then
+        // either keeps the pre-snapshot prediction (preX/preY/preAngle) if the
+        // replay landed close to it, or snaps to the replayed result.
+        function netReconcileLocalPlayer(p, preX, preY, preAngle, ackSeq) {
+            let inputs = netState.predInputs;
+            let i = 0;
+            while (i < inputs.length && inputs[i].seq <= ackSeq) i++;
+            if (i > 0) inputs.splice(0, i); // those inputs are already reflected in this snapshot -- discard
+
+            for (let j = 0; j < inputs.length; j++) {
+                let inp = inputs[j];
+                let step = computeMovementStep(p, inp, inp.dt);
+                p.angle = step.angle; p.x = step.x; p.y = step.y;
+            }
+
+            let dx = p.x - preX, dy = p.y - preY;
+            if (dx * dx + dy * dy < NET_RECONCILE_SNAP_THRESHOLD_SQ) {
+                p.x = preX; p.y = preY; p.angle = preAngle; // replay agrees with what was already shown -- keep it, no jitter
+            }
+            // else: keep the replayed (corrected) position -- a bounded, one-shot visible correction
+        }
+
+        // T31: buffers a raw (un-interpolated) snapshot sample for a
+        // non-local player index, timestamped on THIS machine's clock (not
+        // the host's tick) so netInterpolateRemotePlayers() can render a
+        // point in local wall-clock time regardless of network jitter.
+        function netRecordSnapshotSample(i, x, y, angle) {
+            let buf = netState.snapBuffer[i] || (netState.snapBuffer[i] = []);
+            buf.push({ t: performance.now(), x, y, angle });
+            if (buf.length > NET_SNAP_BUFFER_MAX) buf.shift();
+        }
+
+        // T31: wraps a-b into (-PI, PI] -- the shortest-arc angle delta, so
+        // interpolating across the +-PI boundary doesn't spin the long way
+        // around.
+        function shortestAngleDelta(a, b) {
+            let d = (b - a) % (Math.PI * 2);
+            if (d > Math.PI) d -= Math.PI * 2;
+            if (d < -Math.PI) d += Math.PI * 2;
+            return d;
+        }
+
+        // T31: every rendered frame, for every player row this client is NOT
+        // predicting (remote peers and bots -- both only ever move via 'state'
+        // snapshots on a client), overwrite p.x/p.y/p.angle with a position
+        // interpolated between the two buffered samples that bracket
+        // NET_INTERP_DELAY_MS ago. Deliberately never extrapolates past the
+        // newest sample (holds there instead) -- interpolating between two
+        // known-good states is far more robust than guessing past the last one.
+        function netInterpolateRemotePlayers() {
+            let renderTime = performance.now() - NET_INTERP_DELAY_MS;
+            for (let i = 0; i < players.length; i++) {
+                if (i === netState.myIndex) continue;
+                let p = players[i];
+                if (!p || !p.alive) continue;
+                let buf = netState.snapBuffer[i];
+                if (!buf || buf.length === 0) continue;
+                let s0 = buf[0], s1 = buf[buf.length - 1];
+                if (buf.length > 1) {
+                    if (renderTime <= s0.t) { s1 = s0; }
+                    else if (renderTime >= s1.t) { s0 = s1; }
+                    else {
+                        for (let k = 0; k < buf.length - 1; k++) {
+                            if (buf[k].t <= renderTime && renderTime <= buf[k + 1].t) { s0 = buf[k]; s1 = buf[k + 1]; break; }
+                        }
+                    }
+                }
+                if (s0 === s1) {
+                    p.x = s0.x; p.y = s0.y; p.angle = s0.angle;
+                } else {
+                    let t = (renderTime - s0.t) / (s1.t - s0.t);
+                    p.x = s0.x + (s1.x - s0.x) * t;
+                    p.y = s0.y + (s1.y - s0.y) * t;
+                    p.angle = s0.angle + shortestAngleDelta(s0.angle, s1.angle) * t;
+                }
+            }
+        }
+
+        // T31: the network client's twin of the host's `keys`-driven branch in
+        // updatePlayers() -- applies input to the local head the instant it is
+        // made, every rendered frame, instead of waiting a round trip for the
+        // host to echo it back. Always reads the arrow keys directly (online
+        // play is one keyboard per machine; see netStartTimers()'s inputTimer,
+        // which sends the same keys regardless of roster slot). Records what
+        // it applied, tagged with the input seq most recently sent, so
+        // netReconcileLocalPlayer() can replay exactly this once the host acks
+        // an earlier seq. Never predicts death/collection/effects -- those stay
+        // host-authoritative and only ever change via netApplyStateSnapshot().
+        function netPredictLocalPlayer(deltaSec) {
+            if (netState.frozen) return;
+            let p = players[netState.myIndex];
+            if (!p || !p.alive) return;
+            let input = { left: !!keys['ArrowLeft'], right: !!keys['ArrowRight'] };
+            let delta = deltaSec * 60; // frame-units, matching FIXED_DT's own delta=1 per 1/60s tick
+            let step = computeMovementStep(p, input, delta);
+            p.angle = step.angle; p.x = step.x; p.y = step.y;
+            netState.predInputs.push({ seq: netState.mySeq, left: input.left, right: input.right, dt: delta });
+            if (netState.predInputs.length > NET_PRED_BUFFER_MAX) netState.predInputs.shift();
         }
 
         // T30: applied on the client, every 'world' message (no staleness
@@ -7638,6 +7811,8 @@
             netState.started = true;
             netState.roster = netBuildRoster(config);
             netState.myIndex = netState.roster.findIndex(r => r.peerId === netState.id);
+            netState.snapBuffer = []; // T31: a room can host more than one round -- drop any prior round's samples
+            netState.predInputs = [];
             netOnlineActive = true;
             currentSpeed = config.speed;
             cameraMode = config.camera;
@@ -7705,12 +7880,16 @@
             return {
                 t: 'state', tick: netState.mySeq,
                 fr: lastIsCellFrozen ? 1 : 0, st: Math.round(survivalTime * 10) / 10, gn: activeCell.generation,
-                // per player: [alive, x, y, angle, isGap, attackMode, ghostTimer, hunterTimer, golgiTimer, speedTimer, speedLevel]
+                // per player: [alive, x, y, angle, isGap, attackMode, ghostTimer, hunterTimer, golgiTimer, speedTimer, speedLevel, ack]
+                // T31: ack is the highest 'input' seq the host has received from this player's own peer (0 for a
+                // bot or the host's own local row, neither of which reconcile) -- lets that one peer's client
+                // replay only the inputs the host hasn't incorporated yet.
                 p: players.map(p => [
                     p.alive ? 1 : 0, Math.round(p.x), Math.round(p.y), Math.round(p.angle * 1000) / 1000,
                     p.isGap ? 1 : 0, p.targetMode === 'attack' ? 1 : 0,
                     Math.round(p.effects.ghostTimer * 10) / 10, Math.round(p.effects.hunterTimer * 10) / 10,
-                    Math.round(p.effects.golgiTimer * 10) / 10, Math.round(p.effects.speedTimer * 10) / 10, p.effects.speedLevel
+                    Math.round(p.effects.golgiTimer * 10) / 10, Math.round(p.effects.speedTimer * 10) / 10, p.effects.speedLevel,
+                    p.netPeerId != null ? (netState.lastInputSeqSeen[p.netPeerId] || 0) : 0
                 ])
             };
         }
