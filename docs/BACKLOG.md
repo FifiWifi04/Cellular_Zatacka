@@ -9,6 +9,22 @@ them.
 
 ---
 
+## Open — found during the 2026-08-11 owner pre-merge verification
+
+- **Online multiplayer cannot work from the hosted (HTTPS) build.**
+  `defaultRelayUrl()` always builds a `ws://` URL (`'ws://' + host + ':8090'`),
+  and a page served over `https://` — which is what GitHub Pages and the
+  installed PWA both are — is not permitted to open an insecure WebSocket;
+  the browser blocks it as mixed content before the relay is ever contacted.
+  So Phase 7 is reachable only over `http://localhost` or `file://` today, or
+  via an explicit `?relay=wss://…` override pointing at a TLS-terminated relay.
+  Everything else about T29–T32 verified fine; the failure is graceful and the
+  status message is clear. Needs either a `wss://` default when
+  `location.protocol === 'https:'`, or a line in the Online panel saying the
+  hosted build needs `?relay=wss://…`. — 2026-08-11
+
+---
+
 ## Open — found during the 2026-08-02 code review
 
 - **Dead code branch.** `checkArcCollision()` handles `hb.type === 'poly'`, but
