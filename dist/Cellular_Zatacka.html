@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 7dc58fa49fde941b -->
+<!-- standalone-build-inputs: 1e4aaff1b932ec06 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4697,8 +4697,7 @@ void main() {
         // with the pre-existing player power-up field `effects.hunterTimer`
         // ("Hunter Mode", granted by 5 lysosome vesicles). See this file's
         // ## Findings for T57 for the numbers and the survivability-model choice.
-        const NUCLEUS_TRANSFORM_FREEZE = 3.0;  // seconds the sim freezes for the reveal
-        const NUCLEUS_TRANSFORM_GRACE = 4.0;   // seconds after unfreeze before the first chaser spawns
+        const NUCLEUS_TRANSFORM_FREEZE = 3.0;  // seconds the sim holds before the T60 countdown (below) starts
         const CHASER_MAX = 5;                  // hard cap on live chasers
         const CHASER_SPAWN_INTERVAL = 8.0;     // seconds between spawns while under the cap
         const CHASER_LIFETIME = 20.0;          // seconds before a chaser expires on its own
@@ -4952,6 +4951,19 @@ void main() {
         const INFECTION_INTERVAL = 120;      // seconds between viral infection events
         const INFECTION_WARNING = 5;         // seconds of warning before a viral breach
 
+        // T60: shared "hold -> (settle) -> countdown -> play" tail for every event
+        // that freezes the sim and moves the camera (mitosis reveal, infection
+        // breach, T57 nucleus transformation) -- one countdown, three callers. See
+        // docs/tasks/T60-event-camera-and-countdown.md.
+        const REVEAL_COUNTDOWN = 3.0;          // seconds of visible 3-2-1 before control returns
+        const MITOSIS_REVEAL_HOLD_MIN = 5.0;   // minimum hold before the camera-settle check is even consulted
+        const MITOSIS_REVEAL_MARGIN = 1.15;    // extra headroom around the two cells' true bounding box
+        const CAMERA_SETTLE_SCALE_EPS = 0.001; // world.scale within this of target counts as "arrived"
+        const CAMERA_SETTLE_POS_EPS = 1.0;     // world.x/y within this many px of target counts as "arrived"
+        const MITOSIS_REVEAL_SETTLE_TIMEOUT = 10.0; // safety cap per settle sub-phase -- cameraAtTarget is only
+        // ever set by updateCamera(), which a headless run (window.stepHeadless(), the fuzzer's own soak path)
+        // never calls, so without this a headless mitosis event would freeze the round forever
+
         // INFECTION STATE OBJECT
         let infection = {
             state: 'none',
@@ -4959,8 +4971,10 @@ void main() {
             particles: [],
             nextWarningTime: 60, // The first warning triggers at 60
             triggerTime: 0,
-            warningVisible: false // T22 step 2: drawInfection() reads this, not .state, so the
+            warningVisible: false, // T22 step 2: drawInfection() reads this, not .state, so the
             // hexagon glyph still renders on the exact frame the breach flips state to 'none'
+            breached: false // T60: one-shot latch -- breach effects fire once, state stays
+            // 'warning' (freeze continues) for REVEAL_COUNTDOWN more seconds after
         };
 
         // THE MITOSIS EVENT SYSTEM
@@ -4975,8 +4989,30 @@ void main() {
             microtubules: [],
             progenitor: { active: false },
             nucleusDestroyed: false,
-            generationCounted: false // T11: guards the Gen++ at the snap to once per event
+            generationCounted: false, // T11: guards the Gen++ at the snap to once per event
+            // T60: reveal freeze/countdown sub-phase, independent of .state (which
+            // stays 'forming' for the whole multi-minute event, not just the
+            // opening reveal). 'none' | 'hold' | 'zoomback' | 'countdown'.
+            revealPhase: 'none',
+            phaseStartTime: 0, // survivalTime the current revealPhase began -- settle-timeout reference for 'zoomback'
+            countdownEndsAt: -Infinity
         };
+
+        // T60: written by updateCamera() every render -- true when world.x/y/scale
+        // are within epsilon of the target it computed *this* call. Read one step
+        // later by updateMitosis()'s reveal phase machine so control returns once
+        // the camera has actually arrived, not at a fixed stopwatch mark (a one-step
+        // lag is harmless -- see docs/tasks/T60 Defect 1).
+        let cameraAtTarget = false;
+
+        // T60: true for the entire hold/zoomback/countdown reveal, not just the
+        // old fixed 5s window -- single source of truth so the four gates that
+        // used to each recompute their own "is mitosis reveal live" boolean
+        // (updateCamera, the keydown handler, the touch toggle, the net host's
+        // input handler) can't drift out of sync with each other.
+        function isMitosisFreezeActive() {
+            return mitosis.revealPhase !== 'none';
+        }
 
         let devMode = false;      // master switch: enables the hotkeys + the HUD, nothing else
         let godMode = false;      // disables death checks
@@ -6779,13 +6815,17 @@ void main() {
                         // this only ever fires once per round.
                         if (nucleusFeed.value >= NUCLEUS_FEED_MAX && nucleusTransformTime === -Infinity) {
                             nucleusTransformTime = survivalTime;
-                            nucleusChaserNextSpawn = survivalTime + NUCLEUS_TRANSFORM_FREEZE + NUCLEUS_TRANSFORM_GRACE;
+                            // T60: chasers used to become spawn-eligible after a
+                            // separate NUCLEUS_TRANSFORM_GRACE unfrozen buffer --
+                            // folded into the freeze+countdown itself now, so
+                            // they're eligible the instant control returns.
+                            nucleusChaserNextSpawn = survivalTime + NUCLEUS_TRANSFORM_FREEZE + REVEAL_COUNTDOWN;
                             addShake(1.0, 1.0); // T16
                             emitParticles(nearestCell.x, nearestCell.y, 30, { speed: 4.0, spread: Math.PI * 2, life: 1.0, size: 4, color: 0xff4757 }); // T17
                             warningElement.innerText = "THE CELL HAS TURNED -- THE NUCLEUS IS HUNTING";
                             warningElement.style.color = "#ff4757";
                             warningElement.style.display = 'block';
-                            setTimeout(() => warningElement.style.display = 'none', NUCLEUS_TRANSFORM_FREEZE * 1000 + 500);
+                            setTimeout(() => warningElement.style.display = 'none', (NUCLEUS_TRANSFORM_FREEZE + REVEAL_COUNTDOWN) * 1000);
                         }
                         emitParticles(v.x, v.y, 10, { speed: 3.0, spread: 0.5, angle: Math.atan2(dy, dx), life: 0.4, size: 3, color: v.color }); // T52
                         vesicles.splice(i, 1);
@@ -7033,7 +7073,7 @@ void main() {
             // have weathered CHASER_SURVIVAL_TARGET seconds of the active state,
             // the siege ends -- no more spawns; existing chasers still run out
             // their own CHASER_LIFETIME rather than vanishing instantly.
-            let activeSince = nucleusTransformTime + NUCLEUS_TRANSFORM_FREEZE + NUCLEUS_TRANSFORM_GRACE;
+            let activeSince = nucleusTransformTime + NUCLEUS_TRANSFORM_FREEZE + REVEAL_COUNTDOWN;
             if (!nucleusSiegeEnded && survivalTime - activeSince >= CHASER_SURVIVAL_TARGET) {
                 nucleusSiegeEnded = true;
                 addShake(0.6, 0.6); // T16
@@ -7130,10 +7170,10 @@ void main() {
             if (infection.state === 'warning') {
                 infection.warningVisible = true;
 
-                if (survivalTime >= infection.triggerTime + INFECTION_WARNING) {
+                if (!infection.breached && survivalTime >= infection.triggerTime + INFECTION_WARNING) {
+                    infection.breached = true;
                     warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES!";
                     warningElement.style.display = 'block';
-                    infection.textClearTime = survivalTime + 3.0;
 
                     let inwardAngle = Math.atan2(activeCell.y - infection.y, activeCell.x - infection.x);
                     let safeStartX = infection.x + Math.cos(inwardAngle) * 20;
@@ -7151,16 +7191,32 @@ void main() {
 
                     addShake(0.6, 0.5); // T16: virus explosion/breach
                     infection.nextWarningTime = survivalTime + INFECTION_INTERVAL;
-                    infection.state = 'none';
+                }
+
+                // T60: the camera target never changes across the breach (still
+                // centred on activeCell at the fixed viewSpan below), so there is
+                // no zoomback sub-phase to wait for here -- just hold
+                // REVEAL_COUNTDOWN seconds past the breach with a visible 3-2-1
+                // before actually unfreezing (infection.state -> 'none').
+                if (infection.breached) {
+                    let remaining = (infection.triggerTime + INFECTION_WARNING + REVEAL_COUNTDOWN) - survivalTime;
+                    if (remaining <= 0) {
+                        infection.state = 'none';
+                        infection.breached = false;
+                        warningElement.innerText = "";
+                        warningElement.style.display = 'none';
+                    } else {
+                        // Keep the "hide behind lysosomes" context on screen --
+                        // unlike mitosis/nucleus (own hold phase before the
+                        // countdown starts), the breach and the countdown start
+                        // on the same frame here, so a bare digit would replace
+                        // the warning before the player ever saw it.
+                        warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES! " + Math.ceil(remaining);
+                        warningElement.style.display = 'block';
+                    }
                 }
             } else {
                 infection.warningVisible = false;
-            }
-
-            if (infection.textClearTime && survivalTime >= infection.textClearTime) {
-                warningElement.innerText = "";
-                warningElement.style.display = 'none';
-                infection.textClearTime = 0;
             }
 
             for (let i = infection.particles.length - 1; i >= 0; i--) {
@@ -7264,6 +7320,9 @@ void main() {
                 mitosis.state = 'forming';
                 mitosis.eventStartTime = survivalTime;
                 mitosis.generationCounted = false;
+                mitosis.revealPhase = 'hold'; // T60: start the freeze/countdown sub-phase
+                mitosis.phaseStartTime = survivalTime;
+                mitosis.countdownEndsAt = -Infinity;
 
                 warningElement.innerText = "CELL DIVISION INITIATED! PREPARE TO MIGRATE!";
                 warningElement.style.color = "#00d2d3";
@@ -7429,6 +7488,39 @@ void main() {
                             h: tubeLength
                         });
                     }
+                }
+            }
+
+            // T60: reveal freeze/countdown phase machine -- 'hold' (wide two-cell
+            // framing) -> 'zoomback' (camera settles back to normal framing while
+            // still frozen) -> 'countdown' (visible 3-2-1) -> 'none' (control
+            // returns). cameraAtTarget is one render-step stale (set by
+            // updateCamera(), which runs after this in the frame -- see its own
+            // comment); that lag is harmless for a settle check running over
+            // several seconds. See docs/tasks/T60-event-camera-and-countdown.md.
+            if (mitosis.revealPhase === 'hold') {
+                let heldFor = survivalTime - mitosis.eventStartTime;
+                if (heldFor >= MITOSIS_REVEAL_HOLD_MIN &&
+                    (cameraAtTarget || heldFor >= MITOSIS_REVEAL_HOLD_MIN + MITOSIS_REVEAL_SETTLE_TIMEOUT)) {
+                    mitosis.revealPhase = 'zoomback';
+                    mitosis.phaseStartTime = survivalTime;
+                }
+            } else if (mitosis.revealPhase === 'zoomback') {
+                if (cameraAtTarget || survivalTime - mitosis.phaseStartTime >= MITOSIS_REVEAL_SETTLE_TIMEOUT) {
+                    mitosis.revealPhase = 'countdown';
+                    mitosis.countdownEndsAt = survivalTime + REVEAL_COUNTDOWN;
+                }
+            } else if (mitosis.revealPhase === 'countdown') {
+                let remaining = mitosis.countdownEndsAt - survivalTime;
+                if (remaining <= 0) {
+                    mitosis.revealPhase = 'none';
+                    mitosis.countdownEndsAt = -Infinity;
+                    warningElement.innerText = "";
+                    warningElement.style.display = 'none';
+                } else {
+                    warningElement.innerText = String(Math.ceil(remaining));
+                    warningElement.style.color = "#f1f2f6";
+                    warningElement.style.display = 'block';
                 }
             }
 
@@ -8513,15 +8605,32 @@ void main() {
             }
         }
 
+        // T60: converts a per-frame-at-60fps lerp constant k into a time-based
+        // factor -- v += (target-v) * camLerpFactor(k, deltaSec) converges in
+        // the same *game* time at any frame rate/step count, and is identical
+        // to the old `* k` when deltaSec is exactly 1/60 (so 60fps feel is
+        // unchanged; see docs/tasks/T60 Defect 2).
+        function camLerpFactor(k, deltaSec) {
+            return 1 - Math.pow(1 - k, deltaSec * 60);
+        }
+
         // --- Dynamic Camera Overrides ---
-        function updateCamera() {
+        // cameraDeltaSec is the total game-time simulated since the last call --
+        // may span zero, one, or several stepSimulation() catch-up steps (T28),
+        // so lerps advance proportionally to actual game time, not to how often
+        // this happens to be called (Defect 2). See gameLoop() for how it's built.
+        function updateCamera(cameraDeltaSec) {
             let alivePlayers = players.filter(p => p.alive);
             let isVirus = (infection.state === 'warning');
 
-            // FIX: Only trigger the massive reveal camera for the first 5 seconds!
-            let isMitosisReveal = (typeof mitosis !== 'undefined' && mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+            // T60: only the initial hold shows the wide two-cell framing; the
+            // zoomback/countdown sub-phases fall through to the normal
+            // follow-camera branch below so the camera settles back to normal
+            // framing *before* control returns, instead of snapping the instant
+            // isCellFrozen goes false (the old Defect 1 bug).
+            let isMitosisWideReveal = mitosis.revealPhase === 'hold';
 
-            let isEmergency = isVirus || isMitosisReveal;
+            let isEmergency = isVirus || isMitosisWideReveal;
 
             // --- CAMERA ENGINE (Shared vs. Split-Screen) ---
             if (cameraMode === 'shared' || alivePlayers.length <= 1 || isEmergency) {
@@ -8531,23 +8640,38 @@ void main() {
                 if (isEmergency) {
                     let camCenterX = activeCell.x;
                     let camCenterY = activeCell.y;
-                    let viewSpan = 3000;
+                    let viewSpanX = 3000, viewSpanY = 3000;
 
-                    if (isMitosisReveal) {
-                        camCenterX = (activeCell.x + mitosis.cellB.x) / 2;
-                        camCenterY = (activeCell.y + mitosis.cellB.y) / 2;
-                        viewSpan = 6500;
+                    if (isMitosisWideReveal) {
+                        // T60: frame the two cells' actual bounding box (plus a
+                        // margin) instead of a fixed square viewSpan -- the old
+                        // fixed 6500 letterboxed a wide viewport because the true
+                        // layout is elongated along the split axis (~3400px gap)
+                        // but not across it.
+                        let minX = Math.min(activeCell.x - activeCell.radiusX, mitosis.cellB.x - activeCell.radiusX);
+                        let maxX = Math.max(activeCell.x + activeCell.radiusX, mitosis.cellB.x + activeCell.radiusX);
+                        let minY = Math.min(activeCell.y - activeCell.radiusY, mitosis.cellB.y - activeCell.radiusY);
+                        let maxY = Math.max(activeCell.y + activeCell.radiusY, mitosis.cellB.y + activeCell.radiusY);
+                        camCenterX = (minX + maxX) / 2;
+                        camCenterY = (minY + maxY) / 2;
+                        viewSpanX = (maxX - minX) * MITOSIS_REVEAL_MARGIN;
+                        viewSpanY = (maxY - minY) * MITOSIS_REVEAL_MARGIN;
                     }
 
-                    let targetZoom = Math.min((app.screen.width - 100) / viewSpan, (app.screen.height - 100) / viewSpan);
-                    world.scale.x += (targetZoom - world.scale.x) * 0.05;
-                    world.scale.y += (targetZoom - world.scale.y) * 0.05;
+                    let targetZoom = Math.min((app.screen.width - 100) / viewSpanX, (app.screen.height - 100) / viewSpanY);
+                    let camFactor = camLerpFactor(0.05, cameraDeltaSec);
+                    world.scale.x += (targetZoom - world.scale.x) * camFactor;
+                    world.scale.y += (targetZoom - world.scale.y) * camFactor;
 
                     let targetX = (app.screen.width / 2) - (camCenterX * world.scale.x);
                     let targetY = (app.screen.height / 2) - (camCenterY * world.scale.y);
 
-                    world.x += (targetX - world.x) * 0.05;
-                    world.y += (targetY - world.y) * 0.05;
+                    world.x += (targetX - world.x) * camFactor;
+                    world.y += (targetY - world.y) * camFactor;
+
+                    cameraAtTarget = Math.abs(world.scale.x - targetZoom) < CAMERA_SETTLE_SCALE_EPS &&
+                        Math.abs(world.x - targetX) < CAMERA_SETTLE_POS_EPS &&
+                        Math.abs(world.y - targetY) < CAMERA_SETTLE_POS_EPS;
                 } else if (alivePlayers.length > 0) {
                     let minX = Math.min(...alivePlayers.map(p => p.x));
                     let maxX = Math.max(...alivePlayers.map(p => p.x));
@@ -8568,10 +8692,17 @@ void main() {
                     // as split-screen already allows.
                     let targetZoom = Math.max(Math.min(zoomX, zoomY, 1.2), DIMER_LOD_ZOOM);
 
-                    world.scale.x += (targetZoom - world.scale.x) * 0.1;
-                    world.scale.y += (targetZoom - world.scale.y) * 0.1;
-                    world.x += ((app.screen.width / 2) - (targetCenterX * world.scale.x) - world.x) * 0.1;
-                    world.y += ((app.screen.height / 2) - (targetCenterY * world.scale.y) - world.y) * 0.1;
+                    let camFactor = camLerpFactor(0.1, cameraDeltaSec);
+                    world.scale.x += (targetZoom - world.scale.x) * camFactor;
+                    world.scale.y += (targetZoom - world.scale.y) * camFactor;
+                    let targetX = (app.screen.width / 2) - (targetCenterX * world.scale.x);
+                    let targetY = (app.screen.height / 2) - (targetCenterY * world.scale.y);
+                    world.x += (targetX - world.x) * camFactor;
+                    world.y += (targetY - world.y) * camFactor;
+
+                    cameraAtTarget = Math.abs(world.scale.x - targetZoom) < CAMERA_SETTLE_SCALE_EPS &&
+                        Math.abs(world.x - targetX) < CAMERA_SETTLE_POS_EPS &&
+                        Math.abs(world.y - targetY) < CAMERA_SETTLE_POS_EPS;
                 }
             } else {
                 // FIX 1: The world MUST be visible for the renderTexture to "see" it
@@ -8783,7 +8914,7 @@ void main() {
 
             // --- DYNAMIC TOGGLE LOGIC ---
             players.forEach(p => {
-                let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+                let isMitosisReveal = isMitosisFreezeActive();
                 // T30: a net client never mutates targetMode locally (no
                 // prediction -- see the task's own design note); it only sends
                 // the held key, and the host flips it once on the rising edge
@@ -8872,8 +9003,7 @@ void main() {
         window.toggleTouchTargetMode = function () {
             let p = players[0];
             if (!p || !p.alive || p.isBot) return;
-            let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
-            if (infection.state === 'warning' || isMitosisReveal) return;
+            if (infection.state === 'warning' || isMitosisFreezeActive()) return;
             p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
         };
 
@@ -9412,10 +9542,21 @@ void main() {
                     updateDevIndicator();
                 }
             }
-            let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
+            let isMitosisReveal = isMitosisFreezeActive();
             // T57: the transformation cutscene reuses this same freeze path
-            // rather than adding a third mechanism.
-            let isNucleusReveal = (nucleusTransformTime > -Infinity && (survivalTime - nucleusTransformTime < NUCLEUS_TRANSFORM_FREEZE));
+            // rather than adding a third mechanism. T60: the freeze now covers
+            // NUCLEUS_TRANSFORM_FREEZE (hold) + REVEAL_COUNTDOWN (visible
+            // 3-2-1) -- folds in what used to be a separate unfrozen
+            // NUCLEUS_TRANSFORM_GRACE buffer (see updateNucleusChasers()'s
+            // activeSince, which reads the same two constants).
+            let nucleusHoldEnd = nucleusTransformTime + NUCLEUS_TRANSFORM_FREEZE;
+            let nucleusRevealEnd = nucleusHoldEnd + REVEAL_COUNTDOWN;
+            let isNucleusReveal = (nucleusTransformTime > -Infinity && survivalTime < nucleusRevealEnd);
+            if (isNucleusReveal && survivalTime >= nucleusHoldEnd) {
+                warningElement.innerText = String(Math.ceil(nucleusRevealEnd - survivalTime));
+                warningElement.style.color = "#f1f2f6";
+                warningElement.style.display = 'block';
+            }
             let isCellFrozen = (infection.state === 'warning') || isMitosisReveal || isNucleusReveal;
             lastIsCellFrozen = isCellFrozen; // T30: read by the host's periodic state broadcast
 
@@ -9641,7 +9782,7 @@ void main() {
         // and updateWarningFilter()'s own definitions -- both already read-only
         // despite their "update" names, which is why the task's own design
         // pseudocode places them here rather than in stepSimulation()).
-        function renderFrame(isCellFrozen, deltaSec) {
+        function renderFrame(isCellFrozen, deltaSec, cameraDeltaSec) {
             drawCalcification(); // T22 step 6
 
             if (!isCellFrozen) {
@@ -9663,7 +9804,7 @@ void main() {
 
             drawInfection(); // T22 step 2
             updateWarningFilter(deltaSec); // T18: ramp/toggle post-processing filter off infection.state transition -- must run after drawInfection() so infection.state reflects this frame
-            updateCamera();
+            updateCamera(cameraDeltaSec);
             drawShake(); // T16: after updateCamera() so shakeRoot's offset is never lerped into world
 
             drawPlayerBars(); // T22 step 5
@@ -9711,7 +9852,10 @@ void main() {
                 // for real by the next 'state' message in netApplyStateSnapshot().
                 netPredictLocalPlayer(deltaSec);
                 netInterpolateRemotePlayers();
-                renderFrame(netState.frozen, deltaSec);
+                // T60: a net client has no fixed-step accumulator (see the
+                // comment above), so its own per-call deltaSec already *is* the
+                // real game time elapsed since the last camera update.
+                renderFrame(netState.frozen, deltaSec, deltaSec);
                 if (!netState.frozen) updateAndDrawBackgroundElements(delta, deltaSec);
                 drawTraces();
                 return;
@@ -9719,6 +9863,12 @@ void main() {
 
             simAccumulator += Math.min(app.ticker.deltaMS / 1000, 0.25); // clamp long frames
             let steps = 0;
+            // T60: total game-seconds actually simulated this real frame -- 0 on
+            // a high-refresh display outrunning FIXED_DT, 1 step normally, or up
+            // to MAX_STEPS_PER_FRAME on a slow one. updateCamera() converges by
+            // this, not by a single step's deltaSec, so the camera keeps pace
+            // with real game time regardless of display frame rate (Defect 2).
+            let stepsDeltaSec = 0;
             while (simAccumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
                 // stepSimulation() reads deltaSec from app.ticker.deltaMS, not
                 // from its delta param -- see stepHeadless's comment below.
@@ -9726,6 +9876,7 @@ void main() {
                 let result = stepSimulation(FIXED_DT * 60);
                 if (result.ended) { simAccumulator = 0; return; }
                 lastStepResult = result;
+                stepsDeltaSec += result.deltaSec;
                 simAccumulator -= FIXED_DT;
                 steps++;
             }
@@ -9733,7 +9884,7 @@ void main() {
 
             if (!lastStepResult) return; // no step has completed yet this round
 
-            renderFrame(lastStepResult.isCellFrozen, lastStepResult.deltaSec);
+            renderFrame(lastStepResult.isCellFrozen, lastStepResult.deltaSec, stepsDeltaSec);
 
             // Animate Background Elements once per frame globally -- kept fused
             // (state + draw), see updateAndDrawBackgroundElements()'s own comment
@@ -9986,8 +10137,9 @@ void main() {
                     membrane ones); the bar only ever rises. Past ${Math.round(FREE_WINDOW_ZERO_FRAC * 100)}%
                     the free window shrinks to zero -- vesicles are pulled in from the moment they
                     spawn and can no longer be intercepted. Once the bar fills completely, the cell
-                    turns: the sim freezes for ${NUCLEUS_TRANSFORM_FREEZE}s while the nucleus reveals
-                    itself, then after a ${NUCLEUS_TRANSFORM_GRACE}s grace period it starts spawning
+                    turns: the sim freezes for ${NUCLEUS_TRANSFORM_FREEZE + REVEAL_COUNTDOWN}s (a
+                    3-2-1 countdown plays for the last ${REVEAL_COUNTDOWN}s of it) while the nucleus
+                    reveals itself, then it starts spawning
                     homing chasers (capped at ${CHASER_MAX} at once) from its core. They're slower
                     than you and breakable in Attack mode; survive ${Math.round(CHASER_SURVIVAL_TARGET)}s
                     of it and the nucleus stops hunting.</li>
@@ -10349,7 +10501,8 @@ void main() {
                 particles: [],
                 nextWarningTime: 60,
                 triggerTime: 0,
-                warningVisible: false
+                warningVisible: false,
+                breached: false // T60
             };
             shakeRoot.filters = null; // T18: a round ending mid-warning must not leave the next round filtered
             warningFilterActive = false;
@@ -10358,6 +10511,8 @@ void main() {
             mitosis.state = 'idle';
             mitosis.nextTriggerTime = MITOSIS_INTERVAL; // Production: 4 minutes
             mitosis.eventStartTime = 0;
+            mitosis.revealPhase = 'none'; mitosis.phaseStartTime = 0; mitosis.countdownEndsAt = -Infinity; // T60
+            cameraAtTarget = false; // T60
             mitosis.currentWidth = 600;
             mitosis.nucleusDestroyed = false;
             mitosis.generationCounted = false;
@@ -10881,8 +11036,7 @@ void main() {
                         let prev = netState.remoteInput[msg.from] || { left: false, right: false, toggle: false };
                         if (msg.toggle && !prev.toggle) {
                             let p = players.find(pl => pl.netPeerId === msg.from);
-                            let isMitosisReveal = (mitosis.state === 'forming' && (survivalTime - mitosis.eventStartTime < 5.0));
-                            if (p && p.alive && infection.state !== 'warning' && !isMitosisReveal) {
+                            if (p && p.alive && infection.state !== 'warning' && !isMitosisFreezeActive()) {
                                 p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
                             }
                         }

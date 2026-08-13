@@ -75,6 +75,29 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > Phase 9 (`PHASE9-LATE-GAME-ARC.md`) is scoped but still deliberately has no
 > task files.
 >
+> **T60 landed 2026-08-13** — every `updateCamera()` lerp is now time-based
+> (`camLerpFactor(k, deltaSec)`, exactly reproducing the old per-frame-at-60fps
+> feel when `deltaSec` is `1/60`) and driven by the *total* game-time simulated
+> since the last render (not one step's `deltaSec`), fixing the frame-rate
+> dependence. The mitosis reveal is now a `hold -> zoomback -> countdown ->
+> play` phase machine gated on the camera actually reaching its target
+> (`cameraAtTarget`, with a `MITOSIS_REVEAL_SETTLE_TIMEOUT` safety net for
+> headless runs that never call `updateCamera()` at all), not a fixed 5.0s
+> stopwatch; the same shared `REVEAL_COUNTDOWN=3.0` 3-2-1 countdown was added
+> to the infection breach and T57's nucleus transformation too (folding its
+> separate `NUCLEUS_TRANSFORM_GRACE` buffer in, per the task's own
+> instruction). Mitosis reveal framing now fits the two cells' true bounding
+> box instead of a fixed square, fixing the letterboxing for the
+> matched-orientation case. Verified: zoom change after control returns is
+> 0.0 (640x480) / 0.04 residual-from-live-movement (1280x1024) versus the old
+> 4-5x; both viewports reach control-return at the identical 8.217 game-seconds
+> (frame/viewport independence); all three events' countdowns measured and
+> screenshotted; 5 forced mitosis events with 3 bots showed zero deaths during
+> any freeze/countdown window; split-screen's fixed zoom confirmed untouched;
+> a forced headless mitosis event resolved via the safety timeout instead of
+> deadlocking. `sw.js` `CACHE_NAME` bumped v38→v39; `dist/` rebuilt. See
+> `docs/tasks/T60-event-camera-and-countdown.md` Findings for full numbers.
+>
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
 > Findings.
@@ -651,7 +674,7 @@ sim/render split can wait behind them.
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) | T38 | `DONE` |
 | T59 | ["Shed the Tail" unreachable on touch](tasks/T59-shed-tail-unreachable-on-touch.md) | T55 | `READY` |
-| T60 | [Play resumes while the camera is still moving](tasks/T60-event-camera-and-countdown.md) ⚠️ *first* | T28, T47 | `READY` |
+| T60 | [Play resumes while the camera is still moving](tasks/T60-event-camera-and-countdown.md) ⚠️ *first* | T28, T47 | `DONE` |
 | T61 | [HUD collides with itself; the menu is a wall](tasks/T61-hud-and-menu-restructure.md) | T53, T54, T55 | `READY` |
 | T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) | T08, T36 | `DONE` |
 
