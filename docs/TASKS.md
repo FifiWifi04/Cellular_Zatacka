@@ -54,11 +54,26 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > rather than made stable. `sw.js` `CACHE_NAME` bumped v22→v23; `dist/` rebuilt.
 > See `docs/tasks/T58-red-vesicle-instakills-opponent.md` Findings.
 >
-> **T22 landed 2026-08-11 — all 7 steps done, see the Track G notes below.**
-> Next up: **Track L** (Phase 8, starting with T53, already `READY`), then
-> Phase 7 starting with T28 (now `READY`). Phase 9
-> (`PHASE9-LATE-GAME-ARC.md`) is scoped but deliberately has no task files until
-> T52/T57 have been played.
+> **Everything through T58, Track L and Phase 7 has landed.**
+>
+> ### ⚠️ Owner playtest 2026-08-11 — take these in this order
+>
+> **T60 → T59 → T61 → T62.**
+>
+> - **T60** (first): the sim unfreezes ~2.4–4.7 game-seconds *before* the event
+>   camera stops moving, so the zoom changes 4–5× while the player is already
+>   steering — and because `updateCamera()`'s lerps are still per-frame after
+>   T28, it behaves differently on every device. Adds the owner's 3-2-1
+>   countdown. Measured both ways in the task file.
+> - **T59**: "Shed the Tail" is keyboard-only, so it can be bought on a phone
+>   and never used.
+> - **T61**: HUD/menu restructure — the nucleus meter is drawn over the
+>   scoreboard, the control legend is printed twice, the post-round result is
+>   buried under the setup UI, and the phone menu is cut off with no scroll cue.
+> - **T62**: art pass, resumable, **one section per session**.
+>
+> Phase 9 (`PHASE9-LATE-GAME-ARC.md`) is scoped but still deliberately has no
+> task files.
 >
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
@@ -635,6 +650,9 @@ sim/render split can wait behind them.
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) | T38 | `DONE` |
+| T59 | ["Shed the Tail" unreachable on touch](tasks/T59-shed-tail-unreachable-on-touch.md) | T55 | `READY` |
+| T60 | [Play resumes while the camera is still moving](tasks/T60-event-camera-and-countdown.md) ⚠️ *first* | T28, T47 | `READY` |
+| T61 | [HUD collides with itself; the menu is a wall](tasks/T61-hud-and-menu-restructure.md) | T53, T54, T55 | `READY` |
 | T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) | T08, T36 | `DONE` |
 
 ### Track K — Playtest design & features
@@ -649,6 +667,7 @@ sim/render split can wait behind them.
 | T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `DONE` |
 | T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `DONE` |
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `DONE` |
+| T62 | [Art pass: depth, scale and the bridge](tasks/T62-art-pass-depth-and-scale.md) ⏳ *resumable, one section per session* | T60, T61 | `READY` |
 
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
