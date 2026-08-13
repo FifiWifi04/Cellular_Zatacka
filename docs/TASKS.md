@@ -122,6 +122,35 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > rebuilt. See `docs/tasks/T59-shed-tail-unreachable-on-touch.md` Findings for
 > full numbers.
 >
+> **T61 landed 2026-08-13** — one ordered top-centre HUD stack (`#liveHud`:
+> `#scoreboard` + `#nucleusFeedBar`, always visible independent of `#ui`'s own
+> show/hide) replaces the two independently-positioned elements that used to
+> land on top of each other at Gen 4; the boost-target legend is now stated
+> once (attached to the control cards) instead of twice; round-over shows the
+> stats card + a prominent Play Again first, with setup collapsed behind a
+> `<details>` disclosure; a scroll-fade plus a short-landscape media query fix
+> the phone menu (primary action now reachable with 0 scrolling at 844×390,
+> was cut in half); Help/Scores/Shop/Online each get a distinct icon + accent
+> colour; P3/P4 control cards are omitted (not dimmed) when not configured;
+> the redundant in-panel × was deleted (`#pauseMenuBtn` already does the same
+> job); the stray pre-round "Survival Time: 0.0s" is gone. Fixing item 1
+> surfaced two knock-on bugs from moving `#scoreboard` out of `#ui` (a 48px
+> sliver of `#ui` left visible when nominally hidden, and `#liveHud` bleeding
+> through the four modal overlays' scrim) — both caught before commit via
+> direct `getBoundingClientRect()`/screenshot checks, not by eye, and fixed
+> with a shared `--ui-top-offset` custom property and a
+> `MutationObserver`-driven `updateLiveHudVisibility()` respectively. No
+> hazard touched — `checkCollision`/`checkArcCollision`/`raycast`/
+> `rebuildSpatialGrid` don't appear in the diff (confirmed by grep) — but the
+> §7.6 sweep was still run for real: membrane death fires correctly at all 3
+> speeds with the new round-over UI rendering clean, and a real 30.2s round (1
+> player + 3 bots) played normally with the pause menu and control splash
+> exercised mid-round. Verified over both `http://` and `file://`, including
+> the rebuilt standalone `dist/Cellular_Zatacka.html`. `sw.js` `CACHE_NAME`
+> bumped v40→v41; `dist/` rebuilt. See
+> `docs/tasks/T61-hud-and-menu-restructure.md` Findings for full numbers and
+> screenshots.
+>
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
 > Findings.
@@ -699,7 +728,7 @@ sim/render split can wait behind them.
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) | T38 | `DONE` |
 | T59 | ["Shed the Tail" unreachable on touch](tasks/T59-shed-tail-unreachable-on-touch.md) | T55 | `DONE` |
 | T60 | [Play resumes while the camera is still moving](tasks/T60-event-camera-and-countdown.md) ⚠️ *first* | T28, T47 | `DONE` |
-| T61 | [HUD collides with itself; the menu is a wall](tasks/T61-hud-and-menu-restructure.md) | T53, T54, T55 | `READY` |
+| T61 | [HUD collides with itself; the menu is a wall](tasks/T61-hud-and-menu-restructure.md) | T53, T54, T55 | `DONE` |
 | T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) | T08, T36 | `DONE` |
 
 ### Track K — Playtest design & features

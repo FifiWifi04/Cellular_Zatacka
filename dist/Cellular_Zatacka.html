@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: b364863a05763905 -->
+<!-- standalone-build-inputs: 9ed3945fdebd0f6b -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3264,6 +3264,14 @@ void main() {
             height: 100%;
             overflow: hidden;
             background-color: #0d0d1a;
+            /* T61: #ui's resting top offset (reserved for #liveHud above it,
+               see #ui's own comment) -- a custom property so #ui.hidden-ui's
+               transform (below) can subtract the same value it was pushed
+               down by. Keeping the two in sync any other way (e.g. restating
+               the offset as a literal in both places) silently drifts the
+               moment one of them changes -- see the 46px landscape override
+               in the @media block near the end of this stylesheet. */
+            --ui-top-offset: max(72px, calc(env(safe-area-inset-top) + 64px));
             /* T23: no pan/zoom/pull-to-refresh gestures stolen from touch steering */
             touch-action: none;
             overscroll-behavior: none;
@@ -3438,7 +3446,14 @@ void main() {
 
         #ui {
             position: absolute;
-            top: 0;
+            /* T61: #liveHud (scoreboard + nucleus meter, see its own CSS
+               comment) is a sibling fixed at the very top, independent of
+               #ui's own hidden-ui state -- #ui used to start at top:0 too, so
+               expanding it (pause/menu/round-over) put its own first line
+               directly under #liveHud's text. Reserve #liveHud's tallest case
+               (scoreboard line + gap + nucleus meter) so the two never print
+               on top of each other. */
+            top: var(--ui-top-offset);
             left: 50%;
             transform: translateX(-50%);
             text-align: center;
@@ -3468,22 +3483,40 @@ void main() {
             box-sizing: border-box;
         }
 
-        /* Slide the UI up to hide it */
-        #ui.hidden-ui {
-            transform: translate(-50%, -90%);
-            /* Leaves a tiny sliver visible -- the hint that the panel is up
-               there and that moving the mouse to #ui-trigger brings it back. */
+        /* T61: bottom-fade "more below" cue for the scrollable menu above --
+           T24 added the scroll, but nothing on screen said it was scrollable.
+           updateUiScrollCue() toggles this class from a scroll listener + a
+           ResizeObserver, so the fade only shows when there is actually
+           something to scroll to. position:sticky keeps it pinned to the
+           bottom of the visible scroll area rather than the end of the
+           (possibly much taller) content. */
+        #ui.has-more-below::after {
+            content: '';
+            display: block;
+            position: sticky;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 28px;
+            margin-top: -28px;
+            pointer-events: none;
+            background: linear-gradient(to bottom, transparent, rgba(13, 13, 26, 0.95));
         }
 
-        /* T45: on touch that sliver hints at nothing (the hover listeners are
-           gated to non-touch, T24) and it is not tiny -- the phone panel is far
-           taller than the desktop one (min-width/max-height clamps against the
-           viewport, plus safe-area padding), so 10% of it is a thick band of
-           buttons parked over the arena for the whole round. Push it fully
-           off-screen; the extra 24px clears the box-shadow's downward bleed.
+        /* Slide the UI fully off-screen to hide it. T61: this used to stop at
+           -90% on desktop, deliberately leaving a sliver showing #scoreboard
+           -- but #scoreboard now lives in #liveHud (always visible on its
+           own, independent of #ui), so that sliver would just be peeking at
+           whatever now sits at the bottom of #ui instead. Push it fully away
+           on every device, same as the old touch-only rule; the extra 24px
+           clears the box-shadow's downward bleed. Must also subtract
+           --ui-top-offset (#ui's own resting `top`, above) -- translate() is
+           relative to #ui's own box, not the viewport, so without it the
+           box only clears the viewport by (24px - top-offset), leaving the
+           bottom top-offset-worth of the panel peeking in at y=0.
            #pauseMenuBtn is the affordance for getting the panel back. */
-        body.touch-ui #ui.hidden-ui {
-            transform: translate(-50%, calc(-100% - 24px));
+        #ui.hidden-ui {
+            transform: translate(-50%, calc(-100% - var(--ui-top-offset) - 24px));
         }
 
         /* The invisible trigger area at the top of the screen */
@@ -3503,14 +3536,26 @@ void main() {
             display: none;
         }
 
-        /* Scoreboard remains visible even when menu is hidden. T24: clamp()
-           keeps it readable on a 390px-wide screen without growing past the
-           original 20px on desktop. */
+        /* T61: lives in #liveHud now, so it stays visible even when #ui is
+           hidden without needing the old sliver hack. T24: clamp() keeps it
+           readable on a 390px-wide screen without growing past the original
+           20px on desktop. */
         #scoreboard {
-            margin: 5px 0;
+            margin: 0;
             font-size: clamp(16px, 4.5vw, 20px);
             color: #00d2d3;
             text-shadow: 0 0 10px rgba(0, 210, 211, 0.5);
+        }
+
+        /* T61: round-over result block (stats card + Play Again) -- shown
+           first inside #ui, ahead of the setup controls, so the thing the
+           player wants right after dying isn't buried under a wall of setup
+           UI. Toggled by renderStatsCard()/startRound(), same idiom the old
+           .hidden-stats toggle used, just one level up so the Play Again
+           button hides/shows in lockstep with the card instead of needing
+           its own separate toggle. */
+        .round-result.hidden-round-result {
+            display: none;
         }
 
         /* T53: end-of-round stats card. Lives inside #ui so it inherits its
@@ -3521,8 +3566,20 @@ void main() {
             text-align: left;
         }
 
-        .stats-card.hidden-stats {
-            display: none;
+        /* T61: setup controls collapse behind this once a round has ended,
+           so the result above doesn't compete with a wall of selects/buttons
+           for the player's attention -- expands again for the next round via
+           the native <details> disclosure triangle, or by tapping it. */
+        .setup-summary {
+            cursor: pointer;
+            margin-top: 6px;
+            padding: 4px 0;
+            color: #a29bfe;
+            font-size: 13px;
+        }
+
+        #setupDetails[open] .setup-summary {
+            margin-bottom: 4px;
         }
 
         .stats-card-player {
@@ -3893,6 +3950,37 @@ void main() {
             color: #00d2d3;
         }
 
+        /* T61: Help/Scores/Shop/Online reuse the same overlay shape (T41
+           design, correctly) but were otherwise identical apart from the
+           heading text. A per-panel accent on the border + heading -- each
+           colour borrowed from that panel's own existing button/callout
+           colour elsewhere in the UI, not a new palette entry -- plus a
+           leading icon in the heading itself (see the HTML) makes the four
+           identifiable at a glance. Help keeps the original teal untouched. */
+        .help-panel-scores {
+            border-color: rgba(253, 203, 110, 0.4);
+        }
+
+        .help-panel-scores h2 {
+            color: #fdcb6e;
+        }
+
+        .help-panel-shop {
+            border-color: rgba(0, 184, 148, 0.4);
+        }
+
+        .help-panel-shop h2 {
+            color: #00b894;
+        }
+
+        .help-panel-online {
+            border-color: rgba(9, 132, 227, 0.4);
+        }
+
+        .help-panel-online h2 {
+            color: #0984e3;
+        }
+
         .help-panel h3 {
             color: #a29bfe;
             margin: 18px 0 6px;
@@ -3969,18 +4057,42 @@ void main() {
             margin: 0;
         }
 
+        /* T61: single top-centre HUD stack -- #scoreboard and #nucleusFeedBar
+           used to be positioned independently (the scoreboard inside #ui, the
+           nucleus meter as its own fixed element) and could land on top of
+           each other. Both now live here, in a defined flex-column order, so
+           a future addition to this stack just becomes another child instead
+           of another independently-positioned element to collide with. Always
+           visible (not tied to #ui's hidden-ui state) since the scoreboard
+           timer/result and the nucleus meter both need to read during play,
+           when #ui itself is hidden. */
+        #liveHud {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            position: absolute;
+            top: max(8px, env(safe-area-inset-top));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 150;
+            pointer-events: none;
+        }
+
+        /* T61: hidden while any of the Help/Scores/Shop/Online overlays is
+           open -- see updateLiveHudVisibility(). Those overlays share
+           #liveHud's z-index, so without this its text bled through their
+           semi-transparent scrim above the modal panel. */
+        #liveHud.hidden-hud {
+            display: none;
+        }
+
         /* T52: Gen 4+ nucleus feed meter -- fixed HUD (not world-space), so it
            reads at any zoom/camera mode and survives the T24 mobile layouts.
            Shown/updated from gameLoop; hidden pre-Gen4. */
         #nucleusFeedBar {
             display: none;
-            position: absolute;
-            top: max(8px, env(safe-area-inset-top));
-            left: 50%;
-            transform: translateX(-50%);
             width: min(220px, 55vw);
-            z-index: 150;
-            pointer-events: none;
             font-family: monospace;
             text-align: center;
         }
@@ -4013,6 +4125,61 @@ void main() {
             background: #ff4757;
             box-shadow: 0 0 8px #ff4757;
         }
+
+        /* T61 item 4: a short landscape phone (844x390 is the reported case)
+           is exactly where the desktop-tuned spacing above doesn't fit --
+           Quality/Start Game were sliced by the panel edge with no hint that
+           scrolling would reveal them. #ui already scrolls (T24) and now
+           shows a fade when it does (.has-more-below, above); this reclaims
+           enough vertical space that the primary actions sit above the fold
+           in the first place instead of relying on the scroll cue alone. */
+        @media (max-height: 420px) and (orientation: landscape) {
+            html,
+            body {
+                /* T61: keep #ui.hidden-ui's transform (which reads this same
+                   variable) in sync with the shorter reservation below --
+                   restating 46px only in #ui's own `top` would silently
+                   under-hide the panel by the difference, same bug this
+                   variable was introduced to prevent. */
+                --ui-top-offset: 46px;
+            }
+
+            #liveHud {
+                top: 4px;
+                gap: 2px;
+            }
+
+            #scoreboard {
+                font-size: 13px;
+            }
+
+            #nucleusFeedBar {
+                width: min(150px, 40vw);
+            }
+
+            #ui {
+                padding: 8px 20px;
+                padding-top: 8px;
+            }
+
+            #ui .quick-play-btn {
+                padding: 8px;
+                font-size: 16px;
+                margin-bottom: 4px;
+            }
+
+            #ui .controls {
+                margin-top: 2px;
+                gap: 6px;
+            }
+
+            body.touch-ui #ui select,
+            body.touch-ui #ui button {
+                padding: 8px 12px;
+                font-size: 15px;
+                min-height: 36px;
+            }
+        }
     </style>
 </head>
 
@@ -4031,18 +4198,39 @@ void main() {
         style="display: none; position: absolute; top: 60px; left: 50%; transform: translateX(-50%); color: #ff4757; text-shadow: 0 0 15px rgba(255, 71, 87, 0.8); font-size: clamp(20px, 6vw, 28px); z-index: 200; pointer-events: none;">
     </h2>
 
-    <!-- T52: Gen 4+ nucleus feed meter -- see updateNucleusFeedHUD(). -->
-    <div id="nucleusFeedBar">
-        <div id="nucleusFeedLabel">NUCLEUS</div>
-        <div id="nucleusFeedTrack">
-            <div id="nucleusFeedFill"></div>
+    <!-- T61: single top-centre HUD stack -- see the #liveHud CSS comment.
+         Always visible, independent of #ui's own show/hide. -->
+    <div id="liveHud">
+        <h2 id="scoreboard"></h2>
+        <!-- T52: Gen 4+ nucleus feed meter -- see updateNucleusFeedHUD(). -->
+        <div id="nucleusFeedBar">
+            <div id="nucleusFeedLabel">NUCLEUS</div>
+            <div id="nucleusFeedTrack">
+                <div id="nucleusFeedFill"></div>
+            </div>
         </div>
     </div>
 
     <div id="ui">
-        <button id="uiCloseBtn" class="ui-close-btn" onclick="togglePauseMenu()" aria-label="Close menu">&#10005;</button>
-        <button id="quickPlayBtn" class="quick-play-btn" onclick="quickPlay()">⚡ Quick Play</button>
-        <div class="controls">
+        <!-- T61: the only close affordance #ui needs -- #pauseMenuBtn (top
+             right, always on screen) already toggles this panel open/closed;
+             the in-panel &#10005; duplicated it (item 6b). The four overlay
+             panels below keep their own close buttons -- pauseMenuBtn only
+             toggles #ui, not those. -->
+        <!-- T61: result-first on round-over -- see .round-result CSS and
+             renderStatsCard()/startRound() for the show/hide toggle. Empty
+             (hidden) until a round has ended. -->
+        <div id="roundResult" class="round-result hidden-round-result">
+            <div id="statsCard" class="stats-card"></div>
+            <button id="playAgainBtn" class="quick-play-btn" onclick="startRound()">&#9654; Play Again</button>
+        </div>
+        <!-- T61: setup collapses behind a disclosure once a round has ended
+             (open by default pre-round) so it doesn't compete with the
+             result above -- see renderStatsCard()/startRound(). -->
+        <details id="setupDetails" open>
+            <summary class="setup-summary">Setup</summary>
+            <button id="quickPlayBtn" class="quick-play-btn" onclick="quickPlay()">⚡ Quick Play</button>
+            <div class="controls">
             <select id="modeSelect" onchange="updateUI()">
                 <option value="1">1 Player (Solo)</option>
                 <option value="2">2 Players (Versus)</option>
@@ -4095,15 +4283,14 @@ void main() {
             <p class="splash-hint" id="splashHint">3rd key toggles boost target.</p>
         </div>
         <h3 id="controlsText">P1 (Blue): Left/Right Arrows</h3>
-        <h2 id="scoreboard">Survival Time: 0.0s</h2>
-        <div id="statsCard" class="stats-card hidden-stats"></div>
+        </details>
     </div>
 
     <!-- T41: static How-to-Play guide, closable, reachable from the menu above. -->
     <div id="helpOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleHelpPanel(false)">
         <div class="help-panel">
             <button class="ui-close-btn help-close-btn" onclick="toggleHelpPanel(false)" aria-label="Close help">&#10005;</button>
-            <h2>How to Play</h2>
+            <h2>&#10067; How to Play</h2>
             <div id="helpContent"></div>
         </div>
     </div>
@@ -4112,9 +4299,9 @@ void main() {
          structure exactly (task design §3) -- same close button, outside-click
          close, and pause interaction, rebuilt into highScoreContent on open. -->
     <div id="highScoreOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleHighScorePanel(false)">
-        <div class="help-panel">
+        <div class="help-panel help-panel-scores">
             <button class="ui-close-btn help-close-btn" onclick="toggleHighScorePanel(false)" aria-label="Close high scores">&#10005;</button>
-            <h2>High Scores</h2>
+            <h2>&#127942; High Scores</h2>
             <div id="highScoreContent"></div>
             <button class="hs-clear-btn" onclick="confirmClearHighScores()">Clear History</button>
         </div>
@@ -4126,9 +4313,9 @@ void main() {
          into shopContent on open since balance/ownership can change between
          opens. -->
     <div id="shopOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleShopPanel(false)">
-        <div class="help-panel">
+        <div class="help-panel help-panel-shop">
             <button class="ui-close-btn help-close-btn" onclick="toggleShopPanel(false)" aria-label="Close shop">&#10005;</button>
-            <h2>Microtubule Upgrades</h2>
+            <h2>&#129516; Microtubule Upgrades</h2>
             <div id="shopContent"></div>
         </div>
     </div>
@@ -4137,9 +4324,9 @@ void main() {
          overlay structure exactly (same close button, outside-click close,
          pause interaction). No gameplay crosses the wire yet -- T30. -->
     <div id="netOverlay" class="help-overlay hidden-help" onclick="if (event.target === this) toggleNetPanel(false)">
-        <div class="help-panel">
+        <div class="help-panel help-panel-online">
             <button class="ui-close-btn help-close-btn" onclick="toggleNetPanel(false)" aria-label="Close online menu">&#10005;</button>
-            <h2>Online (beta)</h2>
+            <h2>&#127760; Online (beta)</h2>
             <div id="netContent"></div>
         </div>
     </div>
@@ -5091,6 +5278,8 @@ void main() {
         let fuzzStatsTimer = 0;
         const scoreText = document.getElementById('scoreboard');
         const statsCardElement = document.getElementById('statsCard'); // T53
+        const roundResultElement = document.getElementById('roundResult'); // T61
+        const setupDetailsElement = document.getElementById('setupDetails'); // T61
         const warningElement = document.getElementById('globalWarning');
         const modeSelect = document.getElementById('modeSelect');
         const aiSelect = document.getElementById('aiSelect');
@@ -5098,6 +5287,39 @@ void main() {
         const uiElement = document.getElementById('ui');
         const uiTrigger = document.getElementById('ui-trigger');
         const pauseMenuBtn = document.getElementById('pauseMenuBtn'); // T24
+
+        // T61: bottom-fade "more below" scroll cue for #ui (item 4) -- T24
+        // already made the panel scrollable on a short viewport, but nothing
+        // on screen indicated it. No CSS-only way to detect real overflow, so
+        // a scroll listener plus a MutationObserver (content changes -- the
+        // round result appearing, setup collapsing, the control splash
+        // toggling -- don't change #ui's own clamped box size once it is
+        // already at max-height, so a ResizeObserver on #ui itself would miss
+        // them) toggle the fade class.
+        function updateUiScrollCue() {
+            let hasMore = uiElement.scrollHeight - uiElement.scrollTop - uiElement.clientHeight > 2;
+            uiElement.classList.toggle('has-more-below', hasMore);
+        }
+        uiElement.addEventListener('scroll', updateUiScrollCue);
+        new MutationObserver(updateUiScrollCue).observe(uiElement, { childList: true, subtree: true, attributes: true, characterData: true });
+        window.addEventListener('resize', updateUiScrollCue);
+
+        // T61: #liveHud is deliberately independent of #ui's own hidden-ui
+        // state (it must stay visible during play, while #ui is hidden) --
+        // but that means it is NOT covered by toggleHelpPanel()/
+        // toggleHighScorePanel()/toggleShopPanel()/toggleNetPanel() hiding
+        // #ui while their own overlay is up, and bleeds through the
+        // overlay's semi-transparent scrim. Watch the four overlays' own
+        // hidden-help toggle instead of touching all four functions.
+        const LIVE_HUD_OVERLAY_IDS = ['helpOverlay', 'highScoreOverlay', 'shopOverlay', 'netOverlay'];
+        function updateLiveHudVisibility() {
+            let anyOpen = LIVE_HUD_OVERLAY_IDS.some(id => !document.getElementById(id).classList.contains('hidden-help'));
+            document.getElementById('liveHud').classList.toggle('hidden-hud', anyOpen);
+        }
+        LIVE_HUD_OVERLAY_IDS.forEach(id => {
+            new MutationObserver(updateLiveHudVisibility)
+                .observe(document.getElementById(id), { attributes: true, attributeFilter: ['class'] });
+        });
 
         const ARCS = [
             { type: 'ER', r: 160, thick: 20, span: 1.05, color: 0x0097e6 },
@@ -9075,7 +9297,8 @@ void main() {
 
         // PEEK LOGIC: Show UI on hover, hide when leaving. T24: touch has no
         // hover concept, so this path is gated off entirely for touch devices --
-        // they use pauseMenuBtn/uiCloseBtn below instead.
+        // they use pauseMenuBtn below instead (T61: uiCloseBtn was removed as
+        // a redundant second close affordance, item 6b).
         if (!isTouchDevice) {
             uiTrigger.addEventListener('mouseenter', () => uiElement.classList.remove('hidden-ui'));
             uiElement.addEventListener('mouseleave', () => {
@@ -9987,13 +10210,18 @@ void main() {
             let totalPlayers = currentMode + aiCount;
             if (totalPlayers === 1) {
                 document.getElementById('controlsText').innerHTML = "P1 (Blue): L/R Arrows | Toggle: Down Arrow";
-                if (!isPlaying) scoreText.innerText = `Survival Time: 0.0s · Gen ${activeCell.generation}`;
+                // T61 item 6c: no "Survival Time: 0.0s" placeholder before a
+                // round has ever run -- gameLoop() takes over scoreText once
+                // isPlaying, and the round-end paths set their own text.
             } else {
                 let controls = "P1: L/R/Down | P2: A/D/S";
                 if (totalPlayers >= 3) controls += " | P3: G/J/H";
                 if (totalPlayers === 4) controls += " | P4: 4/6/5";
 
-                controls += " <br> <span style='color:#a29bfe; font-size:14px;'>3rd Key: " + TARGET_MODE_LEGEND + "</span>";
+                // T61 item 2: the boost-target legend used to be restated here
+                // AND in #splashHint (renderControlSplash() below), ~60px
+                // apart in the same panel. Stated once now, attached to the
+                // control cards (splashHint) -- see item 2's "Fix".
 
                 document.getElementById('controlsText').innerHTML = controls;
 
@@ -10026,10 +10254,16 @@ void main() {
 
         // T41: factored out of renderControlSplash so the Help panel can show
         // the same player/key mapping without a second copy of this markup.
-        function controlCardsHtml(totalPlayers) {
+        // T61 item 6a: hideInactive skips the not-configured-this-round cards
+        // entirely instead of dimming them -- renderControlSplash() (the live
+        // menu) wants that; renderHelpPanel()'s static reference guide still
+        // wants all 4 shown regardless of the currently selected mode, so it
+        // leaves this false.
+        function controlCardsHtml(totalPlayers, hideInactive) {
             let html = '';
             playerConfigs.forEach((config, i) => {
                 let active = i < totalPlayers;
+                if (!active && hideInactive) return;
                 let dotColor = '#' + config.color.toString(16).padStart(6, '0');
                 html += `<div class="splash-card${active ? '' : ' dimmed'}">` +
                     `<div class="splash-card-title"><span class="splash-dot" style="background:${dotColor}"></span>P${config.id}</div>` +
@@ -10043,8 +10277,8 @@ void main() {
 
         function renderControlSplash() {
             let totalPlayers = currentMode + aiCount;
-            document.getElementById('splashCards').innerHTML = controlCardsHtml(totalPlayers);
-            // T36: same legend string as controlsText -- can't drift apart.
+            document.getElementById('splashCards').innerHTML = controlCardsHtml(totalPlayers, true); // T61 item 6a: only configured players' cards
+            // T36: the one place the boost-target legend is stated (T61 item 2).
             document.getElementById('splashHint').innerHTML = "3rd key toggles boost target: " + TARGET_MODE_LEGEND + ".";
         }
 
@@ -10551,12 +10785,16 @@ void main() {
                     `</div>`;
             }
             statsCardElement.innerHTML = html;
-            statsCardElement.classList.remove('hidden-stats');
+            // T61: reveal the result-first block and collapse setup behind it
+            // (item 3) -- see the .round-result/#setupDetails CSS/HTML.
+            roundResultElement.classList.remove('hidden-round-result');
+            setupDetailsElement.open = false;
         }
 
         window.startRound = function () {
             // 1. Clear previous round data
-            statsCardElement.classList.add('hidden-stats'); // T53: hide the previous round's card
+            roundResultElement.classList.add('hidden-round-result'); // T61 (was T53's statsCardElement toggle): hide the previous round's result
+            setupDetailsElement.open = true; // T61: expand setup again for the round about to start
             uiBarsLayer.clear(); virusLayer.clear();
             vesicles = []; dynamicLayer.clear();
             atpGranules = []; atpLayer.clear(); calcifyPauseTimer = 0; // T51

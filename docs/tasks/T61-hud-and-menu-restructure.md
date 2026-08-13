@@ -101,16 +101,141 @@ knows immediately.
 
 ## Definition of done
 
-- [ ] Single ordered HUD stack; no overlap at any size
-- [ ] Legend stated once
-- [ ] Round-over and pre-round are distinct states; result is first after a round
-- [ ] Phone overflow indicated; primary action above the fold
-- [ ] Panels visually distinguishable
-- [ ] P3/P4 cards conditional; duplicate close affordance resolved; stray timer hidden
-- [ ] `docs/TASKS.md`: T61 → `DONE`
+- [x] Single ordered HUD stack; no overlap at any size
+- [x] Legend stated once
+- [x] Round-over and pre-round are distinct states; result is first after a round
+- [x] Phone overflow indicated; primary action above the fold
+- [x] Panels visually distinguishable
+- [x] P3/P4 cards conditional; duplicate close affordance resolved; stray timer hidden
+- [x] `docs/TASKS.md`: T61 → `DONE`
 
 ---
 
 ## Findings
 
-*(Before/after screenshots at all three sizes for each item.)*
+**Item 1 (HUD stack).** `#scoreboard` (previously inside `#ui`, only visible
+during play via a "peek sliver" left when `#ui.hidden-ui` slid up 90%) and
+`#nucleusFeedBar` (previously its own independently fixed-position element)
+now both live inside a single new `#liveHud` flex column, always visible and
+independent of `#ui`'s own show/hide state. Verified with `activeCell.generation
+= 4; nucleusFeed.value = 400` forced live, `#ui` opened on top of it (pause
+menu): no overlap at 390x844, 844x390 or 1100x850
+(`t61_gen4_hud_paused_*.png`). Fixing this exposed two knock-on bugs, both
+fixed in the same diff:
+- `#ui`'s own resting `top` had to move down to clear `#liveHud`'s reserved
+  space, but `#ui.hidden-ui`'s hide transform (`translate(-50%, calc(-100% -
+  24px))`) is relative to `#ui`'s own box, not the viewport -- it doesn't
+  automatically compensate for a changed `top`. The first version left a
+  48px sliver of `#ui`'s own bottom content visible at the top of the screen
+  whenever `#ui` was supposedly hidden (caught by directly reading
+  `getBoundingClientRect()` while `helpOverlay` was open, not by eye). Fixed
+  with a shared `--ui-top-offset` custom property that both `#ui`'s `top`
+  and the hide transform read, including inside the new landscape media
+  query (item 4) so the two can't drift out of sync again the way they just
+  did once.
+- `#liveHud` and the four modal overlays (Help/Scores/Shop/Online) share the
+  same `z-index: 150`; since `#liveHud` is deliberately independent of
+  `#ui`'s hide state, it kept rendering (dimmed, through the overlay's
+  `rgba(0,0,0,0.6)` scrim) above the modal panel instead of being covered by
+  it. Fixed with `updateLiveHudVisibility()`, a `MutationObserver` on each
+  overlay's own `hidden-help` class toggle (not a change to the four
+  `toggleXPanel()` functions themselves) that adds `.hidden-hud` to
+  `#liveHud` while any one of them is open. Screenshots of all four panels
+  confirm no bleed-through (`t61_panel_help.png`,
+  `t61_panel_scores.png`, `t61_panel_shop.png`, `t61_panel_online.png`).
+
+**Item 2 (legend printed twice).** `updateUI()`'s multiplayer branch no
+longer appends `TARGET_MODE_LEGEND` to `#controlsText`; `#splashHint`
+(attached to the control cards, `renderControlSplash()`) is now the only
+place it renders. Verified by walking every leaf element under `#ui` and
+counting matches of the full legend string: **1 occurrence** (was 2, ~60px
+apart, per the task's own screenshot).
+
+**Item 3 (round-over is a wall of setup).** New `#roundResult` (stats card +
+a prominent `▶ Play Again` button, reusing `.quick-play-btn` styling) is the
+first child of `#ui`; the setup controls (Quick Play, mode/AI/camera/speed/
+quality selects, Start Game, Fullscreen, Controls/Help/Scores/Shop/Online)
+moved into a native `<details id="setupDetails">`, open pre-round and
+collapsed the moment `renderStatsCard()` runs (`startRound()` re-opens it for
+the next round). Verified by forcing a real membrane death at all 3 speeds
+(the §7.6 sweep below) and reading DOM state right after:
+`roundResultHidden: false`, `setupOpen: false`, `needsScroll: false`,
+`playAgainWithinViewport: true` at 390x844, 844x390 and 1100x850 -- the
+result renders complete and reachable with **zero scrolling** at every
+tested size (`t61_roundover_390x844.png` etc). Clicking `#playAgainBtn`
+correctly calls `startRound()`: `isPlaying` flips back to `true`,
+`survivalTime` resets, `#roundResult` re-hides, `#setupDetails` re-opens,
+`#ui` re-hides (auto-hide-on-start, unchanged).
+
+**Item 4 (phone landscape overflow).** Two independent fixes:
+- `#ui.has-more-below::after` -- a sticky bottom gradient fade, toggled by
+  `updateUiScrollCue()` (a scroll listener + a `MutationObserver`, not a
+  `ResizeObserver`: `#ui` is already clamped at `max-height: 90dvh`, so its
+  own box stops growing once content overflows it, and a `ResizeObserver` on
+  `#ui` itself would miss further content changes past that point).
+  Confirmed `hasMoreBelow: true` exactly when `scrollHeight > clientHeight`.
+- A `@media (max-height: 420px) and (orientation: landscape)` block reclaims
+  vertical space (smaller `--ui-top-offset`, tighter padding/gaps, and a
+  touch-ui-specific size reduction scoped to `#ui` only) so the primary
+  action is reachable without scrolling at all, not just indicated as
+  scrollable. Measured at 844x390 with `body.touch-ui` (the real mobile
+  sizing) applied: `Start Game` bottom edge at 248px, well inside the
+  390px viewport (was cut in half per the task's own screenshot; an
+  intermediate version of this fix that only added `--ui-top-offset`
+  without the media query measured 415px, i.e. still 25px past the fold --
+  caught before commit, not shipped). Screenshot:
+  `t61_phone_landscape_touchui.png`.
+
+**Item 5 (panels indistinguishable).** Each of Help/Scores/Shop/Online now
+has a leading icon in its `<h2>` and a `.help-panel-{scores,shop,online}`
+modifier class carrying a border-tint + heading colour pulled from that
+panel's own existing UI colour elsewhere (gold for Scores' `.hs-new-best`,
+green for Shop's `.shop-buy-btn`, blue for Online's account of buttons);
+Help keeps the original teal untouched as the baseline. Screenshots of all
+four confirm each is identifiable without reading the heading text:
+`t61_panel_help.png` (teal, ❓), `t61_panel_scores.png` (gold, 🏆),
+`t61_panel_shop.png` (green, 🧬), `t61_panel_online.png` (blue, 🌐).
+
+**Item 6a (P3/P4 cards in a 1v1).** `controlCardsHtml()` gained a
+`hideInactive` parameter; `renderControlSplash()` (the live in-game menu)
+passes `true`, `renderHelpPanel()`'s static 4-player reference guide passes
+nothing (unchanged, still shows all 4 dimmed-if-inactive, since it documents
+every possible mapping regardless of the selected mode). Verified: 2
+players configured -> 2 splash cards; 4 players configured -> 4 splash cards;
+Help panel still shows 4 regardless.
+
+**Item 6b (duplicate close button).** Removed `#uiCloseBtn` (the `&#10005;`
+inside `#ui`) entirely -- it called the exact same `togglePauseMenu()` as
+`#pauseMenuBtn` (`&#9776;`, always on screen, top-right), so it was a pure
+duplicate. The four modal overlays keep their own `.ui-close-btn` close
+buttons (confirmed via grep: exactly 4 remain, all on Help/Scores/Shop/
+Online) since `#pauseMenuBtn` only toggles `#ui`, not those.
+
+**Item 6c (stray "Survival Time: 0.0s").** The static HTML default for
+`#scoreboard` is now empty; `updateUI()` no longer writes the placeholder
+text for the solo-mode pre-round case (the multiplayer win-tally text,
+which is real information, is untouched). Verified: a fresh page load with
+no round ever started shows a blank scoreboard, not "Survival Time: 0.0s"
+(`t61_phone_portrait_touchui.png`).
+
+**Regression sweep (item 9/10).** `checkCollision`/`checkArcCollision`/
+`raycast`/`rebuildSpatialGrid`/`TRACE_HITBOX`/`NUCLEUS_RADIUS`/
+`EFFECT_DURATION`/`GAP_DISTANCE`/any hit-cooldown constant do not appear
+anywhere in the diff (confirmed by grep over `git diff`), so AGENT_CONDUCT
+§4.1/§7.6 don't strictly apply -- this is a layout-only task. Still ran the
+sweep for real: forced a membrane death (teleport just past
+`activeCell.radiusX`) at all three speeds (Normal/Fast/Very Fast) with a
+real round in progress -- death fired correctly every time
+(`alive0: false`, `isPlaying: false`) and the new round-over UI rendered
+clean with 0 console errors at each speed
+(`t61_regress_Normal.png`/`Fast`/`VeryFast`). A real unpiloted 30.2s round (1
+player + 3 bots) played normally throughout, including opening/closing the
+pause menu and the control splash mid-round: `worldChildren` flat at 16,
+6621 trace points, 0 console errors.
+
+**Verified over `file://`.** Both the source `260703_Cellsnake.html` and the
+rebuilt `dist/Cellular_Zatacka.html` (the fully self-contained standalone,
+which is what a player without a folder actually runs) load and start a
+round cleanly offline, 0 console/page errors either way.
+
+`sw.js` `CACHE_NAME` bumped v40→v41; `dist/` rebuilt (`--check` passes).
