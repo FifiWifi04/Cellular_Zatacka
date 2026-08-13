@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 1e4aaff1b932ec06 -->
+<!-- standalone-build-inputs: b364863a05763905 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -3322,6 +3322,33 @@ void main() {
             background: #e74c3c;
         }
 
+        /* T59: touch-only Shed the Tail activation, shown by JS only when
+           isTouchDevice and the upgrade is owned. Opposite corner from the
+           T23 toggle so the two never collide. */
+        .shed-tail-btn {
+            display: none;
+            position: fixed;
+            left: max(16px, env(safe-area-inset-left));
+            bottom: max(16px, env(safe-area-inset-bottom));
+            width: 56px;
+            height: 56px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            z-index: 50;
+            font-size: 20px;
+            font-family: monospace;
+            padding: 0;
+            border: none;
+            color: #ffffff;
+            background: #2d3436;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .shed-tail-btn:disabled {
+            opacity: 0.45;
+        }
+
         /* T27: unobtrusive prompt shown when the service worker has a new
            version waiting -- never reload out from under the player. */
         .sw-update-banner {
@@ -4127,6 +4154,10 @@ void main() {
 
     <!-- T23: touch-only boost-target toggle; shown by JS when isTouchDevice -->
     <button id="touchToggleBtn" class="touch-toggle-btn" onclick="toggleTouchTargetMode()">&#8644;</button>
+
+    <!-- T59: touch-only Shed the Tail activation; shown by JS only when
+         isTouchDevice and the upgrade is owned -- see updateShedTailButtonHUD(). -->
+    <button id="shedTailBtn" class="shed-tail-btn" onclick="touchShedTail()">&#9986;</button>
 
     <!-- T27: shown by the service worker registration when an update is waiting -->
     <div id="swUpdateBanner" class="sw-update-banner" onclick="applySwUpdate()">New version available — tap to reload</div>
@@ -7039,6 +7070,23 @@ void main() {
                 : '';
         }
 
+        // T59: DOM HUD control for the touch Shed the Tail button -- draw only
+        // (AGENT_CONDUCT 4.4a), reads players[0].upgrades/effects and
+        // survivalTime, never mutates them. Mirrors updateNucleusFeedHUD()'s
+        // show/hide idiom above.
+        function updateShedTailButtonHUD() {
+            if (!isTouchDevice) return;
+            let p = players[0];
+            let owned = !!(p && p.alive && p.upgrades.shedTail);
+            shedTailBtn.style.display = owned ? 'flex' : 'none';
+            if (!owned) return;
+
+            let remaining = SHED_TAIL_COOLDOWN - (survivalTime - p.effects.lastShedTail);
+            let onCooldown = remaining > 0;
+            shedTailBtn.disabled = onCooldown;
+            shedTailBtn.textContent = onCooldown ? String(Math.ceil(remaining)) : '✂';
+        }
+
         // T57: spawns from the origin nucleus (activeCell) regardless of
         // mitosis state -- homing itself (below) tracks raw player x/y, which
         // is correct whether or not a player has crossed into mitosis.cellB,
@@ -9007,6 +9055,24 @@ void main() {
             p.targetMode = (p.targetMode === 'self') ? 'attack' : 'self';
         };
 
+        // T59: touch-only Shed the Tail activation. Visibility/cooldown display
+        // is driven every frame by updateShedTailButtonHUD() (display §4.4a);
+        // hidden by default here since ownership isn't known until a round has
+        // resolved players[0].upgrades (see startRound()).
+        const shedTailBtn = document.getElementById('shedTailBtn');
+        // T55: same condition as the 'x' keyboard handler below and the bot's
+        // own use of the ability in updatePlayers() -- single-player only, so
+        // this always drives players[0], same reasoning as the toggle above.
+        window.touchShedTail = function () {
+            let p = players[0];
+            if (!isPlaying || paused) return;
+            if (p && p.alive && !p.isBot && p.upgrades.shedTail &&
+                survivalTime - p.effects.lastShedTail > SHED_TAIL_COOLDOWN) {
+                p.effects.lastShedTail = survivalTime;
+                deleteOldestTrace(p, SHED_TAIL_FRACTION);
+            }
+        };
+
         // PEEK LOGIC: Show UI on hover, hide when leaving. T24: touch has no
         // hover concept, so this path is gated off entirely for touch devices --
         // they use pauseMenuBtn/uiCloseBtn below instead.
@@ -9809,6 +9875,7 @@ void main() {
 
             drawPlayerBars(); // T22 step 5
             updateNucleusFeedHUD(); // T52
+            updateShedTailButtonHUD(); // T59
 
             // T17: no splash particles during frozen states (infection warning /
             // mitosis reveal) -- clear rather than leaving the last frame's burst
@@ -10203,7 +10270,11 @@ void main() {
         // task's hard rule.
         const UPGRADES = {
             pickupRadius: { name: 'Wider Pickup Radius', cost: 600, desc: 'Vesicles and ATP granules can be collected from further away.' },
-            shedTail: { name: 'Shed the Tail', cost: 1000, desc: "Press X to cut away the oldest third of your own trace. Long cooldown." },
+            // T59: desc is a function, not a string -- "Press X" was never true
+            // on touch (there is no X key there), so the wording is derived
+            // from isTouchDevice the same way T41's help panel derives its own
+            // text from live state, instead of hardcoding either device's input.
+            shedTail: { name: 'Shed the Tail', cost: 1000, desc: () => `Cut away the oldest third of your own trace with ${isTouchDevice ? 'the scissors button' : "'X'"}. Long cooldown.` },
             spawnChoice: { name: 'Choice of Spawn', cost: 400, desc: 'Pick which of the 4 starting positions you begin the round at (Shop panel).' }
         };
         const PICKUP_RADIUS_BONUS = 12; // px added to the vesicle/ATP collection distance
@@ -10447,7 +10518,8 @@ void main() {
                 let afford = data.balance >= u.cost;
                 let action = owned ? '<span class="shop-owned">Owned</span>' :
                     `<button class="shop-buy-btn" ${afford ? '' : 'disabled'} onclick="attemptPurchase('${id}')">Buy (${u.cost})</button>`;
-                return `<div class="shop-row"><div class="shop-row-info"><b>${u.name}</b><span>${u.desc}</span></div>${action}</div>`;
+                let desc = typeof u.desc === 'function' ? u.desc() : u.desc; // T59: shedTail's desc varies by input device
+                return `<div class="shop-row"><div class="shop-row-info"><b>${u.name}</b><span>${desc}</span></div>${action}</div>`;
             }).join('');
             let spawnPicker = data.owned.spawnChoice ? `
                 <h3>Spawn position</h3>

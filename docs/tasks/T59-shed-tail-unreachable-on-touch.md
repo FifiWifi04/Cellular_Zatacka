@@ -61,15 +61,82 @@ This is the same gap T23 closed for the target-mode toggle, which is why
 
 ## Definition of done
 
-- [ ] Touch button, shown only when owned, drives players[0]
-- [ ] Cooldown state visible on the button
-- [ ] Shop description no longer says "Press X" on touch
-- [ ] Does not steal steering input
-- [ ] Desktop unchanged
-- [ ] `docs/TASKS.md`: T59 → `DONE`
+- [x] Touch button, shown only when owned, drives players[0]
+- [x] Cooldown state visible on the button
+- [x] Shop description no longer says "Press X" on touch
+- [x] Does not steal steering input
+- [x] Desktop unchanged
+- [x] `docs/TASKS.md`: T59 → `DONE`
 
 ---
 
 ## Findings
 
-*(Button placement and why; trace counts before/after; the cooldown evidence.)*
+**Button placement.** `#shedTailBtn` (`.shed-tail-btn`, 56x56 circle) sits in
+the bottom-left corner — the mirror image of T23's `#touchToggleBtn`
+(bottom-right) and clear of `#pauseMenuBtn` (top-right). All three corners
+stay non-overlapping at both 390x844 and 844x390 (measured
+`getBoundingClientRect()`: shedTail `x:16-72,y:318-374`, toggle
+`x:772-828,y:318-374`, pause `x:788-832,y:12-56` at 844x390 — no intersection).
+Screenshotted both sizes, `/tmp/verify/t59_390x844.png` and
+`/tmp/verify/t59_844x390.png`.
+
+**Visibility.** Hidden by default (CSS `display:none`); shown/hidden every
+rendered frame by a new draw-only `updateShedTailButtonHUD()` (§4.4a, mirrors
+`updateNucleusFeedHUD()`'s exact show/hide idiom) gated on
+`isTouchDevice && players[0].alive && players[0].upgrades.shedTail` — the
+same ownership flag T55 already resolves once at round start, so local
+multiplayer/online play (where `resolvePlayerUpgrades()` always returns an
+empty `owned`) hides it automatically with no extra gating needed. Verified:
+`display:none` before granting the upgrade, `display:flex` after (owned via
+direct `saveHighScores()` injection, same schema the real shop purchase
+writes).
+
+**Activation and trace cut.** `touchShedTail()` reuses the exact same
+condition as the existing 'x' keydown handler and the bot's own use of the
+ability in `updatePlayers()` (`p.alive && !p.isBot && p.upgrades.shedTail &&
+survivalTime - p.effects.lastShedTail > SHED_TAIL_COOLDOWN`), and calls the
+same `deleteOldestTrace(p, SHED_TAIL_FRACTION)`. Measured atomically (before/
+after read in the same JS tick, so the player's own continuous forward growth
+can't mask the cut): 25 → 18 points (a live tap), and separately 143 → 101
+after a forced cooldown expiry — both ≈30% (`SHED_TAIL_FRACTION`), matching
+the keyboard path exactly.
+
+**Cooldown.** An immediate second call in the same tick is a no-op (18 → 18).
+The button reflects this: `disabled=true` and its label switches from the
+scissors glyph to a live `Math.ceil()` countdown (`"30"` immediately after
+use, `"29"`s after a short wait) the very next rendered frame. Forcing
+`lastShedTail` back past `SHED_TAIL_COOLDOWN` returns the button to
+`disabled=false` and the scissors glyph, and a real tap through it cuts the
+trace again — cooldown recovery confirmed both in state and via the DOM.
+
+**Steering never stolen.** `document.elementFromPoint()` swept across both
+viewports returns `CANVAS` everywhere except the two 56x56 button footprints
+themselves (top-left/top-right/center/just-outside-each-button all hit the
+canvas; only the exact button rectangles hit `shedTailBtn`/`touchToggleBtn`).
+A synthetic held `pointerdown`(pointerType:`touch`) dispatched at the canvas
+elsewhere sets `keys.ArrowLeft=true` for the duration of the hold and clears
+it on `pointerup` — steering is unaffected, unlike the T45 `#ui-trigger` strip
+that used to swallow the whole top 30px.
+
+**Desktop unchanged.** `isTouchDevice=false` keeps `shedTailBtn` at
+`display:none` throughout (before and after granting the upgrade); the 'x'
+keydown handler still cuts the trace on its own (203 → 156 points, a live,
+non-atomic sample — consistent with ≈30% given trace kept growing during the
+sampling wait).
+
+**Shop text.** `UPGRADES.shedTail.desc` is now a function of `isTouchDevice`
+(`renderShopPanel()` calls it if it's a function, string otherwise — the only
+upgrade that needs to vary). Rendered text: desktop —
+*"Cut away the oldest third of your own trace with 'X'. Long cooldown."*;
+touch — *"...with the scissors button. Long cooldown."* Neither device shows
+"Press X" anymore.
+
+**Verified:** console clean over both `http://` (harness) and `file://`
+(`dist/`, offline); `node --check` on the extracted script; a real 20.2s
+round (1 human + 3 bots, no touch) played normally, no console errors;
+`tools/build_standalone.py --check` passes. `sw.js` `CACHE_NAME` bumped
+v39→v40; `dist/` rebuilt. No hazard was added or changed (`checkCollision`,
+`checkArcCollision`, `raycast`, `rebuildSpatialGrid` do not appear in the
+diff — confirmed by grep), so AGENT_CONDUCT §4.1/§7.6 don't apply here, same
+reasoning T54/T55 recorded for their own no-hazard-touched diffs.

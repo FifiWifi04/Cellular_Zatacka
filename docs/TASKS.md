@@ -98,6 +98,30 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > deadlocking. `sw.js` `CACHE_NAME` bumped v38→v39; `dist/` rebuilt. See
 > `docs/tasks/T60-event-camera-and-countdown.md` Findings for full numbers.
 >
+> **T59 landed 2026-08-13** — a touch-only Shed the Tail button (`#shedTailBtn`,
+> bottom-left corner, mirrors T23's `#touchToggleBtn` in the opposite corner)
+> is shown only when `isTouchDevice && players[0].upgrades.shedTail`, driven
+> by a new draw-only `updateShedTailButtonHUD()` that mirrors T52's
+> `updateNucleusFeedHUD()` show/hide idiom exactly; tapping it calls the same
+> `deleteOldestTrace()` the existing 'x' key already uses, with a live
+> countdown replacing the scissors glyph while on `SHED_TAIL_COOLDOWN`. The
+> shop description is no longer a fixed "Press X" string — `UPGRADES.shedTail.desc`
+> is now a function of `isTouchDevice`. Verified: atomic (same-tick)
+> before/after trace counts prove the ~30% cut (25→18 live, 143→101 after a
+> forced cooldown expiry) and prove the immediate second tap is a no-op
+> (18→18); `document.elementFromPoint()` swept across both 390x844 and
+> 844x390 hits the canvas everywhere except the two 56x56 button footprints
+> (no steering swallowed, unlike T45's old `#ui-trigger` strip); a synthetic
+> held touch `pointerdown` elsewhere on the canvas still sets `keys.ArrowLeft`
+> for the hold's duration; desktop (`isTouchDevice=false`) keeps the button at
+> `display:none` throughout and the 'x' key still works unchanged; console
+> clean over both `http://` and `file://` (`dist/`); a real 20.2s round played
+> normally. No hazard changed (`checkCollision`/`checkArcCollision`/`raycast`/
+> `rebuildSpatialGrid` don't appear in the diff), so §4.1/§7.6 don't apply,
+> same reasoning T54/T55 recorded. `sw.js` `CACHE_NAME` bumped v39→v40; `dist/`
+> rebuilt. See `docs/tasks/T59-shed-tail-unreachable-on-touch.md` Findings for
+> full numbers.
+>
 > **T50 landed 2026-08-09** — grey matter is never lethal in attack mode now,
 > lone or clustered, cooldown or not; see `docs/tasks/T50-red-mode-necrosis-inconsistent.md`
 > Findings.
@@ -673,7 +697,7 @@ sim/render split can wait behind them.
 | T48 | [Aggregate drawn in a rectangular frame; survives outside the membrane](tasks/T48-aggregate-grid-outline-and-containment.md) | T39 | `DONE` |
 | T49 | [Membrane protrusions and fill stay on the round-start ellipse](tasks/T49-membrane-furniture-follows-shrink.md) | T12, T37 | `DONE` |
 | T50 | [Red mode kills you on necrotic organelles it promised to break](tasks/T50-red-mode-necrosis-inconsistent.md) | T38 | `DONE` |
-| T59 | ["Shed the Tail" unreachable on touch](tasks/T59-shed-tail-unreachable-on-touch.md) | T55 | `READY` |
+| T59 | ["Shed the Tail" unreachable on touch](tasks/T59-shed-tail-unreachable-on-touch.md) | T55 | `DONE` |
 | T60 | [Play resumes while the camera is still moving](tasks/T60-event-camera-and-countdown.md) ⚠️ *first* | T28, T47 | `DONE` |
 | T61 | [HUD collides with itself; the menu is a wall](tasks/T61-hud-and-menu-restructure.md) | T53, T54, T55 | `READY` |
 | T58 | [Red vesicle in attack mode instantly kills the opponent](tasks/T58-red-vesicle-instakills-opponent.md) | T08, T36 | `DONE` |
