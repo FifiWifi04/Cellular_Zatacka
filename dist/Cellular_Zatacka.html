@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 249c95b846fdedd9 -->
+<!-- standalone-build-inputs: a2f7b22168c75476 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -5229,7 +5229,7 @@ void main() {
             state: 'idle', // 'idle', 'forming', 'narrowing'
             nextTriggerTime: MITOSIS_INTERVAL, // Production: 4 minutes
             eventStartTime: 0,
-            cellB: { x: 0, y: 0 },
+            cellB: { x: 0, y: 0, radiusX: 0, radiusY: 0 }, // T64: radii always present, see the assignment in the trigger block
             bridge: { x: 0, y: 0, width: 0, height: 0, maxWidth: 600 },
             direction: 0,
             currentWidth: 600,
@@ -7668,7 +7668,19 @@ void main() {
                 let offset = 3400; // Increased to create a distinct tunnel!
 
                 mitosis.direction = dir;
-                mitosis.cellB = { x: activeCell.x, y: activeCell.y };
+                // T64: radiusX/radiusY are NOT optional. Three separate
+                // wall-containment paths (updateDriftingOrganelles' push-back and
+                // its 1000px runaway reset, updateVesicles' bounce) pick a
+                // `nearestCell` that can be cellB and then read .radiusX/.radiusY
+                // off it -- without these they read `undefined`, the arithmetic
+                // yields NaN, and the entity's position is permanently NaN rather
+                // than merely un-bounced. Cell B is a copy of activeCell's current
+                // size: updateCalcification() is gated on `mitosis.state === 'idle'`
+                // so neither can change while the event runs.
+                mitosis.cellB = {
+                    x: activeCell.x, y: activeCell.y,
+                    radiusX: activeCell.radiusX, radiusY: activeCell.radiusY
+                };
                 mitosis.bridge.maxWidth = 600;
 
                 if (dir === 0) mitosis.cellB.x += offset;

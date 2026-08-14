@@ -101,12 +101,16 @@ them.
   *after* T07's trace cap has landed. Incremental removal is where bugs hide.
   — 2026-08-02
 
-- **`mitosis.cellB` never gets `radiusX`/`radiusY` fields**, but the outer-membrane
+- ~~**`mitosis.cellB` never gets `radiusX`/`radiusY` fields**, but the outer-membrane
   wall-bounce in `updateVesicles()` (the `isOutsideCell` branch, pre-existing, not
   touched by T15) reads `nearestCell.radiusX`/`radiusY` and will get `NaN` there
   whenever a vesicle bounces off the wall while `mitosis.cellB` is the nearer cell.
   T15's new gravity-well code only reads `nearestCell.x`/`y`, so it does not hit
-  this; found while reusing the same `nearestCell` pattern. — 2026-08-06
+  this; found while reusing the same `nearestCell` pattern. — 2026-08-06~~
+  **Fixed by [T64](tasks/T64-cellb-radii-nan.md)** (2026-08-14). Worse than filed:
+  the position is written back as `NaN`, so the entity is permanently corrupt and
+  stays in its array rather than merely failing to bounce — and it affected the
+  two `updateDriftingOrganelles()` paths as well, not just the vesicle one.
 
 ---
 

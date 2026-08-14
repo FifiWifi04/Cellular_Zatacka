@@ -745,6 +745,7 @@ sim/render split can wait behind them.
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `DONE` |
 | T62 | [Art pass: depth, scale and the bridge](tasks/T62-art-pass-depth-and-scale.md) ⏳ *resumable, one section per session* | T60, T61 | `DONE` |
 | T63 | [Cell B's membrane kept the pre-T62 zoom collapse](tasks/T63-cellb-membrane-zoom-collapse.md) | T62 | `DONE` |
+| T64 | [`mitosis.cellB` has no radii — Cell B's wall NaNs what touches it](tasks/T64-cellb-radii-nan.md) | — | `DONE` |
 
 > **T62 Section 1 (scale collapse) landed 2026-08-14** — small, low-alpha
 > "filler" cytosol blobs (`spawnCytosolFiller()`, tier-driven count: low 0 /
