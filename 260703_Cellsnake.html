@@ -4838,41 +4838,68 @@
 
             let isHorizontal = (mitosis.direction === 0 || mitosis.direction === 2);
             let gapStart, gapLength;
+            let rx = activeCell.radiusX, ry = activeCell.radiusY;
+            let halfW = mitosis.currentWidth / 2;
+            // T62 section 3: gapStart/gapLength now land exactly where each cell's
+            // own ellipse boundary is already at +/-halfW (instead of the old fixed
+            // "-10" overlap), so the flat corridor sides begin with zero visual jump
+            // against the membrane's own curve, and a short quadraticCurveTo flare at
+            // each end rounds the tangent kink into a genuine neck (this is purely
+            // cosmetic -- isOutsideCell()'s bridge rectangle, the actual hazard
+            // geometry, is untouched and still spans cell-centre to cell-centre).
+            const NECK_FILLET = 70;
 
             if (isHorizontal) {
                 let minX = Math.min(activeCell.x, mitosis.cellB.x);
                 let maxX = Math.max(activeCell.x, mitosis.cellB.x);
+                let edgeOffset = rx * Math.sqrt(Math.max(0, 1 - (halfW * halfW) / (ry * ry)));
 
-                // Start drawing exactly at the edge of the first cell
-                gapStart = minX + activeCell.radiusX - 10;
-                // Stop drawing exactly at the edge of the second cell
-                gapLength = (maxX - activeCell.radiusX + 10) - gapStart;
+                gapStart = minX + edgeOffset;
+                gapLength = (maxX - edgeOffset) - gapStart;
 
                 // Floor
-                mitosisLayer.drawRect(gapStart, activeCell.y - mitosis.currentWidth / 2, gapLength, mitosis.currentWidth);
+                mitosisLayer.drawRect(gapStart, activeCell.y - halfW, gapLength, mitosis.currentWidth);
 
-                // Walls
+                // Walls -- flare into each cell's own ellipse for a short distance
+                // before the straight corridor run.
+                let fillet = Math.min(NECK_FILLET, gapLength / 2, edgeOffset * 0.9);
+                let flareY = ry * Math.sqrt(Math.max(0, 1 - Math.pow((edgeOffset - fillet) / rx, 2)));
+
                 mitosisLayer.lineStyle(8, 0x4a69bd, 0.8);
-                mitosisLayer.moveTo(gapStart, activeCell.y - mitosis.currentWidth / 2);
-                mitosisLayer.lineTo(gapStart + gapLength, activeCell.y - mitosis.currentWidth / 2);
-                mitosisLayer.moveTo(gapStart, activeCell.y + mitosis.currentWidth / 2);
-                mitosisLayer.lineTo(gapStart + gapLength, activeCell.y + mitosis.currentWidth / 2);
+                mitosisLayer.moveTo(gapStart - fillet, activeCell.y - flareY);
+                mitosisLayer.quadraticCurveTo(gapStart, activeCell.y - halfW, gapStart + fillet, activeCell.y - halfW);
+                mitosisLayer.lineTo(gapStart + gapLength - fillet, activeCell.y - halfW);
+                mitosisLayer.quadraticCurveTo(gapStart + gapLength, activeCell.y - halfW, gapStart + gapLength + fillet, activeCell.y - flareY);
+
+                mitosisLayer.moveTo(gapStart - fillet, activeCell.y + flareY);
+                mitosisLayer.quadraticCurveTo(gapStart, activeCell.y + halfW, gapStart + fillet, activeCell.y + halfW);
+                mitosisLayer.lineTo(gapStart + gapLength - fillet, activeCell.y + halfW);
+                mitosisLayer.quadraticCurveTo(gapStart + gapLength, activeCell.y + halfW, gapStart + gapLength + fillet, activeCell.y + flareY);
             } else {
                 let minY = Math.min(activeCell.y, mitosis.cellB.y);
                 let maxY = Math.max(activeCell.y, mitosis.cellB.y);
+                let edgeOffset = ry * Math.sqrt(Math.max(0, 1 - (halfW * halfW) / (rx * rx)));
 
-                gapStart = minY + activeCell.radiusY - 10;
-                gapLength = (maxY - activeCell.radiusY + 10) - gapStart;
+                gapStart = minY + edgeOffset;
+                gapLength = (maxY - edgeOffset) - gapStart;
 
                 // Floor
-                mitosisLayer.drawRect(activeCell.x - mitosis.currentWidth / 2, gapStart, mitosis.currentWidth, gapLength);
+                mitosisLayer.drawRect(activeCell.x - halfW, gapStart, mitosis.currentWidth, gapLength);
 
-                // Walls
+                // Walls -- same neck-flare treatment as the horizontal case.
+                let fillet = Math.min(NECK_FILLET, gapLength / 2, edgeOffset * 0.9);
+                let flareX = rx * Math.sqrt(Math.max(0, 1 - Math.pow((edgeOffset - fillet) / ry, 2)));
+
                 mitosisLayer.lineStyle(8, 0x4a69bd, 0.8);
-                mitosisLayer.moveTo(activeCell.x - mitosis.currentWidth / 2, gapStart);
-                mitosisLayer.lineTo(activeCell.x - mitosis.currentWidth / 2, gapStart + gapLength);
-                mitosisLayer.moveTo(activeCell.x + mitosis.currentWidth / 2, gapStart);
-                mitosisLayer.lineTo(activeCell.x + mitosis.currentWidth / 2, gapStart + gapLength);
+                mitosisLayer.moveTo(activeCell.x - flareX, gapStart - fillet);
+                mitosisLayer.quadraticCurveTo(activeCell.x - halfW, gapStart, activeCell.x - halfW, gapStart + fillet);
+                mitosisLayer.lineTo(activeCell.x - halfW, gapStart + gapLength - fillet);
+                mitosisLayer.quadraticCurveTo(activeCell.x - halfW, gapStart + gapLength, activeCell.x - flareX, gapStart + gapLength + fillet);
+
+                mitosisLayer.moveTo(activeCell.x + flareX, gapStart - fillet);
+                mitosisLayer.quadraticCurveTo(activeCell.x + halfW, gapStart, activeCell.x + halfW, gapStart + fillet);
+                mitosisLayer.lineTo(activeCell.x + halfW, gapStart + gapLength - fillet);
+                mitosisLayer.quadraticCurveTo(activeCell.x + halfW, gapStart + gapLength, activeCell.x + flareX, gapStart + gapLength + fillet);
             }
 
             // Draw Microtubules (Static Obstacles)

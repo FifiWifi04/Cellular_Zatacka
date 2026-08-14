@@ -112,7 +112,7 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 
 - [x] Section 1 — scale collapse (cytosol mid-frequency filler)
 - [x] Section 2 — membrane low-zoom treatment
-- [ ] Section 3 — mitosis bridge as a curve, not four straight lines
+- [x] Section 3 — mitosis bridge as a curve, not four straight lines
 - [ ] Section 4 — depth (parallax, edge falloff)
 - [ ] Section 5 — hazard colour language table
 - [ ] Section 6 — motion and life (breathing pulse, independent ER/Golgi rotation, vesicle traffic)
@@ -221,4 +221,76 @@ frame -- filed to `docs/BACKLOG.md` as a follow-up, out of scope for this
 section. `sw.js` `CACHE_NAME` bumped v42->v43; `dist/` rebuilt (`--check`
 passes).
 
-Remaining sections (3-6) are unstarted.
+**Section 3 (mitosis bridge as a curve), landed 2026-08-14.** Root-caused the
+"four straight lines" look before touching anything: `isOutsideCell()`'s bridge
+rectangle (the actual hazard geometry, untouched by this section) spans
+cell-*centre* to cell-*centre*, so the true safe boundary near each cell is
+`max(ellipseExtent(x), halfW)` -- exactly the ellipse's own curve out to the
+point where it narrows to the corridor's half-width, flat from there on. The
+old code instead started its straight wall at a fixed `radiusX - 10` offset,
+which sits *past* that true crossing point, so between the crossing point and
+the old wall start the membrane's own ring (still drawn in full by
+`drawCalcification()`, unmodified) reads down to ~100px while the new wall
+already needed to be at the full 300px half-width -- a real ~200px vertical
+jump at the seam, which is what actually read as "a separate primitive butted
+against" the cell, not merely a lack of curvature.
+
+Fixed by computing `edgeOffset = rx * sqrt(max(0, 1 - halfW²/ry²))` (swapped
+for the vertical direction) each frame in `drawMitosisVisuals()` and using
+`gapStart`/`gapLength` (local to that function, not read anywhere else --
+confirmed by grep) based on it, so the corridor's flat sides now begin exactly
+where the cell's own ellipse boundary is already at the corridor's half-width
+-- zero positional jump, for free, since the membrane ring's own draw call is
+untouched. A short `quadraticCurveTo` flare (`NECK_FILLET = 70` world px) at
+each end then rounds the remaining ~73° *tangent* kink (ellipse tangent vs.
+flat wall) into a genuine curve, retracing a short arc of the membrane's own
+already-visible curve in the game's own wall colour (`0x4a69bd`, identical to
+the membrane's middle ring) rather than introducing a new shape or colour.
+Net effect: the corridor now reads as a proper hourglass neck (wide at each
+cell, narrowing smoothly to the fixed corridor width) instead of a rectangle
+slapped against two circles -- this falls directly out of the corrected
+geometry, no separate "hourglass" special-casing was needed.
+
+Purely cosmetic: `isOutsideCell()` (the bridge's real rectangle test,
+cell-centre to cell-centre, `mitosis.currentWidth`-driven) is unmodified, and
+neither it nor `checkCollision`/`checkArcCollision`/`raycast`/
+`rebuildSpatialGrid` appear in the diff (confirmed by `git diff` grep). The
+flare's control geometry is derived entirely from the same `activeCell.radiusX/
+radiusY`/`mitosis.currentWidth` the real hazard already uses, so it can only
+ever retrace true ellipse-boundary points -- there's no way for the drawn wall
+to bulge outside the actual safe region and create an invisible-wall death.
+
+Not tier-gated, same reasoning T62 section 2 used for `zoomBoost`: this
+reshapes the vertices of the two existing wall subpaths (2 more
+`quadraticCurveTo` calls per wall instead of a second `lineTo`), it doesn't add
+a new draw call, layer, or particle count to gate. Measured directly:
+`drawMitosisVisuals()` cost 0.0202ms/call before vs. 0.0254ms/call after (3000
+calls each, `performance.now()`), a 0.005ms delta, noise against the 16.6ms
+frame budget.
+
+Verified: before/after screenshots at the true playing zoom (0.55, camera
+stubbed and panned to the bridge midpoint, same technique as sections 1-2) for
+a forced horizontal (`direction=0`) event -- before shows the exact jump
+described above (thick glowing membrane ring cutting hard to a thin flat line);
+after shows a continuous curved neck with no seam. A forced vertical
+(`direction=3`) event screenshotted clean too, confirming the mirrored branch.
+A direct width sweep (`mitosis.currentWidth` = 600, 300, 60, 5, 0.1, 0, calling
+`drawMitosisVisuals()` at each) produced no throw/NaN at any value, including
+the `narrowing` state's approach to a fully-closed bridge. `worldChildren` flat
+at 16 across a real 300-game-second headless immortal run (`window.
+stepHeadless`, dt=1/30, forcing repeat mitosis triggers). A real 15s rendered
+round (1 human + 3 bots, non-immortal) played normally, console clean. Offline
+`file://` load of the rebuilt `dist/Cellular_Zatacka.html` also console-clean
+with a forced mitosis event. `sw.js` `CACHE_NAME` bumped v43->v44; `dist/`
+rebuilt (`--check` passes).
+
+One pre-existing, already-backlogged issue surfaced incidentally while
+diagnosing an early-terminating headless run: the mitosis snap's "kill players
+left behind" check (`updateMitosis()`, "4. Kill players who didn't make it to
+Cell B") is gated on `devMode`, not `godMode`, so an uncontrolled human slot in
+an `immortal: true` harness run can still die at the snap even though
+collision itself is disabled -- this is the same issue T51's Findings already
+filed to `docs/BACKLOG.md`; not re-filed, and out of scope here regardless
+(it's `updateMitosis()` state logic, not this section's draw-only change).
+
+Remaining sections (4-6) are unstarted.

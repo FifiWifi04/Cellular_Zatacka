@@ -770,6 +770,28 @@ sim/render split can wait behind them.
 > matching mitosis-time membrane bake has the same issue but is out of scope
 > here -- filed to `docs/BACKLOG.md`. Sections 3-6 remain — see
 > `docs/tasks/T62-art-pass-depth-and-scale.md` `## Progress`/`## Findings`.
+>
+> **T62 Section 3 (mitosis bridge as a curve) landed 2026-08-14** — root cause
+> was that `isOutsideCell()`'s real bridge boundary already narrows from each
+> cell's own ellipse down to the corridor's flat half-width, but the old
+> straight wall started at a fixed `radiusX - 10` offset *past* that true
+> crossing point, creating a ~200px visual jump against the still-fully-drawn
+> membrane ring. `drawMitosisVisuals()` now starts the corridor exactly at the
+> true ellipse/half-width crossing point (computed fresh each frame from
+> `activeCell.radiusX/radiusY`/`mitosis.currentWidth`, the same values the real
+> hazard already uses) plus a small `quadraticCurveTo` flare at each end,
+> producing a continuous hourglass neck instead of a rectangle butted against
+> two circles -- purely cosmetic, `isOutsideCell()`/`checkCollision()`/
+> `checkArcCollision()`/`raycast()`/`rebuildSpatialGrid()` all absent from the
+> diff. Cost 0.0202ms/call before vs. 0.0254ms/call after (negligible);
+> `worldChildren` flat over a 300-game-second headless run; before/after
+> screenshots at zoom 0.55 for a forced horizontal event confirm the jump is
+> gone, plus a vertical-direction sanity screenshot and a `currentWidth` sweep
+> (600 down to 0) with no throw/NaN. `sw.js` `CACHE_NAME` bumped v43-v44;
+> `dist/` rebuilt. One pre-existing, already-backlogged issue (mitosis snap's
+> kill check gated on `devMode` not `godMode`) surfaced incidentally, not
+> re-filed. Sections 4-6 remain — see
+> `docs/tasks/T62-art-pass-depth-and-scale.md` `## Progress`/`## Findings`.
 
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
