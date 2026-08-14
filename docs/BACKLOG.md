@@ -9,6 +9,22 @@ them.
 
 ---
 
+## Open — found during the 2026-08-14 T62 section 2 session
+
+- **Cell B's membrane (mitosis) has the same zoom-collapse problem as the
+  primary membrane, unfixed.** The mitosis-trigger block's `cellBBg` (search
+  `cellBBg.lineStyle(15, 0x1e3799, 0.4)`) draws an identical three-ring style
+  to `drawCalcification()`'s but as a one-time bake into a static `Graphics`
+  added to `backgroundLayer`, not a per-frame redraw — so it can't read a live
+  `world.scale.x` the way `drawCalcification()`'s new `zoomBoost` does. It
+  would need either baking at a fixed reference width (then relying on the
+  same in-container zoom the rest of the scene gets, unlike the un-boosted
+  original) or a small per-frame follow-up draw call added specifically for
+  Cell B's ring during mitosis. Out of scope for T62 section 2, which named
+  only "the membrane" in the singular. — 2026-08-14
+
+---
+
 ## Open — found during the 2026-08-11 owner pre-merge verification
 
 - **Online multiplayer cannot work from the hosted (HTTPS) build.**

@@ -111,7 +111,7 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 ## Progress
 
 - [x] Section 1 — scale collapse (cytosol mid-frequency filler)
-- [ ] Section 2 — membrane low-zoom treatment
+- [x] Section 2 — membrane low-zoom treatment
 - [ ] Section 3 — mitosis bridge as a curve, not four straight lines
 - [ ] Section 4 — depth (parallax, edge falloff)
 - [ ] Section 5 — hazard colour language table
@@ -169,4 +169,56 @@ tier gate. No hazard function appears in the diff
 absent, confirmed by `git diff` grep), so §7.6's regression sweep doesn't
 apply. `sw.js` `CACHE_NAME` bumped v41→v42; `dist/` rebuilt (`--check` passes).
 
-Remaining sections (2-6) are unstarted.
+**Section 2 (membrane low-zoom treatment), landed 2026-08-14.** `drawCalcification()`
+(the sole per-frame membrane draw for `activeCell`, per its own T37 comment)
+now computes `zoomBoost = Math.max(1, 1 / world.scale.x)` -- the same
+zoom-legibility pattern T52 already uses for the nucleus well in
+`drawVesicles()` -- and multiplies every stroke width by it, so the ring no
+longer thins out as the camera zooms below 1.0 (the ~0.5-0.6 zoom the game is
+actually played at, per section 1's own framing). The three existing rings
+were also thickened at their base width (15/8/3 -> 18/10/4 world px) for a
+stronger boundary at any zoom. A new soft inner glow -- up to 3 concentric
+rings stepping inward from the membrane with decreasing alpha (`0.045 * i`),
+same blue family as the existing outer glow ring -- gives "inside" a falloff
+into the cytosol instead of ending at a stroke. Glow step count is tier-driven
+(`QUALITY_TIERS[tier].membraneGlowSteps`: low 0, medium 2, high 3), the same
+gating idiom section 1 established for `cytosolFillerCount`, so low tier drops
+the new glow layer entirely (confirmed by screenshot: low-tier membrane keeps
+the boosted three-ring stroke but no glow falloff). `zoomBoost` itself is not
+tier-gated, matching T52's precedent -- it only changes stroke width on the
+existing draw calls, not the calls made, so it adds no cost to gate.
+
+Screenshotted before/after at the true playing zoom (0.55, camera frozen via
+a stubbed `updateCamera()` and panned to the membrane edge, since the default
+camera keeps the boundary off-screen near round start): before, the ring read
+as one thin ~15px line; after, it reads as a thick glowing wall with a visible
+falloff into the cytosol, at both high tier (glow present) and low tier (glow
+absent, ring still boosted). Also checked at the Gen 2+ calcification floor
+(`radiusX`/`radiusY` forced to `CALCIFY_FLOOR`=0.45 of base) -- glow rings stay
+valid (innermost ring is `radius - 76` at 3 steps, well clear of the ER/Golgi
+cluster) with no clipping or artifacts.
+
+Cost measured by calling `drawCalcification()` directly 3000x per tier via
+`performance.now()` after a 50-call warmup: 0.0044ms/call (low, no glow),
+0.0058ms/call (medium), 0.0045ms/call (high) -- all sub-millisecond noise
+against the 16.6ms frame budget, no meaningful difference between tiers despite
+the extra glow draw calls. `worldChildren` flat at 16 across a 300-game-second
+headless immortal run. Console clean across: a real 30.2s round (1 human + 3
+bots, non-immortal -- human died into the membrane as expected, all 3 bots
+survived, confirming membrane death behaviour is unchanged), and an offline
+`file://` load of the rebuilt `dist/Cellular_Zatacka.html` (8.2 game-seconds,
+immortal). No hazard function appears in the diff
+(`checkCollision`/`checkArcCollision`/`raycast`/`rebuildSpatialGrid` all
+absent, confirmed by `git diff` grep) -- `activeCell.radiusX/radiusY` (the
+actual collision boundary) are read, never written, by this change -- so
+§7.6's regression sweep doesn't apply.
+
+Not touched, noted here rather than fixed: the one-time `cellBBg` bake in the
+mitosis-trigger block (a separate, static copy of the same three-ring style
+drawn once for Cell B at event start) has the identical zoom-collapse problem
+but can't reuse a live `zoomBoost` since it's baked once, not redrawn per
+frame -- filed to `docs/BACKLOG.md` as a follow-up, out of scope for this
+section. `sw.js` `CACHE_NAME` bumped v42->v43; `dist/` rebuilt (`--check`
+passes).
+
+Remaining sections (3-6) are unstarted.

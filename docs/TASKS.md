@@ -754,7 +754,21 @@ sim/render split can wait behind them.
 > (filler on). `worldChildren` flat (16) across a 300-game-second headless
 > run; low tier confirmed to drop the detail entirely (0 extra particles).
 > No hazard function touched. `sw.js` `CACHE_NAME` bumped v41→v42; `dist/`
-> rebuilt. Sections 2-6 remain — see
+> rebuilt.
+>
+> **T62 Section 2 (membrane low-zoom treatment) landed 2026-08-14** —
+> `drawCalcification()` now boosts every ring's stroke width by
+> `zoomBoost = Math.max(1, 1 / world.scale.x)` (T52's existing nucleus-well
+> pattern) so the membrane no longer thins to one line at the ~0.5-0.6 zoom
+> the game is actually played at, plus a new tier-gated soft inner glow
+> (`QUALITY_TIERS[tier].membraneGlowSteps`: low 0/medium 2/high 3) falling
+> from the ring into the cytosol. Cost measured at 0.0044-0.0058ms/call across
+> tiers (negligible against the 16.6ms frame budget); `worldChildren` flat
+> over a 300-game-second headless run; a real 30.2s round and an offline
+> `file://` load of the rebuilt `dist/` both console-clean; no hazard function
+> in the diff. `sw.js` `CACHE_NAME` bumped v42-v43; `dist/` rebuilt. Cell B's
+> matching mitosis-time membrane bake has the same issue but is out of scope
+> here -- filed to `docs/BACKLOG.md`. Sections 3-6 remain — see
 > `docs/tasks/T62-art-pass-depth-and-scale.md` `## Progress`/`## Findings`.
 
 > **Phase 9 — after Gen 4.** Scoped in

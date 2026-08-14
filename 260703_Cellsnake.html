@@ -1363,13 +1363,13 @@
         const QUALITY_TIERS = {
             low:    { threshold: 0.6,  bloomScale: 0.6, brightness: 1.0, blur: 4, quality: 2, trailBlur: 2,
                       bloomEnabled: false, trailBlurEnabled: false, traceScale: 0.4,  particleBudget: 0,   warningLevel: 0, cytosolCount: 300, cytosolFillerCount: 0,
-                      splitMultisample: PIXI.MSAA_QUALITY.NONE,   splitRenderScale: 0.6, protoLanes: 2, assemblyInterval: 8 },
+                      splitMultisample: PIXI.MSAA_QUALITY.NONE,   splitRenderScale: 0.6, protoLanes: 2, assemblyInterval: 8, membraneGlowSteps: 0 },
             medium: { threshold: 0.45, bloomScale: 1.0, brightness: 1.1, blur: 6, quality: 3, trailBlur: 3,
                       bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.5,  particleBudget: 150, warningLevel: 1, cytosolCount: 800, cytosolFillerCount: 400,
-                      splitMultisample: PIXI.MSAA_QUALITY.MEDIUM, splitRenderScale: 0.8, protoLanes: 3, assemblyInterval: 4 },
+                      splitMultisample: PIXI.MSAA_QUALITY.MEDIUM, splitRenderScale: 0.8, protoLanes: 3, assemblyInterval: 4, membraneGlowSteps: 2 },
             high:   { threshold: 0.3,  bloomScale: 1.5, brightness: 1.2, blur: 8, quality: 4, trailBlur: 4,
                       bloomEnabled: true,  trailBlurEnabled: true,  traceScale: 0.75, particleBudget: 400, warningLevel: 2, cytosolCount: 800, cytosolFillerCount: 600,
-                      splitMultisample: PIXI.MSAA_QUALITY.HIGH,   splitRenderScale: 1.0, protoLanes: 4, assemblyInterval: 3 }
+                      splitMultisample: PIXI.MSAA_QUALITY.HIGH,   splitRenderScale: 1.0, protoLanes: 4, assemblyInterval: 3, membraneGlowSteps: 3 }
         };
         let quality = 'low';      // current tier name; set for real by applyQuality() near the end of the T18 section
         let bloomFilter = null;   // module-scope so applyQuality can retune it
@@ -6441,12 +6441,31 @@
             // T51: while a pause is live the inner ring glows the same colour as the
             // granule that bought it, pulsing, instead of its resting cyan.
             let atpPauseActive = calcifyPauseTimer > 0;
-            calcifyLayer.lineStyle(15, 0x1e3799, 0.4);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
-            calcifyLayer.lineStyle(8, 0x4a69bd, 0.8);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX, activeCell.radiusY);
-            calcifyLayer.lineStyle(3, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
+            let a = activeCell.radiusX, b = activeCell.radiusY;
+
+            // T62 section 2: at the zoom the game is actually played at (~0.5-0.6)
+            // a flat world-space stroke shrinks along with everything else and the
+            // three-layer ring reads as one thin line -- boost stroke width as zoom
+            // falls below 1.0, the same zoomBoost pattern T52 already uses for the
+            // nucleus well in drawVesicles().
+            let zoomBoost = Math.max(1, 1 / world.scale.x);
+
+            // Soft glow falling from the membrane into the cytosol, so "inside"
+            // reads as an enclosed space rather than just a line on screen.
+            // Tier-driven (QUALITY_TIERS[tier].membraneGlowSteps) -- low drops it
+            // entirely, same as T62 section 1's cytosolFillerCount.
+            let glowSteps = QUALITY_TIERS[quality].membraneGlowSteps;
+            for (let i = glowSteps; i >= 1; i--) {
+                calcifyLayer.lineStyle(22 * zoomBoost, 0x1e3799, 0.045 * i);
+                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a - 10 - i * 22, b - 10 - i * 22);
+            }
+
+            calcifyLayer.lineStyle(18 * zoomBoost, 0x1e3799, 0.4);
+            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a + 8, b + 8);
+            calcifyLayer.lineStyle(10 * zoomBoost, 0x4a69bd, 0.8);
+            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a, b);
+            calcifyLayer.lineStyle(4 * zoomBoost, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
+            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a - 3, b - 3);
         }
 
         // T22 step 6: fused pre-existing code (cytosolParticles/membraneProtrusionsList
