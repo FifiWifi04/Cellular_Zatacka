@@ -4446,20 +4446,17 @@
                 // cover the bridge/Cell B before anything is drawn there.
                 traceRTNeedsFullRedraw = true;
 
-                // Draw Cell B base background in backgroundLayer (under cytosol)
+                // Draw Cell B base background in backgroundLayer (under cytosol).
+                // T63: the FILL only. The three ring strokes used to be baked in
+                // here too, which is why Cell B's wall kept collapsing to one thin
+                // line at playing zoom while the primary membrane got T62's
+                // zoomBoost/glow/breathing -- a static Graphics cannot read a live
+                // world.scale.x. The rings now come from drawCalcification()'s
+                // per-frame drawMembraneRings() call, same as the primary cell.
                 let cellBBg = new PIXI.Graphics();
                 cellBBg.beginFill(0x0d0d1a);
                 cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX, activeCell.radiusY);
                 cellBBg.endFill();
-
-                cellBBg.lineStyle(15, 0x1e3799, 0.4);
-                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX + 8, activeCell.radiusY + 8);
-
-                cellBBg.lineStyle(8, 0x4a69bd, 0.8);
-                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX, activeCell.radiusY);
-
-                cellBBg.lineStyle(3, 0x82ccdd, 1.0);
-                cellBBg.drawEllipse(mitosis.cellB.x, mitosis.cellB.y, activeCell.radiusX - 3, activeCell.radiusY - 3);
 
                 backgroundLayer.addChildAt(cellBBg, 0); // Put it under cytosol!
 
@@ -6497,6 +6494,46 @@
         // T37: calcifyLayer draws the membrane ring every frame at every
         // generation (not just Gen 2+) since generateMap() no longer bakes a
         // ring into cellBg -- this is the only membrane boundary, ever.
+        // T63: the whole membrane treatment for ONE cell -- the inward glow, the
+        // three rings, the outward falloff. Extracted from drawCalcification() so
+        // Cell B (mitosis) can be drawn by the identical code path instead of the
+        // separate static bake it used to carry, which could not read a live
+        // world.scale.x and so kept the pre-T62 zoom-collapse. One definition of
+        // "what a membrane looks like", two callers.
+        //
+        // Draw only (§4.4a). Every offset is decorative EXCEPT the ring drawn at
+        // exactly (a, b), which stays pinned to the real collision boundary and
+        // never takes breathePx -- see T62 section 6.
+        function drawMembraneRings(gfx, cx, cy, a, b, zoomBoost, glowSteps, breathePx, innerColor, innerAlpha) {
+            for (let i = glowSteps; i >= 1; i--) {
+                gfx.lineStyle(22 * zoomBoost, 0x1e3799, 0.045 * i);
+                gfx.drawEllipse(cx, cy, a - 10 - i * 22 + breathePx, b - 10 - i * 22 + breathePx);
+            }
+
+            gfx.lineStyle(18 * zoomBoost, 0x1e3799, 0.4);
+            gfx.drawEllipse(cx, cy, a + 8 + breathePx, b + 8 + breathePx);
+            gfx.lineStyle(10 * zoomBoost, 0x4a69bd, 0.8);
+            gfx.drawEllipse(cx, cy, a, b);
+            gfx.lineStyle(4 * zoomBoost, innerColor, innerAlpha);
+            gfx.drawEllipse(cx, cy, a - 3 + breathePx, b - 3 + breathePx);
+
+            // T62 section 4: outward falloff so the membrane fades into the void
+            // instead of cutting straight from the glowing ring to the flat
+            // backgroundColor -- the "vignette or falloff at the cell edge" the
+            // task asks for. A near-black tone here (first attempt) was
+            // indistinguishable from backgroundColor (0x0a0a14) at any alpha low
+            // enough to stay subtle -- screenshotted and confirmed invisible
+            // before landing on this: the wall's own outer-glow blue
+            // (0x1e3799, same colour section 2's inward glow already uses)
+            // bleeding outward with decreasing alpha, so the boundary reads as a
+            // halo receding into the dark rather than a flat cut. Mirrors the
+            // inward glow loop above (same glowSteps/zoomBoost/tier gate).
+            for (let i = 1; i <= glowSteps; i++) {
+                gfx.lineStyle(40 * zoomBoost, 0x1e3799, 0.14 / i);
+                gfx.drawEllipse(cx, cy, a + 8 + i * 40 + breathePx, b + 8 + i * 40 + breathePx);
+            }
+        }
+
         function drawCalcification() {
             calcifyLayer.clear();
             // T51: while a pause is live the inner ring glows the same colour as the
@@ -6518,37 +6555,22 @@
             let glowSteps = QUALITY_TIERS[quality].membraneGlowSteps;
 
             // T62 section 6: slow breathing pulse -- swells/contracts the
-            // decorative rings around the true boundary a few world px. The ring
-            // drawn at exactly (a, b) below is left pinned to the real collision
-            // boundary (activeCell.radiusX/radiusY) and never gets this offset.
+            // decorative rings around the true boundary a few world px.
             let breathePx = Math.sin(survivalTime * MEMBRANE_BREATH_RATE) * MEMBRANE_BREATH_AMOUNT;
 
-            for (let i = glowSteps; i >= 1; i--) {
-                calcifyLayer.lineStyle(22 * zoomBoost, 0x1e3799, 0.045 * i);
-                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a - 10 - i * 22 + breathePx, b - 10 - i * 22 + breathePx);
-            }
+            let innerColor = atpPauseActive ? ATP_COLOR : 0x82ccdd;
+            let innerAlpha = atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0;
 
-            calcifyLayer.lineStyle(18 * zoomBoost, 0x1e3799, 0.4);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a + 8 + breathePx, b + 8 + breathePx);
-            calcifyLayer.lineStyle(10 * zoomBoost, 0x4a69bd, 0.8);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a, b);
-            calcifyLayer.lineStyle(4 * zoomBoost, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
-            calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a - 3 + breathePx, b - 3 + breathePx);
+            drawMembraneRings(calcifyLayer, activeCell.x, activeCell.y, a, b,
+                zoomBoost, glowSteps, breathePx, innerColor, innerAlpha);
 
-            // T62 section 4: outward falloff so the membrane fades into the void
-            // instead of cutting straight from the glowing ring to the flat
-            // backgroundColor -- the "vignette or falloff at the cell edge" the
-            // task asks for. A near-black tone here (first attempt) was
-            // indistinguishable from backgroundColor (0x0a0a14) at any alpha low
-            // enough to stay subtle -- screenshotted and confirmed invisible
-            // before landing on this: the wall's own outer-glow blue
-            // (0x1e3799, same colour section 2's inward glow already uses)
-            // bleeding outward with decreasing alpha, so the boundary reads as a
-            // halo receding into the dark rather than a flat cut. Mirrors the
-            // inward glow loop above (same glowSteps/zoomBoost/tier gate).
-            for (let i = 1; i <= glowSteps; i++) {
-                calcifyLayer.lineStyle(40 * zoomBoost, 0x1e3799, 0.14 / i);
-                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a + 8 + i * 40 + breathePx, b + 8 + i * 40 + breathePx);
+            // T63: Cell B's wall, same treatment, while a division is in progress.
+            // Its radii are activeCell's -- updateCalcification() is gated on
+            // `mitosis.state === 'idle'`, so they cannot move during the event,
+            // which is exactly the assumption the old static bake relied on.
+            if (mitosis.state !== 'idle' && mitosis.cellB) {
+                drawMembraneRings(calcifyLayer, mitosis.cellB.x, mitosis.cellB.y, a, b,
+                    zoomBoost, glowSteps, breathePx, innerColor, innerAlpha);
             }
         }
 
