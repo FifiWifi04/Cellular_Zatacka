@@ -4261,7 +4261,10 @@
         // --- THE INFECTION EVENT SYSTEM ---
         // State only; see drawInfection() below for the render half of the split
         // (T22 step 2 / §4.4a).
-        function updateInfection(delta, deltaSec) {
+        // T66: `frozen` is stepSimulation()'s isCellFrozen. The state half runs
+        // regardless; the particle half is skipped while frozen -- see the guard
+        // just above the particle loop.
+        function updateInfection(delta, deltaSec, frozen) {
             if (survivalTime >= infection.nextWarningTime && infection.state === 'none') {
                 infection.state = 'warning';
                 infection.triggerTime = survivalTime;
@@ -4355,6 +4358,15 @@
             } else {
                 infection.warningVisible = false;
             }
+
+            // T66: the state machine above must keep running while frozen -- it is
+            // what advances the warning timer, fires the breach and drives T65's
+            // countdown -- but the particles must NOT. updateInfection() is called
+            // from outside stepSimulation()'s `if (!isCellFrozen)` block for exactly
+            // that reason, which left the virus swarming around a cell whose players
+            // could not move. Everything below is motion, bouncing and destruction;
+            // none of it is time-critical, so the whole loop simply stops.
+            if (frozen) return;
 
             for (let i = infection.particles.length - 1; i >= 0; i--) {
                 let vp = infection.particles[i];
@@ -6969,7 +6981,7 @@
                 updateNucleusChasers(delta, deltaSec);
             }
             updateMitosis(deltaSec);
-            updateInfection(delta, deltaSec); // T22 step 2
+            updateInfection(delta, deltaSec, isCellFrozen); // T22 step 2; T66 freezes the particles, not the state machine
             updateShake(deltaSec); // T16 (state half, T22 step 6 -- draw half is drawShake())
 
             // The master clock must run in ALL modes so the virus and combos work!
