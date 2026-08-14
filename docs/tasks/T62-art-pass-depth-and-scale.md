@@ -108,6 +108,65 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 
 ---
 
+## Progress
+
+- [x] Section 1 — scale collapse (cytosol mid-frequency filler)
+- [ ] Section 2 — membrane low-zoom treatment
+- [ ] Section 3 — mitosis bridge as a curve, not four straight lines
+- [ ] Section 4 — depth (parallax, edge falloff)
+- [ ] Section 5 — hazard colour language table
+- [ ] Section 6 — motion and life (breathing pulse, independent ER/Golgi rotation, vesicle traffic)
+
+Commit per section (`T62: <section>`), push, then decide whether there is
+budget for the next. Partial `T62:` commits are expected and do **not** mean
+the board is stale. Leave T62 `READY` until every section is ticked.
+
+---
+
 ## Findings
 
-*(Per section: what was done, the screenshots, the cost measurement.)*
+**Section 1 (scale collapse), landed 2026-08-14.** Chose the task's second
+option — "add mid-frequency detail to the cytosol" — over a genuine
+zoom-scaled LOD on the ER/Golgi/membrane line widths, because those are baked
+once in `drawArcs()`/`generateMap()` rather than redrawn per frame (unlike the
+T42/T47 trace-dimer LOD this section's other option points to), so a real LOD
+there means a re-bake-on-zoom-change system — bigger than a first section
+should be, and it would also cut into section 2's explicit "give the membrane
+a low-zoom treatment" scope. The membrane/ER/Golgi zoom-collapse problem itself
+is left for sections 2 and (for the Golgi/ER specifically) a future section —
+noted here, not fixed here.
+
+Added `spawnCytosolFiller()`, called once from `generateMap()` for the primary
+cell and once from the Cell B branch (mitosis), pushing small (r=3-12),
+low-alpha (0.06-0.16) blobs into the *same* `cytosolParticles` array the
+existing large blobs use — so the existing per-frame drift/pulse loop in
+`drawCalcification()` animates them for free, no new per-frame code. Count is
+tier-driven (`QUALITY_TIERS[tier].cytosolFillerCount`: low 0, medium 400, high
+600), added as a new field on the existing tier objects rather than a parallel
+table, and only spawned on top of the existing `cytosolCount` roll — low tier
+gets exactly 0 extra (confirmed: `cytosolParticles.length` 227 at low with
+`cytosolFillerCount:0` vs 933/1111 at medium/high with 400/600 filler
+requested, matching the ~78-83% ellipse-inscribed-in-square accept rate the
+existing large-blob loop already has).
+
+Cost measured by replaying the exact `drawCalcification()` cytosol-forEach
+body 200x in-page via `performance.now()`: 0.075ms/frame at 636 particles
+(filler forced to 0, i.e. old behaviour) vs 0.109ms/frame at 1095 particles
+(filler on) — a 0.034ms increase, negligible against a 16.6ms frame budget.
+`worldChildren` flat at 16 across a 300-game-second (5-minute) headless
+immortal run (`window.stepHeadless`, dt=1/30, 32.4 wall-seconds). Console
+clean across: a quality-tier sweep (low/medium/high, 4 rounds), a real 15s
+round (1 human + 3 bots, non-immortal — human died into the membrane as
+expected with no input, all 3 bots survived), and an offline `file://` load of
+the rebuilt `dist/Cellular_Zatacka.html` (8.2 game-seconds, immortal).
+Before/after screenshots taken at zoom 0.55 (forcing `world.scale.set(0.55)`
+after round start) by toggling `QUALITY_TIERS.high.cytosolFillerCount` between
+0 and 600 across two otherwise-identical high-tier rounds (screenshots not
+committed — text findings only, per repo convention). The low-tier screenshot
+at the same zoom matches the "before" screenshot's sparseness, confirming the
+tier gate. No hazard function appears in the diff
+(`checkCollision`/`checkArcCollision`/`raycast`/`rebuildSpatialGrid` all
+absent, confirmed by `git diff` grep), so §7.6's regression sweep doesn't
+apply. `sw.js` `CACHE_NAME` bumped v41→v42; `dist/` rebuilt (`--check` passes).
+
+Remaining sections (2-6) are unstarted.

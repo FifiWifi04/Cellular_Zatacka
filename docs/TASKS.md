@@ -745,6 +745,18 @@ sim/render split can wait behind them.
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `DONE` |
 | T62 | [Art pass: depth, scale and the bridge](tasks/T62-art-pass-depth-and-scale.md) ⏳ *resumable, one section per session* | T60, T61 | `READY` |
 
+> **T62 Section 1 (scale collapse) landed 2026-08-14** — small, low-alpha
+> "filler" cytosol blobs (`spawnCytosolFiller()`, tier-driven count: low 0 /
+> medium 400 / high 600) now fill the gaps between the existing sparse large
+> blobs, reusing the same `cytosolParticles` array and per-frame drift/pulse
+> loop so no new per-frame code was added. Cost measured directly:
+> 0.075ms/frame at 636 particles (filler off) vs 0.109ms/frame at 1095
+> (filler on). `worldChildren` flat (16) across a 300-game-second headless
+> run; low tier confirmed to drop the detail entirely (0 extra particles).
+> No hazard function touched. `sw.js` `CACHE_NAME` bumped v41→v42; `dist/`
+> rebuilt. Sections 2-6 remain — see
+> `docs/tasks/T62-art-pass-depth-and-scale.md` `## Progress`/`## Findings`.
+
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
 > and is **empty** (the largest `genAtLeast()` gate in the codebase is 4, and
