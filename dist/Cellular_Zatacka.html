@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 73cc4d9d49463b10 -->
+<!-- standalone-build-inputs: 42f41c99573f3380 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -4815,6 +4815,12 @@ void main() {
         let cytosolContainer;
         let cellBgSprite; // T49: persistent membrane-fill Graphics, redrawn as radii shrink
         let lastMembraneRadiusX = null, lastMembraneRadiusY = null; // T49: early-out cache for the re-anchor below
+        // T62 section 4: fraction of camera-focus displacement cytosolContainer
+        // trails by, so the background blobs read as a layer further back than
+        // the organelles/traces in front of them. Applied in
+        // updateAndDrawBackgroundElements(); rendering-only, never read by
+        // isOutsideCell() or any physics path.
+        const PARALLAX_STRENGTH = 0.15;
 
 
         const TRACE_WIDTH = 4;
@@ -9727,6 +9733,22 @@ void main() {
             calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a, b);
             calcifyLayer.lineStyle(4 * zoomBoost, atpPauseActive ? ATP_COLOR : 0x82ccdd, atpPauseActive ? (0.6 + 0.4 * Math.sin(survivalTime * 6)) : 1.0);
             calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a - 3, b - 3);
+
+            // T62 section 4: outward falloff so the membrane fades into the void
+            // instead of cutting straight from the glowing ring to the flat
+            // backgroundColor -- the "vignette or falloff at the cell edge" the
+            // task asks for. A near-black tone here (first attempt) was
+            // indistinguishable from backgroundColor (0x0a0a14) at any alpha low
+            // enough to stay subtle -- screenshotted and confirmed invisible
+            // before landing on this: the wall's own outer-glow blue
+            // (0x1e3799, same colour section 2's inward glow already uses)
+            // bleeding outward with decreasing alpha, so the boundary reads as a
+            // halo receding into the dark rather than a flat cut. Mirrors the
+            // inward glow loop above (same glowSteps/zoomBoost/tier gate).
+            for (let i = 1; i <= glowSteps; i++) {
+                calcifyLayer.lineStyle(40 * zoomBoost, 0x1e3799, 0.14 / i);
+                calcifyLayer.drawEllipse(activeCell.x, activeCell.y, a + 8 + i * 40, b + 8 + i * 40);
+            }
         }
 
         // T22 step 6: fused pre-existing code (cytosolParticles/membraneProtrusionsList
@@ -9764,6 +9786,19 @@ void main() {
                 lastMembraneRadiusX = a;
                 lastMembraneRadiusY = b;
             }
+
+            // T62 section 4: parallax on the background blobs. cytosolContainer's
+            // own position (not the blobs' local x/y, which stay true world
+            // coordinates used by the isOutsideCell() pull-back below) is
+            // recomputed fresh every frame from the camera's current focus point,
+            // never accumulated -- same "stored base each frame" discipline
+            // AGENT_CONDUCT 4.5 requires of world.x/y itself. The camera focus is
+            // read back out of world's own transform (the point currently centred
+            // on screen), so this needs no new camera state.
+            let parallaxCamX = (app.screen.width / 2 - world.x) / world.scale.x;
+            let parallaxCamY = (app.screen.height / 2 - world.y) / world.scale.y;
+            cytosolContainer.x = (parallaxCamX - activeCell.x) * PARALLAX_STRENGTH;
+            cytosolContainer.y = (parallaxCamY - activeCell.y) * PARALLAX_STRENGTH;
 
             cytosolParticles.forEach(blob => {
                 blob.x += blob.vx * delta;

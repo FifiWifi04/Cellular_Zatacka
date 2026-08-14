@@ -790,7 +790,27 @@ sim/render split can wait behind them.
 > (600 down to 0) with no throw/NaN. `sw.js` `CACHE_NAME` bumped v43-v44;
 > `dist/` rebuilt. One pre-existing, already-backlogged issue (mitosis snap's
 > kill check gated on `devMode` not `godMode`) surfaced incidentally, not
-> re-filed. Sections 4-6 remain — see
+> re-filed.
+>
+> **T62 Section 4 (depth: parallax + edge falloff) landed 2026-08-14** —
+> `cytosolContainer` (the shared background-blob container) now gets a
+> rendering-only parallax offset, recomputed fresh every frame from the
+> camera's current focus point (never accumulated, same discipline
+> AGENT_CONDUCT 4.5 requires of `world.x/y`), so the background blobs read as
+> a layer further back than the foreground; verified algebraically exact
+> against the formula. `drawCalcification()` gains an outward falloff mirroring
+> section 2's inward glow (same `glowSteps`/`zoomBoost`/tier gate) — a first
+> near-black attempt proved indistinguishable from `backgroundColor` and was
+> screenshotted, rejected, and replaced with the membrane's own outer-glow blue
+> bleeding outward with decreasing alpha, confirmed clearly visible in a
+> before/after at the true playing zoom (0.55) and confirmed dropped at low
+> tier. Cost unchanged within measurement noise (`drawCalcification()`
+> 0.0099→0.0111ms/call, `updateAndDrawBackgroundElements()`
+> 0.1365→0.1231ms/call); `worldChildren` flat over a 300-game-second headless
+> run; a real 13.9s round (1 human + 3 bots) played and ended normally;
+> offline `file://` load of the rebuilt `dist/` console-clean. No hazard
+> function or `activeCell.radiusX/radiusY` write in the diff. `sw.js`
+> `CACHE_NAME` bumped v44→v45; `dist/` rebuilt. Sections 5-6 remain — see
 > `docs/tasks/T62-art-pass-depth-and-scale.md` `## Progress`/`## Findings`.
 
 > **Phase 9 — after Gen 4.** Scoped in

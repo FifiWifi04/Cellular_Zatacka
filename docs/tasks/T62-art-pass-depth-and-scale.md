@@ -113,7 +113,7 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 - [x] Section 1 — scale collapse (cytosol mid-frequency filler)
 - [x] Section 2 — membrane low-zoom treatment
 - [x] Section 3 — mitosis bridge as a curve, not four straight lines
-- [ ] Section 4 — depth (parallax, edge falloff)
+- [x] Section 4 — depth (parallax, edge falloff)
 - [ ] Section 5 — hazard colour language table
 - [ ] Section 6 — motion and life (breathing pulse, independent ER/Golgi rotation, vesicle traffic)
 
@@ -293,4 +293,73 @@ collision itself is disabled -- this is the same issue T51's Findings already
 filed to `docs/BACKLOG.md`; not re-filed, and out of scope here regardless
 (it's `updateMitosis()` state logic, not this section's draw-only change).
 
-Remaining sections (4-6) are unstarted.
+**Section 4 (depth: parallax + edge falloff), landed 2026-08-14.** Two additions,
+both in the two functions section 2/3 already own (`drawCalcification()`,
+`updateAndDrawBackgroundElements()`) rather than a new system.
+
+*Parallax.* `cytosolContainer` (the shared container both the large blobs and
+T62 section 1's filler blobs live in) gets its own position, recomputed fresh
+every frame in `updateAndDrawBackgroundElements()` from the camera's current
+focus point (`(app.screen.width/2 - world.x) / world.scale.x`, i.e. the world
+point the camera currently centres on -- no new camera state needed) minus
+`activeCell.x/y`, scaled by `PARALLAX_STRENGTH = 0.15`. This is recomputed from
+that stored base every frame, never accumulated from a delta, so it can't drift
+the way AGENT_CONDUCT 4.5 warns `world.x/y` itself could. The blobs' own local
+`x`/`y` fields (world coordinates, read by the existing `isOutsideCell()`
+pull-back-inside-membrane logic) are untouched -- only the container's
+rendering-time offset changes, the same relationship `world.x/y/scale` already
+has to every other layer's local coordinates. Verified algebraically and in
+the browser: forcing `world.x/y/scale` to a known camera position and reading
+`cytosolContainer.x/y` back matched the formula's prediction to floating-point
+precision (`containerX: 74.99999999999996` against `expectedX: 75` for a
+camera focus 500/300 world px off the cell centre). Not tier-gated -- same
+precedent as section 2's `zoomBoost` (T52's), since it's two divisions/two
+multiplications per frame regardless of particle count, not a new draw call to
+gate.
+
+*Edge falloff.* A first attempt drew outward rings in a near-black tone
+(`0x05050d`) stepping out from the membrane, meant to read as a vignette --
+screenshotted at the true playing zoom (0.55, camera stubbed and panned to the
+membrane's rim, same technique sections 2-3 used) and found genuinely
+indistinguishable from the flat `backgroundColor` (`0x0a0a14`): the two tones
+are close enough that no alpha low enough to stay "subtle" was visible at all.
+Replaced with rings in the membrane's own outer-glow blue (`0x1e3799`, the
+same colour section 2's *inward* glow already uses) bleeding *outward* with
+decreasing alpha (`0.14 / i` over `glowSteps` rings, stroke width `40 *
+zoomBoost`, spaced `40` world px apart) -- same `glowSteps`
+(`QUALITY_TIERS[tier].membraneGlowSteps`)/`zoomBoost` the inward loop already
+uses, so low tier drops it entirely and it stays legible at any zoom. Before/
+after screenshots at the membrane rim (0.55 zoom, camera frozen via a stubbed
+`updateCamera()`) confirm the difference: before, the wall cuts straight to
+flat near-black outside the ring; after, a soft blue halo bleeds visibly
+outward before fading to nothing, at high tier -- and the low-tier screenshot
+at the same camera position matches the "before" shot almost exactly (hard
+edge, no halo), confirming the tier gate actually drops the added detail
+first, not just in principle.
+
+Cost measured directly (`drawCalcification()`/`updateAndDrawBackgroundElements()`
+called 3000x via `performance.now()`, quality pinned to `high` in both the
+pre-section-4 baseline via `git stash` and the final code, same technique
+prior sections used): `drawCalcification()` 0.0099ms/call before vs.
+0.0111ms/call after (both noise against the 16.6ms frame budget);
+`updateAndDrawBackgroundElements()` 0.1365ms/call before vs. 0.1231ms/call
+after (no measurable increase -- the difference is within this sandbox's own
+software-rendering timing noise, confirmed by the before run actually having
+*more* live particles (238 vs 236) yet a similar-or-higher time). `calcifyLayer`
+draw-call count confirmed via a tier sweep: low 3 (unchanged, both new loops
+gated off), medium 7, high 9 (3 base rings + 3 inward + 3 outward, matching
+`glowSteps`). `worldChildren` flat at 16 across a real 300-game-second headless
+immortal run (`window.stepHeadless`, dt=1/30, 33.6 wall-seconds -- consistent
+with the ~17.5x headless speedup T22 step 7 measured). A real 13.9s round (1
+human + 3 bots, non-immortal) played and ended normally on its own (bots
+fighting down to one survivor, the standard last-one-standing end condition --
+unrelated to this change), console clean, round-over card rendered correctly.
+An offline `file://` load of the rebuilt `dist/Cellular_Zatacka.html` (8.2
+headless game-seconds, immortal) also console-clean. `git diff` confirms
+`checkCollision`/`checkArcCollision`/`raycast`/`rebuildSpatialGrid`/
+`isOutsideCell` are all absent from the diff, and the only reads of
+`activeCell.radiusX/radiusY` (the real collision boundary) in the new code are
+reads, never writes -- §7.6's regression sweep doesn't apply. `sw.js`
+`CACHE_NAME` bumped v44->v45; `dist/` rebuilt (`--check` passes).
+
+Sections 5-6 remain unstarted.
