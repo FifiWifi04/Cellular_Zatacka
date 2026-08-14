@@ -99,12 +99,12 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 
 ## Definition of done
 
-- [ ] Sections taken one per session, each with before/after at playing zoom
-- [ ] Hazard colour rule written down as a table and applied
-- [ ] Per-frame cost and `worldChildren` unchanged
-- [ ] Quality tiers respected
-- [ ] No collision or hazard constant touched
-- [ ] `docs/TASKS.md`: T62 → `DONE` when every section is done
+- [x] Sections taken one per session, each with before/after at playing zoom
+- [x] Hazard colour rule written down as a table and applied
+- [x] Per-frame cost and `worldChildren` unchanged
+- [x] Quality tiers respected
+- [x] No collision or hazard constant touched
+- [x] `docs/TASKS.md`: T62 → `DONE` when every section is done
 
 ---
 
@@ -115,7 +115,7 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 - [x] Section 3 — mitosis bridge as a curve, not four straight lines
 - [x] Section 4 — depth (parallax, edge falloff)
 - [x] Section 5 — hazard colour language table
-- [ ] Section 6 — motion and life (breathing pulse, independent ER/Golgi rotation, vesicle traffic)
+- [x] Section 6 — motion and life (breathing pulse, vesicle traffic; independent ER/Golgi rotation scoped out, see Findings)
 
 Commit per section (`T62: <section>`), push, then decide whether there is
 budget for the next. Partial `T62:` commits are expected and do **not** mean
@@ -430,4 +430,89 @@ call or particle count to gate, same reasoning as sections 2-4's `zoomBoost`/
 parallax. `sw.js` `CACHE_NAME` bumped v45->v46; `dist/` rebuilt (`--check`
 passes).
 
-Section 6 remains unstarted.
+**Section 6 (motion and life), landed 2026-08-14 -- T62 is now fully done.**
+Two of the three suggested additions landed; the third (independent ER/Golgi
+rotation) was scoped out for a concrete, checked reason -- see below.
+
+*Breathing pulse.* `drawCalcification()` now computes `breathePx =
+Math.sin(survivalTime * MEMBRANE_BREATH_RATE) * MEMBRANE_BREATH_AMOUNT` (period
+5s, amplitude 2.5 world px) once per call and adds it to every *decorative*
+ring's offset (the inward/outward glow loops, the `a+8` outer ring, the `a-3`
+ATP-tinted ring). The one ring drawn at exactly `(a, b)` -- `activeCell.radiusX/
+radiusY`, the real collision boundary -- is deliberately left untouched, so the
+true wall never moves and only the padding around it swells/contracts. Sampling
+the formula directly at `t=0/1.25/2.5s` (0, 5, 10 quarter-periods) returned
+`0, 2.5, ~0` -- confirms the oscillation is real and bounded to the designed
+±2.5px range, not just present in the code.
+
+*Golgi vesicle traffic.* A new `golgiTraffic` array (state) / `golgiTrafficLayer`
+(a new `PIXI.Graphics`, `world.children.length` 16->17) hold small dots that
+drift along a Golgi cisterna's own already-computed `sacPoints` curve
+(`window.golgiData.layers[i].points`, the same per-layer data `drawArcs()`
+bakes and `centralHitboxes` is built from) from `t=0` to `t=1` over
+`GOLGI_TRAFFIC_DURATION=6s`, fading in/out via `Math.sin(t * PI)`. Positioning
+carries each point through the identical golgi-local -> cell-local -> world
+transform `drawArcs()`'s own hitbox computation and `updateVesicles()`'s Golgi
+spawn position both already use (`lx/ly` -> rotate by `golgiData.rot`, offset by
+`golgiData.x/y` -> rotate by `globalRotation`, offset by `activeCell.x/y`), so a
+dot always sits exactly on the cisterna's rendered curve no matter how
+`globalRotation` has moved that frame -- there is no separate rotation state to
+drift out of sync. Entirely cosmetic: dots are never pushed to `vesicles[]`,
+carry no collision, and are read by nothing outside `updateGolgiTraffic()`/
+`drawGolgiTraffic()`. Spawn rate follows T28's own `PER_SEC -> CHANCE * FIXED_DT`
+pattern (`GOLGI_TRAFFIC_SPAWN_PER_SEC=0.35`); count is tier-driven
+(`QUALITY_TIERS[tier].golgiTrafficMax`: low 0, medium 2, high 3), same idiom as
+sections 1-2's `cytosolFillerCount`/`membraneGlowSteps`. `golgiTraffic` is reset
+alongside the other per-round arrays (`vesicles`, `atpGranules`, `nucleusChasers`)
+in `startRound()` -- confirmed directly: forcing 2 live dots then calling
+`startRound()` again dropped the count to 0, so a restart can't leave a stray
+dot rendering against a new round's (different) Golgi layout.
+
+*Independent ER/Golgi rotation -- scoped out, not attempted.* Read
+`drawArcs()`/`checkArcCollision()` before deciding: `centralHitboxes` (ER *and*
+Golgi geometry together, per AGENT_CONDUCT §4.3) is baked once as cell-local,
+un-rotated points, and `checkArcCollision()` un-rotates the player position by
+the single shared `-globalRotation` before comparing against it -- there is
+exactly one rotation value for the whole structure, on both the physics and the
+sensor side. Giving the ER and Golgi visually independent spin would desync
+whichever one moves differently from its own real hitbox -- precisely the
+"invisible wall" failure mode §4.4 warns about (a mitochondrion's drawn shape
+drifting from its hitbox once already broke this game), except worse here since
+it would apply to *every point* of two entire hazard structures, not one
+organelle. Doing it safely would mean teaching `centralHitboxes` and
+`checkArcCollision()` about two independent rotation groups instead of one --
+a hazard-geometry change needing updates to both the physics and sensor paths
+per §4.1, not an art-only change, and well past this section's "cheap addition"
+framing. Per AGENT_CONDUCT §10 ("implement the smaller, more conservative
+option and note the alternative in `docs/BACKLOG.md`"), left undone and filed
+there with this reasoning instead of guessed at.
+
+Verified: a 300-game-second headless immortal run (`window.stepHeadless`,
+dt=1/30, quality forced to `high`) held `worldChildren` flat at 17 throughout,
+console clean, `golgiTraffic.length` bounded within `[0, golgiTrafficMax]` the
+entire time (confirmed via a live `.every(p => p.t >= 0 && p.t <= 1)` check, not
+just a final read). Cost measured directly (`performance.now()`, 3000 calls
+each after a 50-call warmup, high tier, a forced full house of 3 traffic dots
+for `drawGolgiTraffic()`'s realistic case rather than an empty-array early-out):
+`drawCalcification()` 0.0078ms/call before this section (`git stash`) vs.
+0.0080ms/call after (breathing pulse only adds two float ops per ring, no new
+draw calls); `drawGolgiTraffic()` 0.0020ms/call; `updateGolgiTraffic()`
+0.0002ms/call -- all negligible against the 16.6ms frame budget. Low tier
+proven to drop traffic entirely: a separate 120-game-second headless run with
+`quality='low'` (`golgiTrafficMax=0`) held `golgiTraffic.length` at exactly 0
+throughout. Close-up screenshots (zoom 1.4, camera stubbed and panned to the
+Golgi's own world position) with traffic forced on vs. off show two small cyan
+dots riding the violet cisterna ribbons in the "on" shot and nothing in the
+"off" shot -- confirms the dots render exactly on the structure, not floating
+off it. A real 15.1s round (1 human + 3 bots, non-immortal) played normally,
+human died into the membrane as expected with no input, all 3 bots survived,
+console clean. An offline `file://` load of the rebuilt
+`dist/Cellular_Zatacka.html` (8.2 headless game-seconds, immortal) also
+console-clean. `git diff` confirms `checkCollision`/`checkArcCollision`/
+`raycast`/`rebuildSpatialGrid`/`isOutsideCell` are all absent as real
+definitions or call-site changes (the one grep hit is inside this section's own
+comment text) -- purely a draw-only addition plus one new decorative offset,
+§7.6's regression sweep doesn't apply. `sw.js` `CACHE_NAME` bumped v46->v47;
+`dist/` rebuilt (`--check` passes).
+
+T62 is now fully done -- all six sections landed.

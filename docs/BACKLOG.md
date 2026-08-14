@@ -9,6 +9,21 @@ them.
 
 ---
 
+## Open — found during the 2026-08-14 T62 section 6 session
+
+- **ER and Golgi cannot rotate independently without a hazard-geometry change,
+  not just a visual one.** T62 section 6 asked for it ("they share
+  `globalRotation` today, which is why they read as one rigid disc"), but
+  `centralHitboxes` (ER + Golgi's real collision geometry, cell-local and
+  un-rotated per `AGENT_CONDUCT.md` §4.3) and `checkArcCollision()` both use a
+  single shared `-globalRotation` un-rotation. Splitting the *visual* rotation
+  without also teaching `centralHitboxes`/`checkArcCollision()` about two
+  independent rotation groups would desync whichever structure's drawn shape
+  moves differently from its own hitbox — an "invisible wall" bug across two
+  entire hazard structures, not just cosmetic drift. Would need a real
+  hazard-geometry change (both physics and sensor paths, per §4.1), scoped
+  well past a single art-pass section. — 2026-08-14
+
 ## Open — found during the 2026-08-14 T62 section 2 session
 
 - **Cell B's membrane (mitosis) has the same zoom-collapse problem as the

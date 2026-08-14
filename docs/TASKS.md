@@ -743,7 +743,7 @@ sim/render split can wait behind them.
 | T52 | [Gen 4: the nucleus feeds, and the player starves it](tasks/T52-gen4-nucleus-feeding.md) | T15 | `DONE` |
 | T56 | [Make the trace read as a microtubule, and animate it assembling](tasks/T56-microtubule-lattice-and-assembly.md) | T42, T47 | `DONE` |
 | T57 | [When the nucleus is full: the cell turns on the microtubule](tasks/T57-transformed-nucleus.md) | T52 | `DONE` |
-| T62 | [Art pass: depth, scale and the bridge](tasks/T62-art-pass-depth-and-scale.md) ⏳ *resumable, one section per session* | T60, T61 | `READY` |
+| T62 | [Art pass: depth, scale and the bridge](tasks/T62-art-pass-depth-and-scale.md) ⏳ *resumable, one section per session* | T60, T61 | `DONE` |
 
 > **T62 Section 1 (scale collapse) landed 2026-08-14** — small, low-alpha
 > "filler" cytosol blobs (`spawnCytosolFiller()`, tier-driven count: low 0 /
@@ -832,8 +832,42 @@ sim/render split can wait behind them.
 > debris' grey-blue reads closer to the breakable family despite being
 > always-lethal) was left alone and filed to `docs/BACKLOG.md` rather than
 > fixed on a hunch. `sw.js` `CACHE_NAME` bumped v45→v46; `dist/` rebuilt.
-> Section 6 remains — see `docs/tasks/T62-art-pass-depth-and-scale.md`
-> Findings.
+>
+> **T62 Section 6 (motion and life) landed 2026-08-14 — T62 is now fully done.**
+> `drawCalcification()` gets a slow breathing pulse (period 5s, ±2.5 world px)
+> applied only to the *decorative* rings — the ring drawn at exactly
+> `activeCell.radiusX/radiusY` (the real collision boundary) is left pinned so
+> the true wall never moves. A new `golgiTraffic`/`golgiTrafficLayer` system
+> (`world.children.length` 16→17) drifts small dots along a Golgi cisterna's
+> own already-baked curve (`window.golgiData.layers[i].points`), carried
+> through the exact golgi-local→cell-local→world transform `drawArcs()`'s own
+> hitbox computation and `updateVesicles()`'s spawn position both already use,
+> so a dot always sits on the cisterna's rendered curve however
+> `globalRotation` has moved — purely cosmetic, never pushed to `vesicles[]`.
+> Tier-gated (`golgiTrafficMax`: low 0/medium 2/high 3), same idiom as
+> sections 1-2. The third suggested addition — independent ER/Golgi rotation —
+> was scoped out: `centralHitboxes`/`checkArcCollision()` share one
+> `globalRotation` for both structures, so splitting the visual rotation
+> without also changing that hazard geometry would desync drawn shape from
+> hitbox across two entire structures; filed to `docs/BACKLOG.md` with the
+> concrete mechanism it would need instead of guessed at. Verified: 300
+> game-second headless immortal run (high tier) held `worldChildren` flat at
+> 17 and `golgiTraffic.length` bounded within `[0, golgiTrafficMax]`
+> throughout; a separate 120-game-second low-tier run held the count at
+> exactly 0; costs measured directly — `drawCalcification()` 0.0078→0.0080ms/
+> call (breathing pulse), `drawGolgiTraffic()` 0.0020ms/call (3 dots),
+> `updateGolgiTraffic()` 0.0002ms/call, all negligible; close-up screenshots
+> (traffic forced on vs. off) show the dots riding exactly on the Golgi
+> ribbons; a real 15.1s round (1 human + 3 bots) played normally, console
+> clean; an offline `file://` `dist/` load also console-clean; a forced
+> mid-round `startRound()` call proved `golgiTraffic` resets to 0, so a
+> restart can't leave a stray dot from the old layout. No hazard function
+> appears in the diff as a real definition or call-site change. `sw.js`
+> `CACHE_NAME` bumped v46→v47; `dist/` rebuilt. See
+> `docs/tasks/T62-art-pass-depth-and-scale.md` Findings for full numbers and
+> screenshots.
+>
+> **Track K is now fully done.**
 
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists
