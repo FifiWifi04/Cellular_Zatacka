@@ -114,7 +114,7 @@ rigid disc); occasional vesicle traffic along the Golgi stacks.
 - [x] Section 2 — membrane low-zoom treatment
 - [x] Section 3 — mitosis bridge as a curve, not four straight lines
 - [x] Section 4 — depth (parallax, edge falloff)
-- [ ] Section 5 — hazard colour language table
+- [x] Section 5 — hazard colour language table
 - [ ] Section 6 — motion and life (breathing pulse, independent ER/Golgi rotation, vesicle traffic)
 
 Commit per section (`T62: <section>`), push, then decide whether there is
@@ -362,4 +362,72 @@ headless game-seconds, immortal) also console-clean. `git diff` confirms
 reads, never writes -- §7.6's regression sweep doesn't apply. `sw.js`
 `CACHE_NAME` bumped v44->v45; `dist/` rebuilt (`--check` passes).
 
-Sections 5-6 remain unstarted.
+**Section 5 (hazard colour language table), landed 2026-08-14.** Read every
+hazard's draw code (not just the intro list's seven names) to build the rule
+before touching anything, per the section's own instruction. Two families:
+
+| Family | Rule | Hazards | Colours (function) |
+|---|---|---|---|
+| **Always-lethal** ("saturated, alive") | never breakable, any mode | Membrane wall | `0x1e3799`/`0x4a69bd`/`0x82ccdd` (`drawCalcification()`) |
+| | | Nucleus core | `0x4834d4`/`0x6c5ce7`/`0xa29bfe`/`0x686de0` (nucleus draw block) |
+| | | Live mitochondrion | `C_MITO 0x2ecc71`, core `0x55efc4` |
+| | | Live lysosome | `0xff4757` ring, `0xff6b81` bubble |
+| | | ER / Golgi walls | `0x0abde3` (ER), `GOLGI_COLOR 0x8c7ae6`, arcs `0x4a69bd`/`0x1e3799` |
+| | | Mitosis scaffolding + death ring | wall `0x4a69bd`, sweep `0xff4757` (`drawMitosisVisuals()`) |
+| | | Infection virus particles | `0xff4757` body (`drawInfection()`) |
+| | | Necrotic debris (shrapnel) | `0x8899aa`/`0x3c4a52` -- **exception, see below** |
+| | | Player traces | per-player assigned colour |
+| **Breakable in attack mode** ("desaturated, mineral") | `p.targetMode === 'attack'` breaks it instead of killing (`updatePlayers()` 1.6/1.7, `checkCollision()`'s `org.necrotic` branch) | Necrotic organelle / cluster | `0x707070`/`0x9a9a9a` (organelle), `0x5a6b78` fill / `0x2c3a42` outline (`drawNecroticClusters()`) |
+| | | Malignant mass / aggregate | `0x8a6d2f` steady, `0xffe6a8` fresh-block flash (`drawMalignantMass()`) |
+| | | Nucleus chaser | was `0xff4757`/`0xff6b81` -- **identical to the live lysosome above** -- now `0xad5a72`/`0xc97e93` (`drawNucleusChasers()`) |
+
+The one real violation the codebase had: nucleus chasers (breakable, T57) reused
+the live lysosome organelle's exact ring/bubble hex pair (`0xff4757`/`0xff6b81`),
+so a player could not tell the two apart by colour even though one always kills
+and the other can be cleared in attack mode -- the opposite of what this section
+asks the palette to communicate. `0xff4757` turned out to be the game's
+established "lethal red" (also the virus body, the mitosis death-ring sweep, and
+the ribosome-studding colour), which the chaser broke by borrowing for a
+breakable hazard; nothing else in the always-lethal column needed to change.
+Fixed by recolouring the chaser (`drawNucleusChasers()`, and the matching
+`destroyNucleusChaser()` break-particle burst) to `0xad5a72`/`0xc97e93` -- a
+dusty rose roughly 34-41% as saturated as the original neon pair by HSL (down
+from ~90%+), landing in the same desaturated register as the necrotic
+grey-blue and aggregate amber while keeping its own distinct hue so the three
+breakable hazards stay distinguishable from each other, not just from the
+always-lethal set.
+
+Checked every other breakable-family hex (`0x707070`, `0x9a9a9a`, `0x5a6b78`,
+`0x2c3a42`, `0x8a6d2f`, `0xffe6a8`, `0xffdf9e`) against the whole file by grep --
+none collide with an always-lethal hazard.
+
+**Exception, not fixed:** necrotic debris (`drawNecroticDebris()`, shrapnel shed
+by necrotic clusters, `checkCollision()`'s own comment: "lethal, not breakable")
+is tonally a grey-blue close to the breakable necrotic cluster's mineral
+palette, which is the family the rule says it should visually *not* share with
+being always-lethal. Left as-is: it's shed *from* the breakable cluster, so the
+family kinship reads as intentional lineage rather than a "can I break this"
+signal in practice, its fast/sharp fragment silhouette is already unlike the
+static cluster's blob shape, and no confusion with it surfaced in any check
+this session (screenshots, real rounds). Recolouring an existing, unambiguous
+hazard on a hypothesis rather than an observed problem risks §1.2 scope creep;
+noted to `docs/BACKLOG.md` for a future session's judgement call instead.
+
+Verified: close-up (zoom 2.0) and true-playing-zoom (0.55) screenshots with a
+forced lysosome organelle and a forced chaser framed together show the chaser
+now reading as a muted dusty-rose dart against the lysosome's vivid coral-red
+ring -- no longer colour-identical. `drawNucleusChasers()` cost measured at
+0.0127ms/call (3000 calls, 5 chasers, after a 50-call warmup) -- a straight
+constant swap, no new draw calls or allocations, negligible against the 16.6ms
+frame budget. `worldChildren` flat at 16. A real 15.1s round (1 human + 3 bots,
+non-immortal) played normally, human died as expected with no input, console
+clean. An offline `file://` load of the rebuilt `dist/Cellular_Zatacka.html`
+(8.2 game-seconds, immortal) also console-clean. `git diff` confirms
+`checkCollision`/`checkArcCollision`/`raycast`/`rebuildSpatialGrid` are all
+absent from the diff -- purely a draw-colour change, §7.6 doesn't apply. Not
+tier-gated: it changes which constant two existing fills use, not a new draw
+call or particle count to gate, same reasoning as sections 2-4's `zoomBoost`/
+parallax. `sw.js` `CACHE_NAME` bumped v45->v46; `dist/` rebuilt (`--check`
+passes).
+
+Section 6 remains unstarted.

@@ -812,6 +812,28 @@ sim/render split can wait behind them.
 > function or `activeCell.radiusX/radiusY` write in the diff. `sw.js`
 > `CACHE_NAME` bumped v44→v45; `dist/` rebuilt. Sections 5-6 remain — see
 > `docs/tasks/T62-art-pass-depth-and-scale.md` `## Progress`/`## Findings`.
+>
+> **T62 Section 5 (hazard colour language table) landed 2026-08-14** — wrote
+> the two-family rule (always-lethal = saturated/alive, breakable-in-attack-mode
+> = desaturated/mineral) as a table covering every hazard's draw code, which
+> surfaced one real violation: nucleus chasers (breakable, T57) reused the live
+> lysosome organelle's exact colours (`0xff4757`/`0xff6b81`, also the game's
+> established "lethal red" for the virus and the mitosis death-ring), so a
+> player couldn't tell a chaser from a lysosome by colour even though only one
+> of them can be broken. Recoloured the chaser (`drawNucleusChasers()` and its
+> `destroyNucleusChaser()` break-particle burst) to a desaturated dusty rose
+> (`0xad5a72`/`0xc97e93`, ~34-41% as saturated as the original by HSL) sharing
+> the necrotic-grey/aggregate-amber register while staying its own distinct
+> hue. Verified with close-up and true-playing-zoom (0.55) screenshots showing
+> the chaser and lysosome no longer colour-identical; `drawNucleusChasers()`
+> cost 0.0127ms/call (a constant swap, no new draw calls); `worldChildren`
+> flat at 16; a real 15.1s round and an offline `file://` `dist/` load both
+> console-clean. No hazard function in the diff. A known exception (necrotic
+> debris' grey-blue reads closer to the breakable family despite being
+> always-lethal) was left alone and filed to `docs/BACKLOG.md` rather than
+> fixed on a hunch. `sw.js` `CACHE_NAME` bumped v45→v46; `dist/` rebuilt.
+> Section 6 remains — see `docs/tasks/T62-art-pass-depth-and-scale.md`
+> Findings.
 
 > **Phase 9 — after Gen 4.** Scoped in
 > [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md): Gen 5+ currently exists

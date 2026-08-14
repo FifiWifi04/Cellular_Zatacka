@@ -4135,7 +4135,7 @@
             let h = nucleusChasers[i];
             h.dead = true;
             nucleusChasers.splice(i, 1);
-            emitParticles(h.x, h.y, 14, { speed: 2.6, spread: Math.PI * 2, life: 0.5, size: 3, color: 0xff6b81 }); // T17
+            emitParticles(h.x, h.y, 14, { speed: 2.6, spread: Math.PI * 2, life: 0.5, size: 3, color: 0xc97e93 }); // T17 -- T62 section 5: matches the recoloured chaser body, not the lysosome red it used to share
         }
 
         // T57: state only (§4.4a) -- see drawNucleusChasers() for the render half.
@@ -4204,18 +4204,23 @@
         function drawNucleusChasers() {
             chaserLayer.clear();
             for (let h of nucleusChasers) {
-                // Oriented, pulsing body so motion reads as "alive and directed"
-                // at a glance -- must stay distinct from T38's grey crystalline
-                // clusters and T39's soft amber aggregate (see Findings).
+                // Oriented, pulsing body so motion reads as directed, not static.
+                // T62 section 5: chasers are breakable in attack mode, so they use
+                // the desaturated/mineral family (a dusty rose distinct from T38's
+                // grey-blue clusters and T39's amber aggregate), not the vivid
+                // 0xff4757/0xff6b81 pair -- those belong to the live lysosome
+                // organelle, which is always lethal and never breakable. Reusing
+                // them here made a breakable and an unbreakable hazard identical
+                // by colour alone; see the hazard colour table in ## Findings.
                 let pulse = 1 + 0.15 * Math.sin(survivalTime * 8 + h.x);
-                chaserLayer.beginFill(0xff4757, 0.85);
+                chaserLayer.beginFill(0xad5a72, 0.85);
                 chaserLayer.drawCircle(h.x, h.y, h.radius * pulse);
                 chaserLayer.endFill();
 
                 let tipX = h.x + Math.cos(h.angle) * h.radius * 1.8;
                 let tipY = h.y + Math.sin(h.angle) * h.radius * 1.8;
                 let baseA = h.angle + Math.PI * 0.6, baseB = h.angle - Math.PI * 0.6;
-                chaserLayer.beginFill(0xff6b81, 0.9);
+                chaserLayer.beginFill(0xc97e93, 0.9);
                 chaserLayer.moveTo(tipX, tipY);
                 chaserLayer.lineTo(h.x + Math.cos(baseA) * h.radius * 0.7, h.y + Math.sin(baseA) * h.radius * 0.7);
                 chaserLayer.lineTo(h.x + Math.cos(baseB) * h.radius * 0.7, h.y + Math.sin(baseB) * h.radius * 0.7);

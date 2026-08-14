@@ -920,3 +920,16 @@ Eleven findings, written up as T33–T42. Diagnoses established before writing:
   (hung peer). Host migration itself remains out of scope, as this note and
   T29's own boundary both already said — see
   `docs/tasks/T32-net-resilience.md` Findings.
+- **Necrotic debris colour sits in the "breakable" mineral family despite
+  being always-lethal.** T62 section 5's hazard colour table classified
+  `drawNecroticDebris()`'s grey-blue fill (`0x8899aa`/`0x3c4a52`) as an
+  exception: `checkCollision()`'s own comment says debris is "lethal, not
+  breakable," but its colours are close in tone to the breakable necrotic
+  cluster it's shed from (`0x5a6b78`/`0x2c3a42`), which the section's rule
+  would otherwise put in the always-lethal ("saturated, alive") family. Not
+  recoloured this session — no observed confusion in testing, and the shed
+  fragment's shape/behaviour already differs sharply from the static cluster
+  — but worth a deliberate look (a genuine "dead but still lethal" third
+  visual register, or a debris recolour into the always-lethal set) if a
+  future playtest flags it. See `docs/tasks/T62-art-pass-depth-and-scale.md`
+  Findings, section 5.
