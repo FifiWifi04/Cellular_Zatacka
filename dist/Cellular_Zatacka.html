@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: a2f7b22168c75476 -->
+<!-- standalone-build-inputs: d6058a8341396796 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -5220,8 +5220,14 @@ void main() {
             triggerTime: 0,
             warningVisible: false, // T22 step 2: drawInfection() reads this, not .state, so the
             // hexagon glyph still renders on the exact frame the breach flips state to 'none'
-            breached: false // T60: one-shot latch -- breach effects fire once, state stays
+            breached: false, // T60: one-shot latch -- breach effects fire once, state stays
             // 'warning' (freeze continues) for REVEAL_COUNTDOWN more seconds after
+            // T65: mitosis' 'zoomback' sub-phase, for the infection event. Set at the
+            // breach; drops the wide emergency framing so the camera travels back to
+            // the follow shot WHILE STILL FROZEN, instead of snapping there the instant
+            // control returns. countdownEndsAt is -Infinity until the camera settles.
+            cameraReleased: false,
+            countdownEndsAt: -Infinity
         };
 
         // THE MITOSIS EVENT SYSTEM
@@ -7526,18 +7532,48 @@ void main() {
 
                     addShake(0.6, 0.5); // T16: virus explosion/breach
                     infection.nextWarningTime = survivalTime + INFECTION_INTERVAL;
+                    // T65: release the camera now, while the freeze still holds, so
+                    // it travels back to the follow shot during the countdown.
+                    infection.cameraReleased = true;
+                    // ...and invalidate the settle flag in the same breath.
+                    // `cameraAtTarget` is one render-step stale (updateCamera() runs
+                    // after this), so on this frame it still reports "arrived" for the
+                    // WIDE framing we are leaving. Reading it here let the countdown
+                    // start before the camera had moved at all -- measured as 0.30 of
+                    // zoom still travelling after control returned. Clearing it means
+                    // the gate cannot pass until updateCamera() has recomputed it
+                    // against the new follow target.
+                    cameraAtTarget = false;
                 }
 
-                // T60: the camera target never changes across the breach (still
-                // centred on activeCell at the fixed viewSpan below), so there is
-                // no zoomback sub-phase to wait for here -- just hold
-                // REVEAL_COUNTDOWN seconds past the breach with a visible 3-2-1
-                // before actually unfreezing (infection.state -> 'none').
+                // T65: three phases, mirroring mitosis' hold -> zoomback -> countdown.
+                //
+                // T60 asserted "the camera target never changes across the breach, so
+                // there is no zoomback sub-phase to wait for here". That was wrong. The
+                // target does change -- just later: `isVirus` was tied to
+                // `infection.state === 'warning'`, so the wide emergency framing held
+                // through the whole countdown and the camera only flew back to the
+                // player on the frame the freeze lifted, with the player already
+                // steering. Same defect T60 fixed for mitosis, left in place here.
+                //
+                // Now the breach releases the camera, the countdown does not start
+                // until it has arrived (or the settle timeout fires), and control
+                // returns with the camera already where it will stay.
                 if (infection.breached) {
-                    let remaining = (infection.triggerTime + INFECTION_WARNING + REVEAL_COUNTDOWN) - survivalTime;
+                    if (infection.countdownEndsAt === -Infinity) {
+                        let sinceBreach = survivalTime - (infection.triggerTime + INFECTION_WARNING);
+                        if (cameraAtTarget || sinceBreach >= MITOSIS_REVEAL_SETTLE_TIMEOUT) {
+                            infection.countdownEndsAt = survivalTime + REVEAL_COUNTDOWN;
+                        }
+                    }
+                    let remaining = infection.countdownEndsAt === -Infinity
+                        ? REVEAL_COUNTDOWN
+                        : infection.countdownEndsAt - survivalTime;
                     if (remaining <= 0) {
                         infection.state = 'none';
                         infection.breached = false;
+                        infection.cameraReleased = false;
+                        infection.countdownEndsAt = -Infinity;
                         warningElement.innerText = "";
                         warningElement.style.display = 'none';
                     } else {
@@ -7849,6 +7885,12 @@ void main() {
                     (cameraAtTarget || heldFor >= MITOSIS_REVEAL_HOLD_MIN + MITOSIS_REVEAL_SETTLE_TIMEOUT)) {
                     mitosis.revealPhase = 'zoomback';
                     mitosis.phaseStartTime = survivalTime;
+                    // T65: same staleness guard as the infection breach. Leaving
+                    // 'hold' changes the camera's target, but `cameraAtTarget` still
+                    // describes the wide framing until updateCamera() next runs, so
+                    // the zoomback gate could pass on a value that is about to be
+                    // meaningless. Clear it so the next check is against the new target.
+                    cameraAtTarget = false;
                 }
             } else if (mitosis.revealPhase === 'zoomback') {
                 if (cameraAtTarget || survivalTime - mitosis.phaseStartTime >= MITOSIS_REVEAL_SETTLE_TIMEOUT) {
@@ -8013,7 +8055,18 @@ void main() {
                     // 5. Vaporize old hazards, but keep the rescued bridge/cell B survivors!
                     vesicles = survivingVesicles;
                     infection.particles = survivingViruses;
-                    if (infection.particles.length === 0) infection.state = 'none';
+                    if (infection.particles.length === 0) {
+                        // T65: clear the whole event, not just .state. The mitosis snap
+                        // can land mid-breach, and leaving `breached`/`countdownEndsAt`
+                        // latched would make the NEXT warning see a stale expired
+                        // countdown on its first frame and end itself instantly.
+                        // (T60's `breached` latch already had this exposure; it grew
+                        // two more fields here, so it is closed properly now.)
+                        infection.state = 'none';
+                        infection.breached = false;
+                        infection.cameraReleased = false;
+                        infection.countdownEndsAt = -Infinity;
+                    }
 
                     // 6. Rebuild the world! (This draws the Nucleus for the new activeCell)
                     generateMap(true);
@@ -8993,7 +9046,13 @@ void main() {
         // this happens to be called (Defect 2). See gameLoop() for how it's built.
         function updateCamera(cameraDeltaSec) {
             let alivePlayers = players.filter(p => p.alive);
-            let isVirus = (infection.state === 'warning');
+            // T65: only the pre-breach warning shows the wide emergency framing.
+            // Once the breach fires, `cameraReleased` drops this to false and the
+            // camera falls through to the normal follow branch below -- while the
+            // freeze is still on -- exactly as `isMitosisWideReveal` does for the
+            // mitosis reveal. Without it the camera snapped to the player on the
+            // frame control returned.
+            let isVirus = (infection.state === 'warning' && !infection.cameraReleased);
 
             // T60: only the initial hold shows the wide two-cell framing; the
             // zoomback/countdown sub-phases fall through to the normal
@@ -11046,7 +11105,8 @@ void main() {
                 nextWarningTime: 60,
                 triggerTime: 0,
                 warningVisible: false,
-                breached: false // T60
+                breached: false, // T60
+                cameraReleased: false, countdownEndsAt: -Infinity // T65
             };
             shakeRoot.filters = null; // T18: a round ending mid-warning must not leave the next round filtered
             warningFilterActive = false;
