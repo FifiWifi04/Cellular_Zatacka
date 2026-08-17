@@ -748,6 +748,7 @@ sim/render split can wait behind them.
 | T64 | [`mitosis.cellB` has no radii — Cell B's wall NaNs what touches it](tasks/T64-cellb-radii-nan.md) | — | `DONE` |
 | T65 | [Virus breach snapped the camera when control returned](tasks/T65-virus-breach-camera.md) | T60 | `DONE` |
 | T66 | [Virus particles swarmed while the player was frozen](tasks/T66-freeze-virus-particles.md) | T65 | `DONE` |
+| T67 | [Split-screen stalled 10s before the countdown](tasks/T67-split-screen-settle-stall.md) | T65 | `DONE` |
 
 > **T62 Section 1 (scale collapse) landed 2026-08-14** — small, low-alpha
 > "filler" cytosol blobs (`spawnCytosolFiller()`, tier-driven count: low 0 /

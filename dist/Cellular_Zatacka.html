@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-<!-- standalone-build-inputs: 1c3267a8ffa332d0 -->
+<!-- standalone-build-inputs: 5797492918254779 -->
     <meta charset="UTF-8">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
@@ -7569,10 +7569,18 @@ void main() {
                             infection.countdownEndsAt = survivalTime + REVEAL_COUNTDOWN;
                         }
                     }
-                    let remaining = infection.countdownEndsAt === -Infinity
-                        ? REVEAL_COUNTDOWN
+                    // T67: while the camera is still travelling, show the breach
+                    // message with NO number. It used to print Math.ceil() of a
+                    // not-yet-started countdown, i.e. a frozen "3" that sat there
+                    // for the whole settle and only then began ticking -- which
+                    // reads as the game having hung, and was half of the owner's
+                    // "freezes for a few seconds before the actual countdown
+                    // happens" report (the other half was the split-screen stall
+                    // fixed in updateCamera()). No digit until there is a real one.
+                    let settling = infection.countdownEndsAt === -Infinity;
+                    let remaining = settling ? REVEAL_COUNTDOWN
                         : infection.countdownEndsAt - survivalTime;
-                    if (remaining <= 0) {
+                    if (!settling && remaining <= 0) {
                         infection.state = 'none';
                         infection.breached = false;
                         infection.cameraReleased = false;
@@ -7585,7 +7593,8 @@ void main() {
                         // countdown starts), the breach and the countdown start
                         // on the same frame here, so a bare digit would replace
                         // the warning before the player ever saw it.
-                        warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES! " + Math.ceil(remaining);
+                        warningElement.innerText = "VIRAL BREACH! HIDE BEHIND LYSOSOMES!"
+                            + (settling ? "" : " " + Math.ceil(remaining));
                         warningElement.style.display = 'block';
                     }
                 }
@@ -9227,6 +9236,19 @@ void main() {
                 for (let i = alivePlayers.length; i < splitSprites.length; i++) {
                     splitSprites[i].visible = false;
                 }
+
+                // T67: split-screen SNAPS -- world.scale.set()/world.x = ... per
+                // viewport above, no lerp anywhere in this branch -- so the camera is
+                // at its target by construction, every frame.
+                //
+                // This branch never assigned `cameraAtTarget`, so it kept whatever the
+                // shared branch last left. T65 clears the flag when an event releases
+                // the camera, and in split-screen nothing ever set it back: the settle
+                // gate could only fall through to MITOSIS_REVEAL_SETTLE_TIMEOUT, a
+                // 10-second stall before the 3-second countdown even started. That is
+                // the "freezes for a few seconds before the actual countdown" report,
+                // and it applied to the mitosis reveal just as much as the virus.
+                cameraAtTarget = true;
             }
         }
 
