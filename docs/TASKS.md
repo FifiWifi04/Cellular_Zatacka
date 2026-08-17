@@ -75,13 +75,16 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > Phase 9 (`PHASE9-LATE-GAME-ARC.md`) is scoped but still deliberately has no
 > task files.
 >
-> ### ⚠️ Next routine: **T68 only**
+> ### ⚠️ Next routine: **Track N (T71 → T72 → T73)**
 >
-> Everything through T67 is done. The one `READY` task is **T68** (Track M,
-> Phase 2 asset pipeline, unparked 2026-08-14). T69 and T70 are `BLOCKED` on an
-> **owner gate**, not on a task — do not unblock them from inside a session.
-> If T68 is done and the owner has not signed off, **report and stop**; there is
-> no other work queued.
+> Everything through T67 is done. The owner's next routine is the **planned
+> late-game mechanics**, Phase 9 — `PHASE9-LATE-GAME-ARC.md`, tasks T71–T73.
+> Take **T71 first**; T72 and T73 unblock in order as each lands.
+>
+> **Track M (T68–T70, the asset pipeline) is NOT the priority** — it was written
+> up on 2026-08-14 after a misread of "the parked upgrades", and the owner
+> clarified they meant mechanics, not art. T68 stays `READY` and is fine work if
+> Track N ever stalls, but a session should take T71 before it.
 >
 > **T60 landed 2026-08-13** — every `updateCamera()` lerp is now time-based
 > (`camLerpFactor(k, deltaSec)`, exactly reproducing the old per-frame-at-60fps
@@ -902,6 +905,24 @@ after T22 — build and play each layer before adding the next.
 | T53 | [Run stats and a score](tasks/T53-run-stats-and-score.md) | — | `DONE` |
 | T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `DONE` |
 | T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `DONE` |
+
+### Track N — Phase 9: the late-game arc
+
+Scoped in [`PHASE9-LATE-GAME-ARC.md`](PHASE9-LATE-GAME-ARC.md). **Sequential.**
+These are the planned mechanics that were never built: Gen 5+ currently exists
+and is empty — the largest `genAtLeast()` gate in the codebase is 4, and
+`massGrowInterval()` floors from Gen 4 on, so surviving Gen 4 today earns a
+counter increment and nothing else.
+
+**T71 first, and not optional.** At `MITOSIS_INTERVAL = 240` Gen 4 lands at ~12
+minutes and Gen 6 at ~20, so Gen 5/6 content built before the pacing change is
+content nobody reaches.
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T71 | [Advance generations on what the player did, not the clock](tasks/T71-generation-pacing.md) ⚠️ *first* | T52 | `READY` |
+| T72 | [Gen 5: the body notices — immune response and baiting](tasks/T72-gen5-immune-response.md) | T71, T57 | `BLOCKED` |
+| T73 | [Gen 6: the escape, and the first win condition](tasks/T73-gen6-escape.md) ⏳ *resumable, one section per session* | T72 | `BLOCKED` |
 
 ### Track M — Phase 2 (unparked): asset pipeline
 

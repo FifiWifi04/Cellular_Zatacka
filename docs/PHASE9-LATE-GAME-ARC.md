@@ -126,3 +126,20 @@ survival time currently rewards turtling.
 Nothing here starts until T52 and T57 have landed and been played. Then, in
 order: the pacing change, Gen 5 (immune response), Gen 6 (escape) — with Track L
 built in between, since scoring is what gives an escape ending somewhere to land.
+
+---
+
+## Task files — written 2026-08-14
+
+T52 and T57 have now landed **and been played**, and Track L is done, so the
+preconditions above are met. Scoped as **Track N** on the board:
+
+| | | |
+|---|---|---|
+| [T71](tasks/T71-generation-pacing.md) | the pacing change | `READY` — do this first |
+| [T72](tasks/T72-gen5-immune-response.md) | Gen 5, immune response and baiting | `BLOCKED` on T71 |
+| [T73](tasks/T73-gen6-escape.md) | Gen 6, the escape and the first win condition | `BLOCKED` on T72, resumable |
+
+The recommendations in this document were carried into the task files intact:
+option (2) for pacing, baiting as Gen 5's new verb, and the escape as the game's
+first win condition rather than one more hazard.
