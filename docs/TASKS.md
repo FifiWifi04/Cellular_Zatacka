@@ -75,6 +75,14 @@ Target file: `260703_Cellsnake.html` (single file, no build step).
 > Phase 9 (`PHASE9-LATE-GAME-ARC.md`) is scoped but still deliberately has no
 > task files.
 >
+> ### ⚠️ Next routine: **T68 only**
+>
+> Everything through T67 is done. The one `READY` task is **T68** (Track M,
+> Phase 2 asset pipeline, unparked 2026-08-14). T69 and T70 are `BLOCKED` on an
+> **owner gate**, not on a task — do not unblock them from inside a session.
+> If T68 is done and the owner has not signed off, **report and stop**; there is
+> no other work queued.
+>
 > **T60 landed 2026-08-13** — every `updateCamera()` lerp is now time-based
 > (`camLerpFactor(k, deltaSec)`, exactly reproducing the old per-frame-at-60fps
 > feel when `deltaSec` is `1/60`) and driven by the *total* game-time simulated
@@ -895,11 +903,29 @@ after T22 — build and play each layer before adding the next.
 | T54 | [Persistent high-score table](tasks/T54-high-score-table.md) | T53 | `DONE` |
 | T55 | [Microtubule upgrades](tasks/T55-microtubule-upgrades.md) | T54 | `DONE` |
 
+### Track M — Phase 2 (unparked): asset pipeline
+
+Scoped in [`PHASE2-ASSET-PIPELINE-PLAN.md`](PHASE2-ASSET-PIPELINE-PLAN.md).
+**Sequential, and T69/T70 stay `BLOCKED` until the owner has looked at T68's
+screenshots.** A routine must not unblock them itself — the missing human gate is
+exactly why the first attempt (P01) went four organelle types deep and changed a
+hitbox before anyone looked.
+
+These bake the **existing vector art** to textures. They are a rendering-pipeline
+change with zero art risk, not a visual redesign — see the plan for why those two
+goals were conflated last time and why only this half is schedulable.
+
+| ID | Task | Depends on | Status |
+|----|------|-----------|--------|
+| T68 | [Bake the lysosome to a texture, behind a flag](tasks/T68-bake-lysosome-texture.md) 👤 *owner gate on completion* | — | `READY` |
+| T69 | [Extend the bake to mitochondria, without touching the spine](tasks/T69-bake-mitochondria-texture.md) | T68 + owner sign-off | `BLOCKED` |
+| T70 | [Finish the set, then measure whether it was worth it](tasks/T70-bake-remaining-and-measure.md) | T69 | `BLOCKED` |
+
 ### Parked
 
 | ID | Task | Reason |
 |----|------|--------|
-| P01 | Phase 2.1 — sprite/asset pipeline | Owner decision: the vector→image substitution did not look right. Needs a different approach before it is re-planned. See [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). **Phase 2.2 is not parked** — it is T21 above, and it does not depend on the asset swap. |
+| P01 | Phase 2.1 — sprite/asset pipeline | Owner decision: the vector→image substitution did not look right. Needs a different approach before it is re-planned. See [`tasks/P01-asset-pipeline-parked.md`](tasks/P01-asset-pipeline-parked.md). **Partly unparked 2026-08-14 as Track M** — the *pipeline* half is now T68–T70; the *new artwork* half stays parked and is an owner decision, see [`PHASE2-ASSET-PIPELINE-PLAN.md`](PHASE2-ASSET-PIPELINE-PLAN.md). **Phase 2.2 is not parked** — it is T21 above, and it does not depend on the asset swap. |
 
 ---
 
